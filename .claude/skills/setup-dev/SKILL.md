@@ -56,12 +56,13 @@ Tell the user these rules once setup works:
 - Work on a branch: `git checkout -b <name>/<feature>`. Pushes to `main` are blocked.
 - Every push runs CI (backend lint and import, frontend build, secret scan) on GitHub,
   on Linux with the same pinned versions.
-- Open a PR with `gh pr create`. Only the repo owner can approve and merge it.
-- Deploying to Fly is a manual step only the owner runs, after merging. A merged PR
-  isn't live until the owner deploys.
+- Open a PR with `gh pr create`. A maintainer (ob1-can-obi, Elathius or Zafeer-R)
+  approves and merges it; nobody can approve their own PR.
+- Deploying to Fly is a manual step a maintainer runs after merging. A merged PR
+  isn't live until someone deploys.
 - New backend package: add it to `backend/requirements.in`, run `mise run lock`, and
   commit both files. Never edit `backend/requirements.txt` by hand.
-- API keys: never put them in code or commit a `.env` file. Send the key to the owner
+- API keys: never put them in code or commit a `.env` file. Send the key to ob1-can-obi
   privately and add the name, with no value, to `backend/.env.example`. For
   `dev-local`, put your own value in `backend/.env`.
 
@@ -70,7 +71,7 @@ Tell the user these rules once setup works:
 - **`mise: command not found` (Windows):** open a new terminal after installing.
 - **`mise run` says the config isn't trusted:** run `mise trust` in the repo root.
 - **Live backend unreachable:** check https://deployed-on-a-prayer.fly.dev/api/health in a
-  browser. If it's down, tell the owner (`fly status`, `fly logs`). Meanwhile use `dev-local`.
+  browser. If it's down, tell ob1-can-obi (`fly status`, `fly logs`). Meanwhile use `dev-local`.
 - **Frontend shows "Backend unreachable":** the chosen backend isn't running. Use
   `dev-local`, or see above.
 - **Port 8000 or 5173 already in use:** another dev server is running. On macOS find it

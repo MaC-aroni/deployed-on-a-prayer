@@ -9,11 +9,13 @@ against the live backend, and `mise run dev-local` runs both on this machine.
 
 ## Rules
 
-- Never commit to `main`. Use a branch and open a PR (`gh pr create`); only the owner merges.
+- Never commit to `main`. Use a branch and open a PR (`gh pr create`); a maintainer
+  (ob1-can-obi, Elathius, Zafeer-R) approves and merges.
 - Don't add AI attribution to commits: no `Co-Authored-By: Claude ...` (or any other agent)
   trailer, and no "Generated with ..." lines in commit messages.
 - Never put API keys in code, and never commit `.env` files. New keys: add the name to
-  `backend/.env.example` and tell the user to send the value to the owner.
+  `backend/.env.example` and tell the user to send the value to ob1-can-obi,
+  who manages the Fly secrets.
 - Run tools through mise (`mise run ...`, `mise exec -- <cmd>`) so the versions pinned in
   `mise.toml` are used.
 - Python dependencies: edit `backend/requirements.in`, then `mise run lock`. Never hand-edit
