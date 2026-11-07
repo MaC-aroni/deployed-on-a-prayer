@@ -20,20 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Copy GitHub secrets and variables to Fly
-        # Every repo secret and variable, so new keys need no workflow edits.
-        # --stage applies them with the deploy below instead of restarting now.
-        env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-          VARS_JSON: ${{ toJSON(vars) }}
-        run: |
-          mapfile -d '' pairs < <(jq -jn --argjson v "$VARS_JSON" --argjson s "$SECRETS_JSON" \
-            '$v + $s | del(.github_token, .FLY_API_TOKEN) | to_entries[] | "\(.key)=\(.value)\u0000"')
-          if (( ${#pairs[@]} )); then
-            flyctl secrets set --stage "${pairs[@]}"
-          fi
-          echo "Staged ${#pairs[@]} keys"
-
+      # App keys live in Fly's secret store (fly secrets / the Fly dashboard), not here.
       - name: Deploy to Fly
         run: flyctl deploy --remote-only --ha=false
 

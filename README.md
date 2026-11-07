@@ -32,16 +32,16 @@ Fly.io app: FastAPI serves `/api` and the built frontend from the same URL.
 Never put keys in code or commit a `.env` file.
 
 1. Send the key to the owner privately (DM or password manager, not the group chat).
-2. The owner adds it: `gh secret set MY_API_KEY -R ob1-can-obi/deployed-on-a-prayer`
-   (or Settings → Secrets and variables → Actions).
+2. The owner adds it as a Fly secret, either in the dashboard
+   (https://fly.io/apps/deployed-on-a-prayer/secrets) or with `fly secrets import`.
+   The app restarts with it within a few seconds; no deploy needed.
 3. Add the name, with no value, to `backend/.env.example` and commit that.
-4. The next deploy copies it to Fly as an environment variable. Read it with `os.environ["MY_API_KEY"]`.
+4. Read it in code with `os.environ["MY_API_KEY"]`.
 
-Non-sensitive settings go under the Variables tab instead and work the same way.
 For `--local`, put your own values in `backend/.env` (gitignored).
 
 ## Owner notes
 
-- Deploy needs the `FLY_API_TOKEN` repo secret (a deploy token scoped to this app).
+- Deploy needs the `FLY_API_TOKEN` repo secret (a deploy token scoped to this app, expires after 90 days).
 - `fly status`, `fly logs` and `fly secrets list` show what's running.
-- Keys deleted from GitHub stay on Fly until removed with `fly secrets unset NAME`.
+- Remove a key with `fly secrets unset NAME`.
