@@ -20,5 +20,5 @@ against the live backend, and `mise run dev-local` runs both on this machine.
   to `BACKEND_URL`, which `scripts/dev.py` sets. Don't hardcode backend hosts or ports.
 - All backend routes go under `/api`. Every other path serves the frontend, so new pages are
   added in `frontend/src/App.jsx`.
-- CI must pass before a PR can merge: `ruff check --select E9,F63,F7,F82 .` and an import
+- CI must pass before a PR can merge: `python -m ruff check --select E9,F63,F7,F82 .` and an import
   of `app.main` in `backend/`, `npm run build` in `frontend/`, and a gitleaks secret scan.
