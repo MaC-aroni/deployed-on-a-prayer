@@ -14,12 +14,18 @@ Fly.io app: FastAPI serves `/api` and the built frontend from the same URL.
 
 ## Getting started
 
-1. `gh repo clone ob1-can-obi/deployed-on-a-prayer && cd deployed-on-a-prayer`
-2. Ask your coding agent to **"set me up"**. It follows `.claude/skills/setup-dev/SKILL.md`.
-   Without an agent, run `scripts/setup.sh`.
-3. Start working, then open http://localhost:5173:
-   - `scripts/dev.sh` runs the frontend against the live backend.
-   - `scripts/dev.sh --local` runs the backend on your machine too. Use it when changing the backend.
+Ask your coding agent to **"set me up"**. It follows `.claude/skills/setup-dev/SKILL.md`.
+Or do it by hand. These are the same steps on macOS, Linux and Windows once the tools are in:
+
+1. Install the tools: `brew bundle` (macOS) or `winget install GitHub.cli jdx.mise` (Windows).
+2. `gh repo clone ob1-can-obi/deployed-on-a-prayer && cd deployed-on-a-prayer`
+3. `mise trust && mise install` installs the exact Node and Python versions in `mise.toml`.
+4. `mise run setup` installs the packages.
+5. Start working, then open http://localhost:5173:
+   - `mise run dev` runs the frontend against the live backend.
+   - `mise run dev-local` runs the backend on your machine too. Use it when changing the backend.
+
+New backend package: add it to `backend/requirements.in`, run `mise run lock`, and commit both files.
 
 ## Shipping
 
@@ -38,7 +44,7 @@ Never put keys in code or commit a `.env` file.
 3. Add the name, with no value, to `backend/.env.example` and commit that.
 4. Read it in code with `os.environ["MY_API_KEY"]`.
 
-For `--local`, put your own values in `backend/.env` (gitignored).
+For `dev-local`, put your own values in `backend/.env` (gitignored).
 
 ## Owner notes
 

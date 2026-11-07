@@ -1,0 +1,23 @@
+# Exact tool versions for this project. `mise install` fetches them; inside this folder
+# (and in every `mise run` task) they replace whatever Node/Python the machine has.
+[tools]
+node = "22.23.4"
+python = "3.12.16"
+uv = "0.10.2"
+
+# Same commands on macOS, Linux and Windows.
+[tasks.setup]
+description = "Install frontend and backend dependencies, create backend/.env"
+run = "python scripts/setup.py"
+
+[tasks.dev]
+description = "Run the frontend against the live backend on Fly"
+run = "python scripts/dev.py"
+
+[tasks.dev-local]
+description = "Run the backend and frontend on this machine"
+run = "python scripts/dev.py --local"
+
+[tasks.lock]
+description = "Re-pin backend packages after editing backend/requirements.in"
+run = "uv pip compile --universal --python-version 3.12 backend/requirements.in -o backend/requirements.txt"

@@ -1,0 +1,2 @@
+# Store text files with LF line endings, so Windows (CRLF) checkouts don't produce noisy diffs.
+* text=auto eol=lf

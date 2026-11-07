@@ -1,0 +1,4 @@
+# Direct dependencies. After editing, run `mise run lock` to update requirements.txt.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
