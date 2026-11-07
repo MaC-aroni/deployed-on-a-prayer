@@ -13,16 +13,31 @@ jobs:
   deploy:
     # Anyone else who clicks the button gets a skipped run, not a deploy.
     if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Deploy
-        # The runner kills every process a job started when the job ends.
-        # Clearing RUNNER_TRACKING_ID lets the servers keep running afterwards.
+      - name: Copy GitHub secrets and variables to Fly
+        # Every repo secret and variable, so new keys need no workflow edits.
+        # --stage applies them with the deploy below instead of restarting now.
         env:
-          RUNNER_TRACKING_ID: ""
-          # Every repo secret and variable, so new keys need no workflow edits.
           SECRETS_JSON: ${{ toJSON(secrets) }}
           VARS_JSON: ${{ toJSON(vars) }}
-        run: ./deploy.sh
+        run: |
+          mapfile -d '' pairs < <(jq -jn --argjson v "$VARS_JSON" --argjson s "$SECRETS_JSON" \
+            '$v + $s | del(.github_token, .FLY_API_TOKEN) | to_entries[] | "\(.key)=\(.value)\u0000"')
+          if (( ${#pairs[@]} )); then
+            flyctl secrets set --stage "${pairs[@]}"
+          fi
+          echo "Staged ${#pairs[@]} keys"
+
+      - name: Deploy to Fly
+        run: flyctl deploy --remote-only --ha=false
+
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors https://deployed-on-a-prayer.fly.dev/api/health
+          curl -fsS -o /dev/null https://deployed-on-a-prayer.fly.dev/excuses

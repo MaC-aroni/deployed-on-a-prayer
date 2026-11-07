@@ -2,22 +2,23 @@
 
 ![CI](https://github.com/ob1-can-obi/deployed-on-a-prayer/actions/workflows/ci.yml/badge.svg)
 
-FastAPI backend (`backend/`) and React + Vite frontend (`frontend/`). Both run on the host
-laptop, which teammates reach over Tailscale:
+**Live:** https://deployed-on-a-prayer.fly.dev (try `/excuses` before your demo)
+
+FastAPI backend (`backend/`) and React + Vite frontend (`frontend/`). In prod they ship as one
+Fly.io app: FastAPI serves `/api` and the built frontend from the same URL.
 
 | | Backend | Frontend |
 |---|---|---|
-| Host laptop (prod) | http://prayer-host.tail051cbb.ts.net:8000 | http://prayer-host.tail051cbb.ts.net:3000 |
+| Live (Fly) | https://deployed-on-a-prayer.fly.dev/api | https://deployed-on-a-prayer.fly.dev |
 | Your machine (dev) | http://localhost:8000 | http://localhost:5173 |
 
 ## Getting started
 
-1. Install [Tailscale](https://tailscale.com/download) and open the invite link from the owner.
-2. `gh repo clone ob1-can-obi/deployed-on-a-prayer && cd deployed-on-a-prayer`
-3. Ask your coding agent to **"set me up"**. It follows `.claude/skills/setup-dev/SKILL.md`.
+1. `gh repo clone ob1-can-obi/deployed-on-a-prayer && cd deployed-on-a-prayer`
+2. Ask your coding agent to **"set me up"**. It follows `.claude/skills/setup-dev/SKILL.md`.
    Without an agent, run `scripts/setup.sh`.
-4. Start working, then open http://localhost:5173:
-   - `scripts/dev.sh` runs the frontend against the host laptop's backend.
+3. Start working, then open http://localhost:5173:
+   - `scripts/dev.sh` runs the frontend against the live backend.
    - `scripts/dev.sh --local` runs the backend on your machine too. Use it when changing the backend.
 
 ## Shipping
@@ -34,14 +35,13 @@ Never put keys in code or commit a `.env` file.
 2. The owner adds it: `gh secret set MY_API_KEY -R ob1-can-obi/deployed-on-a-prayer`
    (or Settings → Secrets and variables → Actions).
 3. Add the name, with no value, to `backend/.env.example` and commit that.
-4. The next deploy writes it into the host's `backend/.env`. Read it with `os.environ["MY_API_KEY"]`.
+4. The next deploy copies it to Fly as an environment variable. Read it with `os.environ["MY_API_KEY"]`.
 
 Non-sensitive settings go under the Variables tab instead and work the same way.
 For `--local`, put your own values in `backend/.env` (gitignored).
 
-## Host laptop (owner)
+## Owner notes
 
-- Runner: `~/actions-runner`, a background service that picks up Deploy runs.
-- Prod copy: `~/deployed-on-a-prayer-prod`, with both servers managed by pm2:
-  `pm2 status`, `pm2 logs`, `pm2 restart all`.
-- After a reboot, log in, then run Deploy again (or `pm2 resurrect`) to bring the servers back.
+- Deploy needs the `FLY_API_TOKEN` repo secret (a deploy token scoped to this app).
+- `fly status`, `fly logs` and `fly secrets list` show what's running.
+- Keys deleted from GitHub stay on Fly until removed with `fly secrets unset NAME`.

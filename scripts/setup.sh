@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-HOST_BACKEND="http://prayer-host.tail051cbb.ts.net:8000"
+PROD_BACKEND="https://deployed-on-a-prayer.fly.dev"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -23,11 +23,11 @@ echo "Installing backend dependencies..."
 (cd backend && { [[ -d .venv ]] || python3 -m venv .venv; } && .venv/bin/pip install -q -r requirements.txt)
 [[ -f backend/.env ]] || cp backend/.env.example backend/.env
 
-if curl -fsS --max-time 5 -o /dev/null "$HOST_BACKEND/api/health"; then
-  echo "Host laptop's backend is reachable."
+if curl -fsS --max-time 10 -o /dev/null "$PROD_BACKEND/api/health"; then
+  echo "Live backend on Fly is reachable."
 else
-  echo "WARNING: can't reach $HOST_BACKEND. Is Tailscale connected, and is the host laptop awake?" >&2
+  echo "WARNING: can't reach $PROD_BACKEND. It may not be deployed yet." >&2
   echo "         You can still work fully locally with: scripts/dev.sh --local" >&2
 fi
 
-echo "Done. Start with: scripts/dev.sh (host backend) or scripts/dev.sh --local (your own backend)"
+echo "Done. Start with: scripts/dev.sh (live backend) or scripts/dev.sh --local (your own backend)"

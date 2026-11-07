@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Starts the frontend dev server with hot reload.
-#   scripts/dev.sh          use the host laptop's backend (nothing else to run)
+#   scripts/dev.sh          use the live backend on Fly (nothing else to run)
 #   scripts/dev.sh --local  also run the backend on this machine, and use that
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-HOST_BACKEND="http://prayer-host.tail051cbb.ts.net:8000"
+PROD_BACKEND="https://deployed-on-a-prayer.fly.dev"
 [[ -d frontend/node_modules && -d backend/.venv ]] || { echo "Run scripts/setup.sh first." >&2; exit 1; }
 
 if [[ "${1:-}" == --local ]]; then
@@ -15,8 +15,8 @@ if [[ "${1:-}" == --local ]]; then
   export BACKEND_URL="http://localhost:8000"
   echo "Backend:  http://localhost:8000/docs (on this machine, reloads on save)"
 else
-  export BACKEND_URL="$HOST_BACKEND"
-  echo "Backend:  $HOST_BACKEND (host laptop)"
+  export BACKEND_URL="$PROD_BACKEND"
+  echo "Backend:  $PROD_BACKEND (live on Fly)"
 fi
 
 echo "Frontend: http://localhost:5173"

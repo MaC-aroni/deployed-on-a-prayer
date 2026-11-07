@@ -1,6 +1,6 @@
 name: CI
 
-# Build checks on every push to every branch. Runs on GitHub's machines, never the host laptop.
+# Build checks on every push to every branch, on GitHub's machines.
 # Deliberately no pull_request trigger: fork PRs on this public repo run nothing.
 on:
   push:
