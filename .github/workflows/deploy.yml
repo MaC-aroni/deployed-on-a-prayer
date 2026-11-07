@@ -1,24 +1,25 @@
 name: Deploy
 
+# Manual only: the repo owner clicks "Run workflow" on main (Actions → Deploy).
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: # manual "Run workflow" button in the Actions tab
+  workflow_dispatch:
 
-# Only one deploy at a time; a newer push cancels an in-progress deploy.
+# One deploy at a time; a second click waits for the first to finish.
 concurrency:
   group: deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    # Anyone else who clicks the button gets a skipped run, not a deploy.
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
       - name: Deploy
         # The runner kills every process a job started when the job ends.
-        # Clearing RUNNER_TRACKING_ID lets the server keep running afterwards.
+        # Clearing RUNNER_TRACKING_ID lets the servers keep running afterwards.
         env:
           RUNNER_TRACKING_ID: ""
           # Every repo secret and variable, so new keys need no workflow edits.

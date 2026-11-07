@@ -1,32 +1,48 @@
 #!/usr/bin/env bash
-# Runs on the host laptop on every push to main.
-# Fill in the section for your stack once it's decided.
+# Runs on the host laptop when the owner clicks Deploy (.github/workflows/deploy.yml).
+# Copies the code to a prod folder, installs, and (re)starts both servers with pm2.
 set -euo pipefail
 
-echo "Deploying commit $(git rev-parse --short HEAD) by ${GITHUB_ACTOR:-local}"
+PROD="$HOME/deployed-on-a-prayer-prod"
+echo "Deploying commit $(git rev-parse --short HEAD) by ${GITHUB_ACTOR:-local} to $PROD"
 
-# Write GitHub secrets and variables to .env (secrets win on name clashes),
-# then export them so anything started below inherits them too.
-if [[ -n "${SECRETS_JSON:-}" ]]; then
+# A separate folder, so the runner's checkout cleanup never touches the running servers.
+# Excluded paths survive --delete, so installs and .env stay put between deploys.
+mkdir -p "$PROD"
+rsync -a --delete --exclude .git --exclude node_modules --exclude .venv --exclude .env --exclude dist ./ "$PROD/"
+
+# GitHub secrets and variables -> backend/.env (secrets win on name clashes).
+(
   umask 077
   /usr/bin/jq -rn \
     --argjson v "${VARS_JSON:-"{}"}" \
-    --argjson s "$SECRETS_JSON" \
-    '$v + $s | del(.github_token) | to_entries[] | "\(.key)=\(.value | @json)"' > .env
-  echo "Wrote $(wc -l < .env | tr -d ' ') keys to .env"
-  set -a; source .env; set +a
-fi
+    --argjson s "${SECRETS_JSON:-"{}"}" \
+    '{APP_ENV: "production"} + $v + $s | del(.github_token) | to_entries[] | "\(.key)=\(.value | @json)"' \
+    > "$PROD/backend/.env"
+)
+echo "Wrote $(wc -l < "$PROD/backend/.env" | tr -d ' ') keys to backend/.env"
+# Keep the raw secrets out of the environment pm2 hands to the servers.
+unset SECRETS_JSON VARS_JSON
 
-# --- Docker Compose ---
-# docker compose up -d --build --remove-orphans
+cd "$PROD/backend"
+[[ -d .venv ]] || python3 -m venv .venv
+.venv/bin/pip install -q -r requirements.txt
 
-# --- Node (pm2) ---
-# npm ci
-# npm run build --if-present
-# pm2 startOrRestart ecosystem.config.js   # or: pm2 restart app || pm2 start server.js --name app
+cd "$PROD/frontend"
+npm ci --no-audit --no-fund
+npm run build
 
-# --- Python (pm2) ---
-# python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-# pm2 restart app || pm2 start ".venv/bin/python app.py" --name app
+cd "$PROD"
+pm2 startOrRestart ecosystem.config.cjs --update-env
+pm2 save
 
-echo "Deploy step is a placeholder. Edit deploy.sh to start your server."
+# Fail the deploy if either server doesn't come up.
+for url in http://localhost:8000/api/health http://localhost:3000/api/health; do
+  if curl -fsS --retry 15 --retry-delay 1 --retry-connrefused -o /dev/null "$url"; then
+    echo "OK: $url"
+  else
+    echo "Not responding: $url"
+    pm2 logs --lines 30 --nostream
+    exit 1
+  fi
+done
