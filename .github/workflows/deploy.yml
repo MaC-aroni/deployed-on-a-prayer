@@ -1,0 +1,24 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # manual "Run workflow" button in the Actions tab
+
+# Only one deploy at a time; a newer push cancels an in-progress deploy.
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy
+        # The runner kills every process a job started when the job ends.
+        # Clearing RUNNER_TRACKING_ID lets the server keep running afterwards.
+        env:
+          RUNNER_TRACKING_ID: ""
+        run: ./deploy.sh
