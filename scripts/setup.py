@@ -33,7 +33,7 @@ def venv_python():
 
 def check_versions():
     """Warn, rather than fail, when the tools aren't the ones mise.toml pins."""
-    pinned = tomllib.loads((ROOT / "mise.toml").read_text())["tools"]
+    pinned = tomllib.loads((ROOT / "mise.toml").read_text(encoding="utf-8"))["tools"]
 
     python = ".".join(map(str, sys.version_info[:3]))
     if python != pinned["python"]:

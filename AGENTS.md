@@ -10,15 +10,45 @@ against the live backend, and `mise run dev-local` runs both on this machine.
 ## Rules
 
 - Never commit to `main`. Use a branch and open a PR (`gh pr create`); only the owner merges.
+- Don't add AI attribution to commits: no `Co-Authored-By: Claude ...` (or any other agent)
+  trailer, and no "Generated with ..." lines in commit messages.
 - Never put API keys in code, and never commit `.env` files. New keys: add the name to
   `backend/.env.example` and tell the user to send the value to the owner.
 - Run tools through mise (`mise run ...`, `mise exec -- <cmd>`) so the versions pinned in
-  `mise.toml` are used. Teammates are on macOS and Windows; prod and CI are Linux.
+  `mise.toml` are used.
 - Python dependencies: edit `backend/requirements.in`, then `mise run lock`. Never hand-edit
-  `backend/requirements.txt`. Use `pathlib` for paths, and keep import paths' case exact.
+  `backend/requirements.txt`. The lock is universal, so it covers every OS.
 - The frontend calls the backend only through relative `/api/...` URLs. Vite forwards them
   to `BACKEND_URL`, which `scripts/dev.py` sets. Don't hardcode backend hosts or ports.
 - All backend routes go under `/api`. Every other path serves the frontend, so new pages are
   added in `frontend/src/App.jsx`.
 - CI must pass before a PR can merge: `python -m ruff check --select E9,F63,F7,F82 .` and an import
   of `app.main` in `backend/`, `npm run build` in `frontend/`, and a gitleaks secret scan.
+
+## Cross-platform code
+
+Teammates develop on macOS and Windows; CI and prod (Fly, Docker) run Linux. Code must work
+on all three, and passing on one laptop proves nothing about the others.
+
+- **File name case:** macOS and Windows ignore case, Linux doesn't. An import of
+  `./home.jsx` for `Home.jsx` works locally and breaks CI and prod. Match case exactly in
+  every import, `open()`, static file path and URL to a file. When renaming only the case
+  of a file, use `git mv`, or git on macOS/Windows won't notice.
+- **Paths:** build them with `pathlib.Path` in Python and `path.join` in Node, anchored to
+  the file (`Path(__file__).resolve().parent`), not the current directory. Never hardcode
+  `/` or `\` separators, absolute paths like `/Users/...` or `C:\...`, or `~`.
+- **Scripts:** write tooling in Python (stdlib only, like `scripts/`) and expose it as a
+  `mise.toml` task. No bash or PowerShell scripts, and no shell-only syntax (`&&` chains,
+  `export`, `$VAR`) in `package.json` scripts.
+- **Subprocesses:** pass argument lists, not shell strings (`subprocess.run([...])`, not
+  `shell=True`). Find executables with `shutil.which`, since `npm` is `npm.cmd` on Windows.
+  A virtualenv's programs are in `.venv/bin` on macOS/Linux and `.venv\Scripts` on Windows.
+- **Files:** open text files with `encoding="utf-8"`, since Windows defaults to another
+  encoding. Line endings are normalized to LF by `.gitattributes`; don't fight it.
+- **Packages:** before adding a dependency, check that it supports Windows. If it doesn't,
+  add an environment marker in `requirements.in` (for example `; sys_platform != "win32"`)
+  and make the code work without it.
+- **Environment variables:** read them in code (`os.environ`, `process.env`) or `.env`
+  files. Don't document commands that set them inline (`FOO=1 cmd` doesn't work on Windows).
+- **Ports and hosts:** use `localhost` and the existing ports (backend 8000, frontend 5173).
+  Fly serves on 8080 inside the container.
