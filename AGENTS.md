@@ -7,6 +7,15 @@ against the live backend, and `mise run dev-local` runs both on this machine.
 
 **First-time setup or a broken local environment:** follow `.claude/skills/setup-dev/SKILL.md`.
 
+## Repo and team
+
+- Repo: https://github.com/MaC-aroni/deployed-on-a-prayer (public, in the MaC-aroni org).
+  Clone with `gh repo clone MaC-aroni/deployed-on-a-prayer`.
+- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. Any of them can approve and
+  merge PRs (not their own) and run Deploy (Actions → Deploy → Run workflow on `main`).
+  The list lives in `.github/CODEOWNERS` and in `.github/workflows/deploy.yml`; change both together.
+- Only ob1-can-obi has access to the Fly app, so API key values and Fly problems go to them.
+
 ## Rules
 
 - Never commit to `main`. Use a branch and open a PR (`gh pr create`); a maintainer
