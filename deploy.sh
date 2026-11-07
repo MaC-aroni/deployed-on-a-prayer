@@ -5,6 +5,18 @@ set -euo pipefail
 
 echo "Deploying commit $(git rev-parse --short HEAD) by ${GITHUB_ACTOR:-local}"
 
+# Write GitHub secrets and variables to .env (secrets win on name clashes),
+# then export them so anything started below inherits them too.
+if [[ -n "${SECRETS_JSON:-}" ]]; then
+  umask 077
+  /usr/bin/jq -rn \
+    --argjson v "${VARS_JSON:-"{}"}" \
+    --argjson s "$SECRETS_JSON" \
+    '$v + $s | del(.github_token) | to_entries[] | "\(.key)=\(.value | @json)"' > .env
+  echo "Wrote $(wc -l < .env | tr -d ' ') keys to .env"
+  set -a; source .env; set +a
+fi
+
 # --- Docker Compose ---
 # docker compose up -d --build --remove-orphans
 

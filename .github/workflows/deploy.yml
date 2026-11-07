@@ -21,4 +21,7 @@ jobs:
         # Clearing RUNNER_TRACKING_ID lets the server keep running afterwards.
         env:
           RUNNER_TRACKING_ID: ""
+          # Every repo secret and variable, so new keys need no workflow edits.
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          VARS_JSON: ${{ toJSON(vars) }}
         run: ./deploy.sh
