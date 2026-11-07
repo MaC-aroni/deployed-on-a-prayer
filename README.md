@@ -3,22 +3,22 @@
 ![CI](https://github.com/ob1-can-obi/deployed-on-a-prayer/actions/workflows/ci.yml/badge.svg)
 
 FastAPI backend (`backend/`) and React + Vite frontend (`frontend/`). Both run on the host
-laptop, which teammates reach over Tailscale at `prayer-host`:
+laptop, which teammates reach over Tailscale:
 
 | | Backend | Frontend |
 |---|---|---|
-| Host laptop (prod) | http://prayer-host:8000 | http://prayer-host:3000 |
+| Host laptop (prod) | http://prayer-host.tail051cbb.ts.net:8000 | http://prayer-host.tail051cbb.ts.net:3000 |
 | Your machine (dev) | http://localhost:8000 | http://localhost:5173 |
 
 ## Getting started
 
 1. Install [Tailscale](https://tailscale.com/download) and open the invite link from the owner.
 2. `gh repo clone ob1-can-obi/deployed-on-a-prayer && cd deployed-on-a-prayer`
-3. Ask your coding agent to **"set me up for frontend"** (or backend). It follows
-   `.claude/skills/setup-dev/SKILL.md`. Without an agent, run `scripts/setup.sh frontend` (or `backend`).
-4. `scripts/dev.sh`, then open http://localhost:5173
-
-Frontend work uses the host's backend, so you only run the frontend. Backend work runs both locally.
+3. Ask your coding agent to **"set me up"**. It follows `.claude/skills/setup-dev/SKILL.md`.
+   Without an agent, run `scripts/setup.sh`.
+4. Start working, then open http://localhost:5173:
+   - `scripts/dev.sh` runs the frontend against the host laptop's backend.
+   - `scripts/dev.sh --local` runs the backend on your machine too. Use it when changing the backend.
 
 ## Shipping
 
@@ -37,7 +37,7 @@ Never put keys in code or commit a `.env` file.
 4. The next deploy writes it into the host's `backend/.env`. Read it with `os.environ["MY_API_KEY"]`.
 
 Non-sensitive settings go under the Variables tab instead and work the same way.
-Locally, put your own values in `backend/.env` (gitignored).
+For `--local`, put your own values in `backend/.env` (gitignored).
 
 ## Host laptop (owner)
 
