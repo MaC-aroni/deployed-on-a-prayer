@@ -226,8 +226,10 @@ The AI behind the selector is `mac/aihelp.py`, on whatever LLM `MAC_LLM_API_KEY`
 - **Auto-fix** also asks for the changed files, keeps only what the guardrails above allow,
   pushes them to `mac/autofix/<run-id>` in the failing repo, and re-runs Build and Rehearse with
   that branch (`autofix` on those runs: parent, branch, attempt). A passing rehearsal opens the
-  pull request; after 3 failed attempts the branch is handed over in a PR for a person. A check
-  step (`smoke_test`) is explained but never patched: checks are what prove a fix.
+  pull request; after 3 failed attempts the branch is handed over in a PR for a person. When a check
+  (`smoke_test`) fails, the model picks which earlier step's code caused it (code accepts only a
+  step that ran and isn't a check), and that step's code is read and fixed. Checks themselves are
+  never patched: they're what prove a fix.
 
 **Undo retries and restarts.** `undo` also works on a `rollback_failed` run: it redoes only the
 steps that weren't undone (and the failed step's own cleanup). After a server restart, a Rehearse

@@ -403,7 +403,7 @@ def test_cancel_endpoint(api):
 
 def test_activity_reports_what_is_in_flight(api):
     client, env, _ = api
-    assert client.get("/api/mac/activity").json() == {"busy": False, "active": []}
+    assert client.get("/api/mac/activity").json() == {"busy": False, "active": [], "diagnosing": []}
     client.post(f"/api/mac/migrations/{NAME}/build")
     run = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()  # waits at the manual step
     act = client.get("/api/mac/activity").json()

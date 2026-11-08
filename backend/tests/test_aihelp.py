@@ -147,16 +147,38 @@ def test_autofix_stops_after_the_limit_and_hands_over_a_pr(env, spec_path):
     assert ops.prs[0][2] == "mac/autofix/r1" and ops.pushes == []
 
 
-def test_a_failing_check_step_is_explained_but_never_patched(env, spec_path):
-    llm = ScriptedLLM(EXPLANATION, REPORT)
+def test_a_failing_check_is_traced_to_the_step_that_caused_it(env, spec_path):
+    culprit = json.dumps({"step": "db_migrate", "why": "it writes the dates the smoke test reads"})
+    llm = ScriptedLLM(EXPLANATION, culprit, REPORT, GOOD_FIX)
     diag, ops = diagnostician(env, llm)
     env.runner.build(spec_path)
     env.executor.fail[("smoke_test", "run")] = "time data '01-JAN-24' does not match format '%Y-%m-%d'"
     run = env.runner.rehearse(spec_path, "autofix")
     run = env.runner.play(run.id, "db_migrate")
-    assert run.status == RunStatus.FAILED and run.failed_step == "smoke_test"
-    diagnosis = [e.message for e in env.store.events(run.id) if e.kind == "diagnosis"][0]
-    assert "checks are off limits" in diagnosis and ops.pushes == []
+    assert run.failed_step == "smoke_test"
+    assert ops.reads == [("MaC-aroni/claims-db-migrate", "b" * 40, "")]  # the culprit's repo, not smoke-tests
+    assert ops.pushes and ops.pushes[0][0] == "MaC-aroni/claims-db-migrate"
+    assert env.store.report(run.id)["step"] == "db_migrate"
+    culprit_prompt = llm.prompts[1][1]
+    assert "- db_migrate:" in culprit_prompt and "- smoke_test" not in culprit_prompt
+
+
+def test_a_culprit_the_model_invents_is_ignored(env, spec_path):
+    llm = ScriptedLLM(EXPLANATION, json.dumps({"step": "some_other_repo"}), REPORT)
+    diag, ops = diagnostician(env, llm)
+    env.runner.build(spec_path)
+    env.executor.fail[("smoke_test", "run")] = "boom"
+    run = env.runner.rehearse(spec_path, "autofix")
+    env.runner.play(run.id, "db_migrate")
+    assert ops.pushes == []  # falls back to the check itself, which auto-fix never patches
+
+
+def test_diagnosis_in_progress_counts_as_busy(env, spec_path):
+    seen = []
+    llm = ScriptedLLM(lambda user: seen.append(set(env.runner.diagnosing)) or EXPLANATION)
+    diagnostician(env, llm)
+    run = failing_rehearsal(env, spec_path, "explain")
+    assert seen == [{run.id}] and env.runner.diagnosing == set()
 
 
 def test_an_llm_outage_never_changes_the_outcome(env, spec_path):

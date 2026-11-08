@@ -435,8 +435,11 @@ async def chat(body: ChatBody, state: State = Depends(get_state), user: str | No
 def activity(state: State = Depends(get_state)):
     """Everything in flight. The Deploy workflow waits for `busy` to clear before restarting the
     server, so a deploy never cuts a Rehearse, Deploy or agent job off mid-way."""
-    active = [_summary(r) for r in state.runner.store.runs(limit=200) if r.status.active]
-    return {"busy": bool(active), "active": active}
+    store = state.runner.store
+    active = [_summary(r) for r in store.runs(limit=200) if r.status.active]
+    # A failed run's AI help (diagnosis, auto-fix) keeps working after the run itself has ended.
+    diagnosing = [_summary(store.get(i)) for i in list(state.runner.diagnosing)]
+    return {"busy": bool(active or diagnosing), "active": active, "diagnosing": diagnosing}
 
 
 @router.get("/runs")

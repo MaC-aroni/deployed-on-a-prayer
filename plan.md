@@ -31,6 +31,19 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Auto-fix traces a failing check to the step that caused it (ob1-can-obi, with Claude Code)
+
+#### What changed
+- When a **check** fails (e.g. `smoke_test`), Report and Auto-fix now find the earlier step whose
+  code caused it (the model picks from the steps that ran; code accepts only those, never a check)
+  and read and fix *that* code. Before, Auto-fix refused, because checks are off limits. Verified on
+  the real prod failure: smoke_test → `db_migrate` → a fix to `claims_export.py`.
+- `GET /api/mac/activity` adds `diagnosing`: a failed run whose AI help is still working counts
+  as busy, so a deploy waits instead of cutting it off.
+
+#### What you need to do
+- Nothing.
+
 ### 2026-11-08: Backend for the chat assistant (ob1-can-obi, with Claude Code)
 
 #### What changed
