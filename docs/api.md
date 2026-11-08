@@ -83,8 +83,12 @@ yet (a chained approval waits for its predecessor; a `design_doc` one waits for 
 Tickets are kept when the plan changes; Jira gets a comment instead of a new ticket.
 `approvals[].status` (`approved` · `pending` · `rejected` · `unknown` · `not_requested`),
 `detail` and `checked` (Unix seconds) are the **live** state: the server asks Jira on its own
-(every `MAC_APPROVAL_POLL_SECONDS`, default 30) and Jira can push changes to the webhook, so
-the UI only has to re-fetch this endpoint. `approvals_checked` is the newest check;
+(every `MAC_APPROVAL_POLL_SECONDS`, default 10) and Jira can push changes to the webhook, so
+the UI only has to re-fetch this endpoint (a build's `report.approvals` is only a snapshot of
+that Build, so don't show it as the current status). Re-fetching every few seconds while an
+approval is outstanding is cheap: it reads MaC's records and never calls Jira. A change also
+sends an `approval` event on the migration's latest run (see the stream below).
+`approvals_checked` is the newest check;
 `approvals_live` is false when neither the poller nor the webhook is configured.
 
 When an approval is granted in Jira, MaC raises the next ticket in its `after` chain by itself
@@ -209,6 +213,8 @@ was undone). `active` is true for the first three.
 - `log`: a line of output; `step` says which card it belongs to
 - `step`: a step changed state
 - `run`: a run-level message, like started, waiting, failed or undoing
+- `approval`: an approval changed in Jira or a ticket was raised, e.g. `approvals: APPR-MGR-001
+  approved; raised APPR-MCP-001`. Not a log line: re-fetch `GET /api/mac/migrations/{name}`
 - `diagnosis`: the AI's take after a failure. In Explain mode it's Markdown with the headings
   "What went wrong / Likely cause / Where / What to do"; Report adds a link to `report.md`;
   Auto-fix adds what it changed, the branch, and the attempt number. An auto-fix run has

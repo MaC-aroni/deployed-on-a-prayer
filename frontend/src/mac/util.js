@@ -16,6 +16,11 @@ export const APPROVAL_LABEL = {
   not_requested: "Not requested",
 };
 
+// An approval still moving: not yet approved or rejected. Without a status (mock data) it isn't live.
+export function approvalOutstanding(approval) {
+  return typeof approval?.status === "string" && approval.status !== "approved" && approval.status !== "rejected";
+}
+
 // One colour per meaning, everywhere: badges, icons, rows and timeline nodes agree.
 export const VARIANT = {
   succeeded: "success", approved: "success",

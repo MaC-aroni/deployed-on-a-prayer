@@ -10,6 +10,7 @@ import { SkeletonPipeline } from "../components/Skeleton.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import StepInspector from "../components/StepInspector.jsx";
 import { api, fmtAgo, fmtTime, follow, reportUrl, repoKey, shortRepo, sourceApi } from "../mac/api.js";
+import { useLiveApprovals } from "../mac/useLiveApprovals.js";
 import { Link, navigate } from "../router.jsx";
 import { MODE_LABEL, STATUS, runMeta } from "../status.js";
 import { cx } from "../lib.js";
@@ -121,6 +122,12 @@ export default function Migration({ source, initialRun }) {
     };
   }, [refresh]);
 
+  // Approvals given in Jira show up within seconds: re-read the migration while any is outstanding.
+  const reloadMig = useCallback(() => {
+    src.detail().then(setMig).catch(() => {});
+  }, [src]);
+  useLiveApprovals(mig?.approvals, reloadMig);
+
   // The latest Build carries guardrail status for the whole migration.
   const latestBuildId = mig?.latest?.build?.id;
   const latestBuildUpdated = mig?.latest?.build?.updated;
@@ -169,6 +176,7 @@ export default function Migration({ source, initialRun }) {
             setEvents((prev) => (prev.some((p) => p.seq === ev.seq) ? prev : [...prev, ev]));
             if (ev.kind !== "log") refetchRun();
             if (ev.kind === "log" && /approvals changed in Jira|cancelled by/.test(ev.message)) refresh();
+            if (ev.kind === "approval") reloadMig();
           },
           () => {
             if (!alive) return;
@@ -184,7 +192,7 @@ export default function Migration({ source, initialRun }) {
       alive = false;
       stop();
     };
-  }, [runId, refresh]);
+  }, [runId, refresh, reloadMig]);
 
   async function act(label, fn) {
     setBusy(true);

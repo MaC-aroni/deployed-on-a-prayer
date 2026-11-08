@@ -31,6 +31,29 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Jira approvals show up live in the console (Zafeer-R)
+
+#### What changed
+- While any approval is outstanding the migration page re-reads the migration every 5 s (a read of
+  MaC's own records, no Jira call), and it refetches at once on the new `approval` run event. The
+  page already showed live `approvals[].status` (#33); this makes it move without a reload. The
+  hook is `useLiveApprovals` in `frontend/src/mac/`.
+- `sync_approvals` emits that `approval` event (on the migration's latest run) whenever a status
+  changes or a ticket is raised.
+- The server's own Jira check runs every **10 s** by default (was 30; `MAC_APPROVAL_POLL_SECONDS`).
+- Raising an approval's ticket is atomic: the poller, the webhook and Build can't both raise it or
+  both comment on a reused one. `after:` chains are unchanged: a dependent ticket is raised only
+  once its predecessor is approved, and never after a rejection.
+- `mise run mac-jira-webhook` now accepts the older `JIRA_*` variable names, like the app does.
+
+#### What you need to do
+- **ob1-can-obi:** the Jira webhook was never switched on in prod (the endpoint answers 404 and Jira
+  lists no webhook). After the next Deploy, run `mise run mac-jira-webhook` (needs `fly auth login`
+  and a Jira admin account in `backend/.env`; add `--manual` if the account isn't a Jira admin).
+  Until then approvals arrive through the 10 s check.
+- **Elathius (UI):** nothing to change. Keep reading approval status from `approvals[].status`, not
+  from a Build's report (a snapshot of that Build). Note `src/mac/Console.jsx` is unrouted.
+
 ### 2026-11-08: Undo is verified (ob1-can-obi, with Claude Code)
 
 #### What changed

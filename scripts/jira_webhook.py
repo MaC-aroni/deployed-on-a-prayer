@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / "backend" / ".env")
+from mac.cli import _env  # noqa: E402  (the same ATLASSIAN_* / older JIRA_* names the app accepts)
 from mac.integrations import IntegrationError, _Atlassian  # noqa: E402
 
 APP = os.environ.get("FLY_APP", "deployed-on-a-prayer")
@@ -60,7 +61,7 @@ def manual(fly: str, secret: str, project: str) -> int:
         return 1
     print(f"""
 The webhook URL is on your clipboard. Send it privately to a Jira admin (not in a public channel),
-who creates the webhook at {os.environ.get("ATLASSIAN_SITE", "").rstrip("/")}/plugins/servlet/webhooks :
+who creates the webhook at {(_env("ATLASSIAN_SITE", "JIRA_SITE") or "").rstrip("/")}/plugins/servlet/webhooks :
   Name:   {NAME}
   URL:    (paste)
   Events: Issue -> updated
@@ -70,13 +71,17 @@ Until then, approvals still arrive through the 30-second check.""")
 
 
 def main() -> int:
-    site, email, token = (os.environ.get(k) for k in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN"))
+    site = _env("ATLASSIAN_SITE", "JIRA_SITE")
+    email = _env("ATLASSIAN_EMAIL", "JIRA_EMAIL")
+    token = _env("ATLASSIAN_API_TOKEN", "JIRA_API_TOKEN")
     if not (site and email and token):
-        print("ATLASSIAN_SITE, ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN must be set in backend/.env")
+        print("ATLASSIAN_SITE, ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN (or the older JIRA_SITE, JIRA_EMAIL "
+              "and JIRA_API_TOKEN) must be set in backend/.env")
         return 1
     fly = shutil.which("fly") or shutil.which("flyctl")
     if not fly:
-        print("the fly CLI isn't installed")
+        print("the fly CLI isn't on your PATH. Install it (https://fly.io/docs/flyctl/install/), open a new "
+              "terminal so PATH updates, and run `fly auth login`. Only the Fly app's owner can set secrets.")
         return 1
     project = os.environ.get("JIRA_PROJECT", "MAC")
     secret = secrets.token_urlsafe(32)

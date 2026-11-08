@@ -1,6 +1,10 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from mac.runner import GateError
+from mac.spec import load_spec
 from mac.store import RunStatus, StepState
 
 from .conftest import ALL_STEPS, DB, IAC, MGR, MUTATING, OWNER, TR, demo_data, write_spec
@@ -427,6 +431,67 @@ def test_sync_approvals_raises_the_next_link_of_the_chain(env, spec_path):
     build = env.store.runs()[0]
     records = env.store.approval_records(build.migration, build.spec_digest)
     assert records["APPR-MGR-001"].status == "approved"
+
+
+def test_sync_announces_changes_with_an_approval_event(env, spec_path):
+    env.approvals.default = "pending"
+    env.runner.build(spec_path)
+    env.approvals.by_approval[MGR] = "approved"
+    env.runner.sync_approvals(spec_path)
+    latest = env.store.latest(env.store.runs()[0].migration)
+    announced = [e.message for e in env.store.events(latest.id) if e.kind == "approval"]
+    assert announced == [f"approvals: {MGR} approved; raised {OWNER}"]
+    env.runner.sync_approvals(spec_path)  # nothing moved: nothing announced
+    assert len([e for e in env.store.events(latest.id) if e.kind == "approval"]) == 1
+
+
+def test_concurrent_syncs_raise_a_chained_ticket_once(env, spec_path):
+    env.approvals.default = "pending"
+    env.runner.build(spec_path)
+    assert env.approvals.raised_ids() == [TR, MGR]  # the MCP team waits for the manager
+    env.approvals.by_approval[MGR] = "approved"
+    raise_ticket = env.approvals.raise_ticket
+
+    def slow_raise(request):  # widen the window in which a second caller could also raise it
+        time.sleep(0.05)
+        return raise_ticket(request)
+
+    env.approvals.raise_ticket = slow_raise
+    with ThreadPoolExecutor(max_workers=8) as pool:  # the poller, the webhook and Build, all at once
+        list(pool.map(lambda _: env.runner.sync_approvals(spec_path), range(8)))
+    assert env.approvals.raised_ids() == [TR, MGR, OWNER]
+
+
+def test_a_chained_ticket_is_never_raised_while_its_predecessor_is_open(env, spec_path):
+    env.approvals.default = "pending"
+    env.runner.build(spec_path)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: env.runner.sync_approvals(spec_path), range(8)))
+    assert OWNER not in env.approvals.raised_ids()
+    env.approvals.by_approval[MGR] = "rejected"
+    env.runner.sync_approvals(spec_path)
+    assert OWNER not in env.approvals.raised_ids()  # a rejection doesn't release the next link either
+
+
+def test_concurrent_callers_comment_once_when_a_plan_is_reused(env, spec_path, tmp_path):
+    env.approvals.default = "pending"
+    env.runner.build(spec_path)
+    changed = tmp_path / "changed.yaml"
+    changed.write_text(spec_path.read_text(encoding="utf-8").replace("owner_team: claims-platform", "owner_team: claims-core"),
+                       encoding="utf-8")
+    spec = load_spec(changed)
+    approval = spec.approval(TR)
+    comment = env.approvals.comment
+
+    def slow_comment(key, text):  # widen the window in which a second caller could also comment
+        time.sleep(0.05)
+        comment(key, text)
+
+    env.approvals.comment = slow_comment
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: env.runner._approval_state(spec.metadata.name, spec.digest(), spec, approval, lambda m: None),
+                      range(8)))
+    assert [c[0] for c in env.approvals.comments] == ["MAC-1"]  # told once, not once per caller
 
 
 def test_declared_outputs_are_recorded_and_logged(env, spec_path):

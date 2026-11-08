@@ -287,6 +287,32 @@ def test_jira_webhook_syncs_the_ticket_owner(api):
     assert client.post("/api/mac/jira/webhook?token=x", json={}).status_code == 404
 
 
+def test_jira_webhook_walks_the_approval_chain_and_tells_the_console(api):
+    client, env, _ = api
+    deploy = _waiting_deploy(client, env)
+    manager = next(k for k, a in env.approvals.key_to_approval.items() if a == "APPR-MGR-001")
+    env.approvals.by_approval["APPR-MGR-001"] = "approved"  # the manager clicks Approved in Jira
+
+    resp = client.post("/api/mac/jira/webhook?token=hook-secret", json={"issue": {"key": manager}})
+    assert resp.status_code == 200
+    assert resp.json()["changed"] == ["APPR-MGR-001"] and resp.json()["raised"] == ["APPR-MCP-001"]
+
+    # The next ticket exists now, exactly once, and the app's live state shows both.
+    assert env.approvals.raised_ids().count("APPR-MCP-001") == 1
+    by_id = {a["id"]: a for a in client.get(f"/api/mac/migrations/{NAME}").json()["approvals"]}
+    assert by_id["APPR-MGR-001"]["status"] == "approved"
+    assert by_id["APPR-MCP-001"]["status"] == "pending" and by_id["APPR-MCP-001"]["ticket"]["key"]
+
+    # A second delivery of the same webhook changes nothing and raises nothing.
+    again = client.post("/api/mac/jira/webhook?token=hook-secret", json={"issue": {"key": manager}}).json()
+    assert again["changed"] == [] and again["raised"] == []
+    assert env.approvals.raised_ids().count("APPR-MCP-001") == 1
+
+    # Consoles watching the run hear about it on the stream, so they refetch at once.
+    events = client.get(f"/api/mac/runs/{deploy['id']}/events").json()
+    assert [e["message"] for e in events if e["kind"] == "approval"] == ["approvals: APPR-MGR-001 approved; raised APPR-MCP-001"]
+
+
 def test_manual_sync_endpoint(api):
     client, env, _ = api
     _waiting_deploy(client, env)

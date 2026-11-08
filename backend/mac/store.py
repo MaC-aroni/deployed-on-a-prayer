@@ -70,7 +70,7 @@ class Event(BaseModel):
     seq: int
     ts: float
     step: str | None
-    kind: str  # log | step | run | diagnosis
+    kind: str  # log | step | run | diagnosis | approval (an approval changed in Jira; clients refetch) | agent | failure
     message: str
 
 
