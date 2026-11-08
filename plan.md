@@ -16,13 +16,56 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Live app | https://deployed-on-a-prayer.fly.dev (placeholder pages, plus `/excuses`) |
 | Stack | FastAPI backend (`backend/`), React + Vite frontend (`frontend/`), one Fly.io app |
 | MaC runner | `backend/mac/`, spec `mac/v0.2`, rules in [`docs/runner.md`](docs/runner.md) |
+| Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml) |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
-| Not built yet | AWS account and state bucket, the 3 demo repos, HTTP API for the UI, UI, Jira, agents |
+| Not built yet | AWS account and state bucket, the 3 demo repos, UI, Jira, agents |
 
 ---
 
 ## Entries
+
+### 2026-11-07: Runner API for the UI (ob1-can-obi, with Claude Code)
+
+**For Elathius and the UI agent: build the pipeline screens against [`docs/api.md`](docs/api.md).**
+
+#### What changed
+- **New HTTP API at `/api/mac`** over the runner:
+  - list and show migrations, with stages and steps in run order, ready to draw as columns
+  - Build / Rehearse / Deploy with the AI selector (`ai: explain | report | autofix`)
+  - ▶ play, resume and undo on runs
+  - run details, history and event logs
+  - a **live stream** (server-sent events) of every log line and state change
+- **Buttons answer at once:** `202` plus the run when it starts, `409` plus a plain-English
+  reason when the runner refuses (e.g. "Run Build first"). The work runs in the background,
+  so long runs never block a request.
+- **Locked on Fly:** in production every `/api/mac` endpoint needs the `MAC_API_TOKEN` Fly
+  secret, and answers 503 until it's set. That's because the app is public and Deploy
+  changes real AWS. Locally it's open.
+- The runner now splits each action into a quick rule check (`start_*` / `request_*`) and the
+  slow work (`execute`). After a restart it re-queues work that never started, and marks runs
+  that were cut off mid-work as `rollback_failed`, so nothing looks active forever.
+- The Docker image now includes `examples/`, so the API on Fly lists the demo migration.
+- Test client: `httpx2` in the dev lockfile. Tests: 76, all passing.
+
+#### How to adapt
+1. **UI work:**
+   - run `mise run dev-local` (not `mise run dev`); `/api/mac` works locally without a token
+   - put a `GITHUB_TOKEN` in `backend/.env` if you want Builds to reach GitHub
+   - until the demo repos exist, Builds fail with "repo or branch not found"; those are
+     real runs with real events, good for building screens
+2. **Follow the contract in `docs/api.md`:**
+   - step states for card colours
+   - run statuses
+   - which buttons to enable
+   - show `409` reasons as they are
+   - use `EventSource` on `/runs/{id}/stream` for live cards
+3. **Don't re-implement runner rules in the UI**, like "can I deploy?". Ask the server and show
+   its answer. The UI can grey buttons out as a hint, but the server decides.
+4. **Need a field or endpoint that isn't there?** Add it in `backend/app/mac_api.py`, with a
+   test in `backend/tests/test_api.py` and the change in `docs/api.md`, or ask ob1-can-obi.
+5. **ob1-can-obi:** set `MAC_API_TOKEN` as a Fly secret before using the API on Fly, and add
+   a Fly volume for `MAC_DATA_DIR` so run history survives deploys.
 
 ### 2026-11-07: Everything up to the runner (ob1-can-obi, with Claude Code)
 

@@ -6,8 +6,14 @@ Deploy    runs it for real, using the commits the passing Rehearse used.
 
 Any step failing undoes every step that finished, newest first. Runs pause at approvals and
 manual steps; play / resume continue them later, from the state saved in the Store.
+
+Every action has two halves, so a web request can answer at once and do the slow part in the
+background: `start_*` / `request_*` check the rules and record what should happen next
+(raising GateError if it's not allowed), then `execute(run_id)` does it. The plain methods
+(`build`, `rehearse`, `play`, ...) do both, for the CLI and tests.
 """
 
+import threading
 from pathlib import Path
 
 from .diagnostics import Diagnostician, Failure, Mode, NotConfigured
@@ -31,20 +37,144 @@ class Runner:
         self.executor = executor
         self.data_dir = Path(data_dir)
         self.diagnostician = diagnostician or NotConfigured()
+        # Rule checks and state changes happen under this lock, so two clicks can't both start
+        # a run or both press play. The slow work in execute() runs outside it.
+        self._lock = threading.Lock()
 
-    # ---- Starting runs -------------------------------------------------------------------
+    # ---- One-call versions (CLI, tests) ----------------------------------------------------
 
     def build(self, spec_path: Path, overrides: dict[str, str] | None = None) -> RunRecord:
+        return self.execute(self.start_build(spec_path, overrides).id)
+
+    def rehearse(self, spec_path: Path, diagnostics_mode: str | None = None,
+                 overrides: dict[str, str] | None = None) -> RunRecord:
+        return self.execute(self.start_rehearse(spec_path, diagnostics_mode, overrides).id)
+
+    def deploy(self, spec_path: Path, diagnostics_mode: str | None = None) -> RunRecord:
+        return self.execute(self.start_deploy(spec_path, diagnostics_mode).id)
+
+    def play(self, run_id: str, step_id: str) -> RunRecord:
+        return self.execute(self.request_play(run_id, step_id).id)
+
+    def resume(self, run_id: str) -> RunRecord:
+        return self.execute(self.request_resume(run_id).id)
+
+    def undo(self, run_id: str) -> RunRecord:
+        return self.execute(self.request_undo(run_id).id)
+
+    # ---- Starting runs (quick: rule checks only) ---------------------------------------------
+
+    def start_build(self, spec_path: Path, overrides: dict[str, str] | None = None) -> RunRecord:
         """overrides: RepoRef.key -> branch, used by auto-fix to test its own branch. Guardrails
         on an overridden repo are reported but don't block, and Deploy never accepts the result."""
-        spec, text = self._load(spec_path)
-        overrides = overrides or {}
-        unknown = sorted(set(overrides) - set(spec.repos()))
-        if unknown:
-            raise GateError(f"overrides name repos this pipeline doesn't use: {', '.join(unknown)}")
-        run = self._new_run(spec, text, spec_path, "build", overrides=overrides)
-        self._event(run, "run", "Build started")
+        with self._lock:
+            spec, text = self._load(spec_path)
+            overrides = overrides or {}
+            unknown = sorted(set(overrides) - set(spec.repos()))
+            if unknown:
+                raise GateError(f"overrides name repos this pipeline doesn't use: {', '.join(unknown)}")
+            run = self._new_run(spec, text, spec_path, "build", overrides=overrides, next_action="build")
+            self._event(run, "run", "Build started")
+            return run
 
+    def start_rehearse(self, spec_path: Path, diagnostics_mode: str | None = None,
+                       overrides: dict[str, str] | None = None) -> RunRecord:
+        with self._lock:
+            spec, text = self._load(spec_path)
+            self._refuse_if_active(spec)
+            build = self.store.latest(spec.metadata.name, "build")
+            if build is None or build.status != RunStatus.SUCCEEDED or build.spec_digest != spec.digest():
+                raise GateError("Rehearse needs a passing Build of this exact migration.yaml. Run Build first.")
+            if build.overrides != (overrides or {}):
+                raise GateError("The last Build used different branches than this Rehearse. "
+                                "Build again with the same ones.")
+            run = self._new_run(spec, text, spec_path, "rehearse", overrides=build.overrides, shas=build.shas,
+                                based_on=build.id, diagnostics_mode=diagnostics_mode, next_action="advance")
+            self._event(run, "run", "Rehearse started in the rehearsal environment; everything is undone at the end")
+            return run
+
+    def start_deploy(self, spec_path: Path, diagnostics_mode: str | None = None) -> RunRecord:
+        with self._lock:
+            spec, text = self._load(spec_path)
+            self._refuse_if_active(spec)
+            rehearsal = self.store.latest(spec.metadata.name, "rehearse")
+            if rehearsal is None or rehearsal.status != RunStatus.SUCCEEDED or rehearsal.spec_digest != spec.digest():
+                raise GateError("Deploy needs a passing Rehearse of this exact migration.yaml. Run Rehearse first.")
+            if rehearsal.overrides:
+                raise GateError("The last Rehearse ran auto-fix branches. "
+                                "Merge them into main, then Build and Rehearse again.")
+            try:
+                current = {key: self.github.resolve(ref) for key, ref in spec.repos().items()}
+            except IntegrationError as e:
+                raise GateError(f"Couldn't check the repos on GitHub: {e}") from e
+            changed = sorted(key for key, sha in current.items() if rehearsal.shas.get(key) != sha)
+            if changed:
+                raise GateError("Changed since the last Rehearse: " + ", ".join(changed)
+                                + ". Run Build and Rehearse again so Deploy runs code that was rehearsed.")
+            run = self._new_run(spec, text, spec_path, "deploy", shas=rehearsal.shas, based_on=rehearsal.id,
+                                diagnostics_mode=diagnostics_mode, next_action="advance")
+            self._event(run, "run", "Deploy started in production")
+            return run
+
+    # ---- Continuing runs (quick: rule checks only) -------------------------------------------
+
+    def request_play(self, run_id: str, step_id: str) -> RunRecord:
+        with self._lock:
+            run, _ = self._existing(run_id)
+            if run.status != RunStatus.WAITING or run.steps.get(step_id) != StepState.WAITING:
+                raise GateError(f"{step_id} isn't waiting for play "
+                                f"(run is {run.status}, step is {run.steps.get(step_id)})")
+            run.played.append(step_id)
+            return self._queue(run, "advance", f"{step_id}: play pressed", step_id)
+
+    def request_resume(self, run_id: str) -> RunRecord:
+        """Checks approvals again, e.g. after a Jira ticket moved."""
+        with self._lock:
+            run, _ = self._existing(run_id)
+            if run.status != RunStatus.WAITING:
+                raise GateError(f"run {run_id} is {run.status}, not waiting")
+            return self._queue(run, "advance", "Resumed: checking approvals again")
+
+    def request_undo(self, run_id: str) -> RunRecord:
+        with self._lock:
+            run, _ = self._existing(run_id)
+            if run.mode == "build" or run.status not in (RunStatus.WAITING, RunStatus.SUCCEEDED) \
+                    or (run.mode == "rehearse" and run.status == RunStatus.SUCCEEDED):
+                raise GateError(f"nothing to undo: {run.mode} run {run_id} is {run.status}")
+            return self._queue(run, "undo", "Undo requested")
+
+    # ---- Doing the work (slow) ----------------------------------------------------------------
+
+    def execute(self, run_id: str) -> RunRecord:
+        """Does what the last start_* / request_* call queued. Safe to call from a worker thread."""
+        with self._lock:
+            run, spec = self._existing(run_id)
+            action, run.next_action = run.next_action, None
+            if action is None:
+                raise GateError(f"run {run_id} has nothing queued")
+            self.store.save(run)
+        if action == "build":
+            return self._do_build(run, spec)
+        if action == "undo":
+            self._skip_unreached(run)
+            ok = self._rollback(run, spec, failed=None)
+            return self._finish(run, RunStatus.UNDONE if ok else RunStatus.ROLLBACK_FAILED,
+                                None if ok else "undo didn't finish; see the log for what's left")
+        return self._advance(run, spec)
+
+    def recover(self) -> list[str]:
+        """After a restart: returns runs that were queued but never picked up (execute them again),
+        and marks runs that were mid-work as rollback_failed, since what they left behind is unknown."""
+        queued = []
+        for run in self.store.runs(limit=500):
+            if run.next_action is not None and run.status.active:
+                queued.append(run.id)
+            elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK):
+                self._finish(run, RunStatus.ROLLBACK_FAILED,
+                             "the runner restarted in the middle of this run; check what it left behind")
+        return queued
+
+    def _do_build(self, run: RunRecord, spec: Spec) -> RunRecord:
         issues = validate(spec)
         run.report["issues"] = [str(i) for i in issues]
         for issue in issues:
@@ -67,69 +197,6 @@ class Runner:
         except IntegrationError as e:
             return self._finish(run, RunStatus.FAILED, str(e))
         return self._finish(run, RunStatus.SUCCEEDED)
-
-    def rehearse(self, spec_path: Path, diagnostics_mode: str | None = None,
-                 overrides: dict[str, str] | None = None) -> RunRecord:
-        spec, text = self._load(spec_path)
-        self._refuse_if_active(spec)
-        build = self.store.latest(spec.metadata.name, "build")
-        if build is None or build.status != RunStatus.SUCCEEDED or build.spec_digest != spec.digest():
-            raise GateError("Rehearse needs a passing Build of this exact migration.yaml. Run Build first.")
-        if build.overrides != (overrides or {}):
-            raise GateError("The last Build used different branches than this Rehearse. Build again with the same ones.")
-        run = self._new_run(spec, text, spec_path, "rehearse", overrides=build.overrides,
-                            shas=build.shas, based_on=build.id, diagnostics_mode=diagnostics_mode)
-        self._event(run, "run", "Rehearse started in the rehearsal environment; everything is undone at the end")
-        return self._advance(run, spec)
-
-    def deploy(self, spec_path: Path, diagnostics_mode: str | None = None) -> RunRecord:
-        spec, text = self._load(spec_path)
-        self._refuse_if_active(spec)
-        rehearsal = self.store.latest(spec.metadata.name, "rehearse")
-        if rehearsal is None or rehearsal.status != RunStatus.SUCCEEDED or rehearsal.spec_digest != spec.digest():
-            raise GateError("Deploy needs a passing Rehearse of this exact migration.yaml. Run Rehearse first.")
-        if rehearsal.overrides:
-            raise GateError("The last Rehearse ran auto-fix branches. Merge them into main, then Build and Rehearse again.")
-        try:
-            current = {key: self.github.resolve(ref) for key, ref in spec.repos().items()}
-        except IntegrationError as e:
-            raise GateError(f"Couldn't check the repos on GitHub: {e}") from e
-        changed = sorted(key for key, sha in current.items() if rehearsal.shas.get(key) != sha)
-        if changed:
-            raise GateError("Changed since the last Rehearse: " + ", ".join(changed)
-                            + ". Run Build and Rehearse again so Deploy runs code that was rehearsed.")
-        run = self._new_run(spec, text, spec_path, "deploy", shas=rehearsal.shas, based_on=rehearsal.id,
-                            diagnostics_mode=diagnostics_mode)
-        self._event(run, "run", "Deploy started in production")
-        return self._advance(run, spec)
-
-    # ---- Continuing runs ----------------------------------------------------------------
-
-    def play(self, run_id: str, step_id: str) -> RunRecord:
-        run, spec = self._existing(run_id)
-        if run.status != RunStatus.WAITING or run.steps.get(step_id) != StepState.WAITING:
-            raise GateError(f"{step_id} isn't waiting for play (run is {run.status}, step is {run.steps.get(step_id)})")
-        run.played.append(step_id)
-        self._event(run, "step", f"{step_id}: play pressed", step_id)
-        return self._advance(run, spec)
-
-    def resume(self, run_id: str) -> RunRecord:
-        """Checks approvals again, e.g. after a Jira ticket moved."""
-        run, spec = self._existing(run_id)
-        if run.status != RunStatus.WAITING:
-            raise GateError(f"run {run_id} is {run.status}, not waiting")
-        return self._advance(run, spec)
-
-    def undo(self, run_id: str) -> RunRecord:
-        run, spec = self._existing(run_id)
-        if run.mode == "build" or run.status not in (RunStatus.WAITING, RunStatus.SUCCEEDED) \
-                or (run.mode == "rehearse" and run.status == RunStatus.SUCCEEDED):
-            raise GateError(f"nothing to undo: {run.mode} run {run_id} is {run.status}")
-        self._event(run, "run", "Undo requested")
-        self._skip_unreached(run)
-        ok = self._rollback(run, spec, failed=None)
-        return self._finish(run, RunStatus.UNDONE if ok else RunStatus.ROLLBACK_FAILED,
-                            None if ok else "undo didn't finish; see the log for what's left")
 
     # ---- The state machine ----------------------------------------------------------------
 
@@ -302,6 +369,13 @@ class Runner:
         run.steps[step.id] = state
         self.store.save(run)
         self._event(run, "step", f"{step.id}: {state}", step.id)
+
+    def _queue(self, run: RunRecord, action: str, message: str, step: str | None = None) -> RunRecord:
+        # Marked running straight away, so a second click is refused while the work is queued.
+        run.next_action, run.status, run.reason = action, RunStatus.RUNNING, None
+        self.store.save(run)
+        self._event(run, "step" if step else "run", message, step)
+        return run
 
     def _wait(self, run: RunRecord, step: Step, state: StepState, reason: str) -> RunRecord:
         run.steps[step.id] = state

@@ -10,7 +10,10 @@ from fastapi.staticfiles import StaticFiles
 # backend/.env for local dev. On Fly, keys arrive as Fly secrets (real env vars).
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+from . import mac_api  # noqa: E402 - reads env vars, so after load_dotenv
+
 app = FastAPI(title="deployed-on-a-prayer")
+app.include_router(mac_api.router)  # before the frontend catch-all below
 
 EXCUSES = [
     "It worked on my laptop. My laptop has since entered witness protection.",
