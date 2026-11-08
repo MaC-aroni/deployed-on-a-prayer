@@ -17,6 +17,9 @@ in `demo-data/confluence/` and published with `mise run mac publish-knowledge de
 The agents plan migrations from it and cite it, so it must agree with the demo pipeline;
 `backend/tests/test_knowledge.py` checks that. Change both together.
 
+**The agents** (graph, planner, guide writer, code writer) are in `docs/agents.md`. Keep their
+rules in code (citations, documented repos only, the code writer's limits), not only in prompts.
+
 **The UI talks to the runner only through `/api/mac`** (`backend/app/mac_api.py`), whose
 contract is `docs/api.md`. Keep that doc in sync when you change the API. The server enforces
 the run rules; the UI shows its answers instead of re-implementing them.

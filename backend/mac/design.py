@@ -9,11 +9,10 @@ the steps and approvals on the page are always exactly what will run.
 """
 
 import html
-import json
 import re
 from typing import Protocol
 
-from .integrations import IntegrationError, _request
+from .llm import NIMChat
 from .spec import Spec
 from .validate import execution_order
 
@@ -77,32 +76,14 @@ def facts(spec: Spec, shas: dict[str, str]) -> str:
 
 
 class NIMDesignWriter:
-    """NVIDIA NIM's OpenAI-compatible chat completions API (build.nvidia.com)."""
+    """Writes the design page through the shared LLM client (mac/llm.py)."""
 
     def __init__(self, api_key: str, model: str, base_url: str = "https://integrate.api.nvidia.com/v1",
                  timeout: int = 120):
-        self.url = base_url.rstrip("/") + "/chat/completions"
-        self.headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
-        self.model = model
-        self.timeout = timeout
+        self.chat = NIMChat(api_key, model, base_url, timeout)
 
     def write(self, facts_text: str) -> str:
-        body = {
-            "model": self.model,
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                         {"role": "user", "content": "Write the design document for this migration.\n\n" + facts_text}],
-            "temperature": 0.2,
-            "max_tokens": 4096,
-        }
-        reply = _request(self.url, self.headers, method="POST", body=body)
-        try:
-            text = reply["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as e:
-            raise IntegrationError(f"unexpected LLM response: {json.dumps(reply)[:300]}") from e
-        if not text or not text.strip():
-            raise IntegrationError("the LLM returned an empty design document")
-        # Reasoning models may prepend their thinking; it doesn't belong on the page.
-        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        return self.chat.complete(SYSTEM_PROMPT, "Write the design document for this migration.\n\n" + facts_text)
 
 
 def render_page(spec: Spec, shas: dict[str, str], markdown: str, run_id: str) -> str:
