@@ -203,6 +203,10 @@ class Runner:
         A Build changes nothing, so one cut short is just failed."""
         queued = []
         for run in self.store.runs(limit=500):
+            if run.mode not in ("build", "rehearse", "deploy"):
+                if run.status.active:  # an agent job (ingest, plan, …): nothing in AWS to undo
+                    self._finish(run, RunStatus.FAILED, "the server restarted while this was running; start it again")
+                continue
             if run.next_action is not None and run.status.active:
                 queued.append(run.id)
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK) and run.mode == "build":

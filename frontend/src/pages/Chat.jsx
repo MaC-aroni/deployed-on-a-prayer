@@ -1,61 +1,54 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, ChevronDown, ChevronRight, Cog, ExternalLink, MessageSquare, Plus, Send, Sparkles, Trash2 } from "lucide-react";
+import { BookOpen, Check, ChevronDown, ChevronRight, Cog, MessageSquare, Plus, Search, Send, Sparkles, Trash2, X } from "lucide-react";
 import Markdown from "../components/Markdown.jsx";
 import { useAuth } from "../components/Shell.jsx";
-import { api, fmtAgo } from "../mac/api.js";
-import { Link, navigate } from "../router.jsx";
+import { api, chatStream, fmtAgo } from "../mac/api.js";
+import { navigate } from "../router.jsx";
 import { cx } from "../lib.js";
 
-// Chat: a fresh agent over the whole knowledge base. Each question spins up retrieval (the
-// relevant sections and the graph's neighbourhood of what was named) and the model answers
-// with citations; the sources and the agent's trace sit under every answer.
+// Chat with the MaC assistant (docs/api.md → "The assistant"): a fresh agent per question with
+// read-only tools over Confluence, Jira and MaC's own runs and approvals. The conversation is
+// posted whole each time; the server streams each lookup (shown as progress under the cog),
+// then the answer as Markdown with links. Transcripts are kept per chat so they list in the rail.
 
 const SUGGESTIONS = [
   "What does ClaimsAdjudicationService depend on?",
-  "Which approvals does a PHI data migration need?",
-  "What are the naming and Terraform standards for the landing zone?",
+  "Which approvals does the claims migration need, and what's their status?",
+  "What did the last Rehearse fail on?",
 ];
 
-function Sources({ sources }) {
-  if (!sources?.length) return null;
-  const cited = sources.filter((s) => s.cited);
-  const shown = cited.length ? cited : sources.slice(0, 4);
+const TOOL_LABEL = {
+  search_confluence: "Searching Confluence",
+  read_confluence_page: "Reading a Confluence page",
+  search_jira: "Searching Jira",
+  read_jira_issue: "Reading a Jira issue",
+  mac_status: "Reading MaC's runs and approvals",
+};
+
+function toolLine(t) {
+  const arg = t.args ? Object.values(t.args)[0] : null;
   return (
-    <div className="chat-sources">
-      {shown.map((s) => {
-        const inner = (
-          <>
-            <span className="mono">S{s.n}</span> {s.title} <span className="muted">› {s.heading}</span>
-          </>
-        );
-        return s.url ? (
-          <a key={s.n} className="chip chat-chip" href={s.url} target="_blank" rel="noreferrer" title={s.id}>
-            {inner} <ExternalLink size={10} />
-          </a>
-        ) : (
-          <Link key={s.n} className="chip chat-chip" to={`/knowledge/${s.page}`} title={s.id}>
-            {inner}
-          </Link>
-        );
-      })}
-    </div>
+    <>
+      <span className="chat-tool-name">{TOOL_LABEL[t.name] ?? t.name}</span>
+      {arg && <span className="mono muted"> · {String(arg).slice(0, 80)}</span>}
+      {t.summary && <span className="muted"> · {t.summary}</span>}
+    </>
   );
 }
 
-function Trace({ trace, model }) {
+function Tools({ tools }) {
   const [open, setOpen] = useState(false);
-  if (!trace?.length) return null;
+  if (!tools?.length) return null;
   return (
     <div className="chat-trace">
       <button className="link-btn chat-trace-toggle" onClick={() => setOpen((v) => !v)}>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} how I answered {model && <span className="mono muted">· {model}</span>}
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} how I answered · {tools.length} lookup{tools.length === 1 ? "" : "s"}
       </button>
       {open && (
-        <ol className="trace">
-          {trace.map((t, i) => (
-            <li key={i} className={cx("trace-line", `k-${t.phase}`)}>
-              <span className="trace-kind">{t.phase}</span>
-              <p>{t.text}</p>
+        <ol className="chat-tools">
+          {tools.map((t, i) => (
+            <li key={i} className={cx("chat-tool", { bad: t.ok === false })}>
+              {t.ok === false ? <X size={12} /> : <Check size={12} />} {toolLine(t)}
             </li>
           ))}
         </ol>
@@ -64,13 +57,17 @@ function Trace({ trace, model }) {
   );
 }
 
+const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
 export default function Chat({ chatId }) {
   const { locked, health } = useAuth();
   const [chats, setChats] = useState([]);
   const [turns, setTurns] = useState([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState([]); // tool events of the answer in flight
   const [title, setTitle] = useState(null);
+  const idRef = useRef(chatId);
   const endRef = useRef(null);
   const boxRef = useRef(null);
   const noLlm = health ? !health.llm : false;
@@ -81,6 +78,7 @@ export default function Chat({ chatId }) {
   }, [loadChats]);
 
   useEffect(() => {
+    idRef.current = chatId;
     if (!chatId) {
       setTurns([]);
       setTitle(null);
@@ -98,26 +96,57 @@ export default function Chat({ chatId }) {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns.length, busy]);
+  }, [turns.length, busy, live.length]);
+
+  async function persist(nextTurns, nextTitle) {
+    if (!idRef.current) {
+      idRef.current = newId();
+      window.history.replaceState({}, "", `/chat/${idRef.current}`);
+    }
+    try {
+      await api.saveChat(idRef.current, nextTitle, nextTurns);
+      loadChats();
+    } catch {
+      /* history is a convenience; the answer is on screen */
+    }
+  }
 
   async function send(text) {
     const message = (text ?? draft).trim();
     if (!message || busy) return;
     setDraft("");
     setBusy(true);
-    setTurns((t) => [...t, { role: "user", text: message, ts: Date.now() / 1000 }]);
+    setLive([]);
+    const nextTitle = title ?? message.slice(0, 80);
+    setTitle(nextTitle);
+    const asked = [...turns, { role: "user", text: message, ts: Date.now() / 1000 }];
+    setTurns(asked);
+    const history = asked.filter((t) => t.role === "user" || t.role === "assistant").map((t) => ({ role: t.role, content: t.text }));
+    const tools = [];
+    let answer = null;
+    let error = null;
     try {
-      const r = await api.chat(message, chatId);
-      setTurns((t) => [...t, { role: "assistant", text: r.reply, ts: Date.now() / 1000, sources: r.sources, trace: r.trace, model: r.model }]);
-      setTitle(r.title);
-      loadChats();
-      if (!chatId) window.history.replaceState({}, "", `/chat/${r.chat_id}`);
+      await chatStream(history, ({ kind, data }) => {
+        if (kind === "tool") {
+          tools.push(data);
+          setLive([...tools]);
+        } else if (kind === "answer") answer = data.content;
+        else if (kind === "error") error = data.message;
+      });
+      if (answer == null && !error) error = "The assistant ended without an answer.";
     } catch (e) {
-      setTurns((t) => [...t, { role: "error", text: e.detail ?? String(e), status: e.status, ts: Date.now() / 1000 }]);
-    } finally {
-      setBusy(false);
-      boxRef.current?.focus();
+      error = e.detail ?? String(e);
+      error = e.status === 503 || e.status === 409 ? `Can't answer here: ${error}` : e.status === 401 ? "Sign in with GitHub to use the assistant." : error;
     }
+    const reply = error
+      ? { role: "error", text: error, ts: Date.now() / 1000, tools }
+      : { role: "assistant", text: answer, ts: Date.now() / 1000, tools, model: health?.model ?? null };
+    const done = [...asked, reply];
+    setTurns(done);
+    setLive([]);
+    setBusy(false);
+    boxRef.current?.focus();
+    persist(done, nextTitle);
   }
 
   async function remove(id, e) {
@@ -125,7 +154,7 @@ export default function Chat({ chatId }) {
     try {
       await api.deleteChat(id);
       loadChats();
-      if (id === chatId) navigate("/chat");
+      if (id === idRef.current) navigate("/chat");
     } catch {
       /* the list refresh tells */
     }
@@ -146,7 +175,7 @@ export default function Chat({ chatId }) {
         </button>
         <div className="chat-rail-list">
           {chats.map((c) => (
-            <button key={c.id} className={cx("chat-rail-item", { active: c.id === chatId })} onClick={() => navigate(`/chat/${c.id}`)} title={c.title}>
+            <button key={c.id} className={cx("chat-rail-item", { active: c.id === idRef.current })} onClick={() => navigate(`/chat/${c.id}`)} title={c.title}>
               <MessageSquare size={13} className="muted" />
               <span className="chat-rail-title">{c.title}</span>
               <span className="muted small">{fmtAgo(c.updated)}</span>
@@ -167,9 +196,9 @@ export default function Chat({ chatId }) {
                 <span className="chat-empty-mark">
                   <Sparkles size={22} />
                 </span>
-                <h1>Ask the knowledge base</h1>
+                <h1>Ask MaC</h1>
                 <p className="muted">
-                  Every question spins up a fresh agent with the whole knowledge base{health?.model ? ` and ${health.model}` : ""}. Answers cite the pages they came from.
+                  Every question spins up a fresh agent{health?.model ? ` on ${health.model}` : ""} with read-only tools over Confluence, Jira and MaC's own runs and approvals. It looks things up, cites what it used, and can't change anything.
                 </p>
                 <div className="chat-suggestions">
                   {SUGGESTIONS.map((q) => (
@@ -183,15 +212,14 @@ export default function Chat({ chatId }) {
             {title && turns.length > 0 && <h1 className="chat-title">{title}</h1>}
             {turns.map((t, i) => (
               <div key={i} className={cx("chat-turn", `role-${t.role}`)}>
-                {t.role === "assistant" && (
-                  <span className="chat-avatar">
+                {t.role !== "user" && (
+                  <span className={cx("chat-avatar", { bad: t.role === "error" })}>
                     <Sparkles size={14} />
                   </span>
                 )}
                 <div className="chat-bubble">
-                  {t.role === "assistant" ? <Markdown text={t.text} /> : t.role === "error" ? <span className="chat-error">{t.status === 409 ? "Can't answer here: " : "Something went wrong: "}{t.text}</span> : t.text}
-                  {t.role === "assistant" && <Sources sources={t.sources} />}
-                  {t.role === "assistant" && <Trace trace={t.trace} model={t.model} />}
+                  {t.role === "assistant" ? <Markdown text={t.text} /> : t.role === "error" ? <span className="chat-error">{t.text}</span> : t.text}
+                  {t.role !== "user" && <Tools tools={t.tools} />}
                 </div>
               </div>
             ))}
@@ -200,8 +228,21 @@ export default function Chat({ chatId }) {
                 <span className="chat-avatar working">
                   <Cog size={16} className="spin" />
                 </span>
-                <div className="chat-bubble chat-thinking">
-                  <Cog size={14} className="spin" /> spinning up an agent over the knowledge base{health?.model ? ` · ${health.model}` : ""}…
+                <div className="chat-bubble chat-thinking-block">
+                  <div className="chat-thinking">
+                    <Cog size={14} className="spin" /> {live.length ? "working through the lookups…" : "spinning up an agent…"}
+                    {health?.model && <span className="mono muted"> · {health.model}</span>}
+                  </div>
+                  {live.length > 0 && (
+                    <ol className="chat-tools live">
+                      {live.map((t, i) => (
+                        <li key={i} className={cx("chat-tool", { bad: t.ok === false })}>
+                          <Search size={12} /> {toolLine(t)}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <p className="faint small">Answers can take a while: the agent reads pages and tickets before it writes.</p>
                 </div>
               </div>
             )}
@@ -218,13 +259,13 @@ export default function Chat({ chatId }) {
               </div>
             ) : (
               <div className={cx("chat-composer", { hint: locked })}>
-                <textarea ref={boxRef} rows={1} placeholder="Ask about a service, a standard, an approval, a migration…" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} disabled={busy} />
+                <textarea ref={boxRef} rows={1} placeholder="Ask about a service, an approval, a run, a standard…" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} disabled={busy} />
                 <button className="btn btn-primary chat-send" onClick={() => send()} disabled={busy || !draft.trim()} title="Send (Enter)">
                   <Send size={14} />
                 </button>
               </div>
             )}
-            <p className="faint small chat-foot">Enter sends · Shift+Enter for a new line · answers come only from the knowledge base and say when it doesn't know</p>
+            <p className="faint small chat-foot">Enter sends · Shift+Enter for a new line · read-only: it looks up Confluence, Jira and MaC and says when it couldn't find something</p>
           </div>
         </div>
       </section>

@@ -1,10 +1,11 @@
 app = "deployed-on-a-prayer"
 primary_region = "lax" # min_machines_running only applies to the primary region
 
-# A deploy or stop waits this long for the app to exit, so a Terraform step in flight can finish
-# instead of leaving half-made resources and a stale state lock behind.
+# The Deploy workflow waits for running work before restarting, so a shutdown is normally
+# instant. This only bounds the downtime if the app is stopped while busy anyway (agent jobs run
+# on daemon threads and never hold it up; a Terraform step gets this long to finish).
 kill_signal = "SIGINT"
-kill_timeout = "300s"
+kill_timeout = "60s"
 
 [env]
   APP_ENV = "production"

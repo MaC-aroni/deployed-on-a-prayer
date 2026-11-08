@@ -87,10 +87,10 @@ export const api = {
   removeRepo: (slug) => call("DELETE", `/repos/${slug}`),
   publishKnowledge: (page) => call("POST", `/knowledge/${enc(page)}/publish`),
   reviewKnowledge: (page, status, note) => call("POST", `/knowledge/${enc(page)}/review`, { status, note }),
-  // Chat: a fresh agent over the whole knowledge base, one turn per call
-  chat: (message, chatId) => call("POST", "/chat", { message, chat_id: chatId ?? null }),
+  // Chat transcripts (the answers come from chatStream below; the server keeps no history itself)
   chats: () => call("GET", "/chats"),
   chatDetail: (id) => call("GET", `/chats/${enc(id)}`),
+  saveChat: (id, title, turns) => call("PUT", `/chats/${enc(id)}`, { title, turns }),
   deleteChat: (id) => call("DELETE", `/chats/${enc(id)}`),
 
   // Sign-in: { login, required, available, repo }
@@ -182,4 +182,53 @@ export function parseAgent(ev) {
   } catch {
     return null;
   }
+}
+
+// The assistant (docs/api.md → "The assistant"): POST the whole conversation, read the
+// server-sent events back with fetch (EventSource can't POST). onEvent gets {kind, data} for
+// `tool` (a lookup: name, args, ok, summary), `answer` ({content}, Markdown) and `error`
+// ({message}); it resolves when the stream ends. Throws ApiError on a non-2xx answer.
+export async function chatStream(messages, onEvent, { signal } = {}) {
+  const res = await fetch("/api/mac/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify({ messages }),
+    signal,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, detailOf(data, res.status));
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const dispatch = (chunk) => {
+    let kind = "message";
+    const lines = [];
+    for (const line of chunk.split("\n")) {
+      if (line.startsWith("event:")) kind = line.slice(6).trim();
+      else if (line.startsWith("data:")) lines.push(line.slice(5).trim());
+    }
+    if (kind === "end") return true;
+    let data = {};
+    try {
+      data = lines.length ? JSON.parse(lines.join("\n")) : {};
+    } catch {
+      data = { raw: lines.join("\n") };
+    }
+    onEvent({ kind, data });
+    return false;
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if (chunk.trim() && dispatch(chunk)) return;
+    }
+  }
+  if (buffer.trim()) dispatch(buffer);
 }

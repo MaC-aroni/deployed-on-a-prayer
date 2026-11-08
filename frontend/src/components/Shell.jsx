@@ -118,7 +118,7 @@ export default function Shell({ crumbs = [], actions, children }) {
     const load = () =>
       Promise.all([api.migrations().catch(() => []), api.plans().catch(() => [])]).then(([m, p]) => alive && setCounts({ pipelines: m.length + p.length }));
     load();
-    const id = setInterval(load, 10000);
+    const id = setInterval(load, 30000);
     return () => {
       alive = false;
       clearInterval(id);

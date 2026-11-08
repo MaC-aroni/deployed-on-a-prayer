@@ -218,3 +218,22 @@ def test_reads_retry_transient_failures_but_writes_never_do(monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(integrations.IntegrationError("GET x -> HTTP 404: nope", status=404)))
     with pytest.raises(integrations.IntegrationError):
         integrations._request("https://x/y", {})  # a 404 is an answer, not a flake: no retry
+
+
+def test_llm_posts_are_retried_on_timeouts(monkeypatch):
+    from mac import integrations
+    from mac.llm import NIMChat
+
+    calls = []
+
+    def slow_then_ok(url, headers, *, method="GET", body=None, timeout=30):
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise integrations.IntegrationError(f"{method} {url} -> TimeoutError: The read operation timed out")
+        return {"choices": [{"message": {"content": "hello"}}]}
+
+    monkeypatch.setattr(integrations, "_request_once", slow_then_ok)
+    monkeypatch.setattr(integrations, "RETRY_DELAY", 0)
+    monkeypatch.delenv("MAC_LLM_TIMEOUT", raising=False)
+    assert NIMChat("k").complete("s", "u") == "hello"
+    assert calls == [300, 300]

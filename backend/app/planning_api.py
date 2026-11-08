@@ -25,21 +25,20 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
-import uuid
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from mac import agents_cli, cli as mac_cli
-from mac.graph import Graph, context_for, extract
+from mac.graph import Graph, extract
 from mac.integrations import GitHubAPI, IntegrationError, TicketRequest, _request, open_pull_request, read_files
 from mac.knowledge import KnowledgeError, KnowledgePage, load_pages, publish
 from mac.knowledge import render as render_page
 from mac.llm import DEFAULT_MODEL, LLM, parse_json
 from mac.planner import plan, pr_body
 from mac.runner import GateError
-from mac.sources import Catalog, relevant, sections_from_pages
+from mac.sources import sections_from_pages
 from mac.spec import Spec, SpecError, load_spec, parse_spec
 from mac.store import RunRecord, RunStatus
 from mac.validate import validate
@@ -479,7 +478,7 @@ def ingest(state: mac_api.State = Depends(mac_api.get_state), config: Planning =
     run = _new_run(state, "ingest", "knowledge")
     state.runner.store.add_event(run.id, "run", "Ingest started: building the knowledge graph"
                                  + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_ingest(state, config, run.id, llm))
+    state.submit_agent(lambda: _execute_ingest(state, config, run.id, llm))
     return mac_api._run_view(run)
 
 
@@ -710,7 +709,7 @@ def learn(body: LearnBody, state: mac_api.State = Depends(mac_api.get_state), co
     _refuse_if_active(state, migration, "learn")
     run = _new_run(state, "ingest", migration)
     state.runner.store.add_event(run.id, "run", f"Learn started: {slug}" + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_learn(state, config, run.id, slug, llm))
+    state.submit_agent(lambda: _execute_learn(state, config, run.id, slug, llm))
     return mac_api._run_view(run)
 
 
@@ -941,7 +940,7 @@ def add_repo(body: RepoBody, state: mac_api.State = Depends(mac_api.get_state), 
     _refuse_if_active(state, migration, "licence check")
     run = _new_run(state, "ingest", migration)
     state.runner.store.add_event(run.id, "run", f"Repository added: {slug}" + (f" (by @{user})" if user else ""))
-    state.submit(lambda: _execute_add_repo(state, config, run.id, slug, llm, user))
+    state.submit_agent(lambda: _execute_add_repo(state, config, run.id, slug, llm, user))
     return mac_api._run_view(run)
 
 
@@ -956,21 +955,15 @@ def remove_repo(owner: str, name: str, state: mac_api.State = Depends(mac_api.ge
     return {"removed": f"{owner}/{name}"}
 
 
-# ---- Chat: a fresh agent over the whole knowledge base ----------------------------------------
+# ---- Chat transcripts -------------------------------------------------------------------------
+# The assistant itself is the runner API's `POST /api/mac/chat` (mac/assistant.py: a streaming,
+# tool-using agent over Confluence, Jira and MaC's records). The server keeps no history, so the
+# console stores each conversation here, so chats survive reloads and list in the rail.
 
 
-CHAT_PROMPT = """You are MaC's assistant for a company's engineering knowledge base: its services, repositories,
-standards, approvals and migration pipelines. Answer the question from the numbered sources and the
-graph facts below, and only from them; cite each claim as [S1], [S2]. When the sources don't say,
-say so plainly in one sentence and suggest which page would need to be written or which team to ask.
-Answer in short Markdown: a direct first sentence, then bullets if useful. No preamble."""
-
-MAX_TURNS = 8
-
-
-class ChatBody(BaseModel):
-    chat_id: str | None = None
-    message: str
+class ChatTranscript(BaseModel):
+    title: str
+    turns: list[dict]  # [{role: user|assistant|error, text, ts, tools?: [...]}]
 
 
 def _chats_dir(state: mac_api.State) -> Path:
@@ -987,66 +980,19 @@ def _load_chat(state: mac_api.State, chat_id: str) -> dict | None:
         return None
 
 
-def _save_chat(state: mac_api.State, chat: dict) -> None:
+@router.put("/chats/{chat_id}")
+def save_chat(chat_id: str, body: ChatTranscript, state: mac_api.State = Depends(mac_api.get_state),
+              user: str | None = Depends(signed_in)):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{6,40}", chat_id):
+        raise HTTPException(422, "chat id: 6 to 40 letters, digits, - or _")
+    if len(body.turns) > 400:
+        raise HTTPException(422, "that conversation is too long to keep; start a new chat")
+    existing = _load_chat(state, chat_id) or {"id": chat_id, "created": time.time(), "by": user}
+    chat = {**existing, "title": body.title[:120], "turns": body.turns, "updated": time.time()}
     folder = _chats_dir(state)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{chat['id']}.json").write_text(json.dumps(chat, indent=2), encoding="utf-8")
-
-
-@router.post("/chat")
-def chat(body: ChatBody, state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config),
-         user: str | None = Depends(signed_in)):
-    """One turn with a fresh agent that has the whole knowledge base (hand-written and generated
-    pages) and the graph. Retrieval is code (the most relevant sections and the graph's
-    neighbourhood of what the question names); the model only writes the answer and cites."""
-    question = body.message.strip()
-    if not question:
-        raise HTTPException(422, "Say something")
-    llm = _llm(config)
-    chat = (_load_chat(state, body.chat_id) if body.chat_id else None) or {
-        "id": uuid.uuid4().hex[:12], "title": question[:80], "created": time.time(), "updated": time.time(),
-        "by": user, "turns": []}
-    history = chat["turns"][-MAX_TURNS:]
-    sections = _sections(state, config)
-    graph = _load_graph(state)
-    recent = " ".join(t["text"] for t in history if t["role"] == "user")[-400:]
-    if graph is not None:
-        sub, picked = context_for(graph, sections, question, k=10)
-        facts = sub.facts()
-        if len(facts) > 6000:
-            facts = facts[:6000] + "\n…"
-        matched = len(sub.nodes) if sub is not graph else 0
-    else:
-        picked, facts, matched = relevant(sections, question + " " + recent, k=10), "", 0
-    catalog = Catalog(picked)
-    transcript = "\n".join(f"{'User' if t['role'] == 'user' else 'Assistant'}: {t['text']}" for t in history)
-    prompt = ((f"Conversation so far:\n{transcript}\n\n" if transcript else "")
-              + f"Question: {question}\n\n"
-              + (f"Graph facts:\n{facts}\n\n" if facts else "")
-              + f"Sources:\n{catalog.prompt_block()}")
-    try:
-        reply = llm.complete(CHAT_PROMPT, prompt, max_tokens=1200).strip()
-    except IntegrationError as e:
-        raise HTTPException(502, f"the model didn't answer: {e}") from e
-    cited = {int(n) for n in re.findall(r"\[S(\d+)\]", reply)}
-    urls = _urls(state)
-    sources = [{"n": i, "id": sec.id, "page": sec.doc_id, "title": sec.doc_title, "heading": sec.heading,
-                "url": sec.url or urls.get(sec.doc_id), "cited": i in cited}
-               for i, sec in enumerate(catalog.sections, 1)]
-    docs = len({sec.doc_id for sec in catalog.sections})
-    trace = [
-        {"phase": "observation", "text": f"read {len(catalog.sections)} sections across {docs} page(s)"
-                                          + (f"; {matched} graph facts matched the question" if matched else "; the question names nothing in the graph" if graph is not None else "; no graph yet, text search only")},
-        {"phase": "reasoning", "text": ("answered from " + ", ".join(f"S{n}" for n in sorted(cited))) if cited else "the sources didn't settle it; said so"},
-        {"phase": "outcome", "text": f"{len(reply)} characters from {_model_name(llm) or 'the configured model'}"},
-    ]
-    chat["turns"] += [{"role": "user", "text": question, "ts": time.time()},
-                      {"role": "assistant", "text": reply, "ts": time.time(), "sources": sources, "trace": trace,
-                       "model": _model_name(llm)}]
-    chat["updated"] = time.time()
-    _save_chat(state, chat)
-    return {"chat_id": chat["id"], "title": chat["title"], "model": _model_name(llm), "reply": reply,
-            "sources": sources, "trace": trace, "turns": len(chat["turns"])}
+    (folder / f"{chat_id}.json").write_text(json.dumps(chat, indent=2), encoding="utf-8")
+    return {"id": chat_id, "title": chat["title"], "turns": len(chat["turns"]), "updated": chat["updated"]}
 
 
 @router.get("/chats")
@@ -1366,7 +1312,7 @@ def start_plan(body: PlanBody, state: mac_api.State = Depends(mac_api.get_state)
     _refuse_if_active(state, migration, "plan")
     run = _new_run(state, "plan", migration)
     state.runner.store.add_event(run.id, "run", f"Planning started: {goal}" + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_plan(state, config, run.id, goal, body, llm))
+    state.submit_agent(lambda: _execute_plan(state, config, run.id, goal, body, llm))
     return mac_api._run_view(run)
 
 
@@ -1614,7 +1560,7 @@ def investigate(run_id: str, body: InvestigateBody | None = None, state: mac_api
     state.runner.store.save(run)
     state.runner.store.add_event(run.id, "run", f"Investigation started: {failed.mode} {failed.id} failed at {failed.failed_step}"
                                  + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_investigate(state, config, run.id, failed, llm))
+    state.submit_agent(lambda: _execute_investigate(state, config, run.id, failed, llm))
     return mac_api._run_view(run)
 
 

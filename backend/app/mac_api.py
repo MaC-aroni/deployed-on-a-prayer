@@ -43,10 +43,15 @@ log = logging.getLogger("mac.api")
 class State:
     runner: Runner
     migrations_dir: Path
-    submit: Callable[[Callable[[], None]], None]  # runs work in the background
+    submit: Callable[[Callable[[], None]], None]  # runs pipeline work in the background
+    # Agent jobs (ingest, learn, plan, investigate) only call the LLM and write records, so a
+    # restart can simply fail them. Daemon threads: they never keep a stopping server alive.
+    submit_agent: Callable[[Callable[[], None]], None] = lambda fn: threading.Thread(
+        target=fn, name="mac-agent", daemon=True).start()
     poll_seconds: int = 0  # how often to ask Jira about pending approvals; 0 = never
     webhook_secret: str | None = None  # MAC_JIRA_WEBHOOK_SECRET; None = the Jira webhook is off
     prober: Callable = probes.send  # (url, probe, region) -> result; tests swap it
+    assistant: Callable | None = None  # () -> mac.assistant.Assistant, or None when no LLM is set
 
 
 _state: State | None = None
@@ -382,6 +387,56 @@ def _get_run(state: State, run_id: str) -> RunRecord:
         return state.runner.store.get(run_id)
     except KeyError as e:
         raise HTTPException(404, f"no run {run_id!r}") from e
+
+
+class ChatBody(BaseModel):
+    messages: list[dict]  # [{"role": "user" | "assistant", "content": "..."}], oldest first
+
+
+def _default_assistant():
+    from mac.assistant import AtlassianReader, Assistant
+    from mac.llm import DEFAULT_BASE_URL, DEFAULT_MODEL, NIMChat
+    key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+    if not key:
+        return None
+    llm = NIMChat(key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL), os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
+    site, email, token = (os.environ.get(k) for k in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN"))
+    reader = AtlassianReader(site, email, token, os.environ.get("CONFLUENCE_SPACE_KEY")) if site and email and token else None
+    return lambda store: Assistant(llm, store, reader)
+
+
+@router.post("/chat")
+async def chat(body: ChatBody, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
+    """The assistant: answers from Jira, Confluence and MaC's records, read-only. Streams
+    server-sent events: `tool` per lookup ({name, args, ok, summary}), then `answer` ({content},
+    Markdown with links) or `error` ({message}), then `end`. Read the stream with fetch(), since
+    EventSource can't POST. Sign-in is required on Fly (it reads Jira and spends LLM tokens)."""
+    if not body.messages or body.messages[-1].get("role") != "user":
+        raise HTTPException(422, "the last message must be the user's question")
+    factory = state.assistant or _default_assistant()
+    if factory is None:
+        raise HTTPException(503, "The assistant needs an LLM: set MAC_LLM_API_KEY (or NVIDIA_API_KEY)")
+    assistant = factory(state.runner.store)
+
+    async def generate():
+        events = assistant.run(body.messages)
+        while True:
+            event = await asyncio.to_thread(next, events, None)  # each step may wait on the LLM
+            if event is None:
+                break
+            yield f"event: {event.kind}\ndata: {json.dumps(event.data, default=str)}\n\n"
+        yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/activity")
+def activity(state: State = Depends(get_state)):
+    """Everything in flight. The Deploy workflow waits for `busy` to clear before restarting the
+    server, so a deploy never cuts a Rehearse, Deploy or agent job off mid-way."""
+    active = [_summary(r) for r in state.runner.store.runs(limit=200) if r.status.active]
+    return {"busy": bool(active), "active": active}
 
 
 @router.get("/runs")

@@ -1,5 +1,5 @@
 """The planning API: the knowledge graph and the Planner over HTTP, with a scripted LLM.
-Runs inline (submit=lambda fn: fn()), so every response already reflects the finished work."""
+Runs inline (submit=lambda fn: fn(), submit_agent=lambda fn: fn()), so every response already reflects the finished work."""
 
 import json
 import shutil
@@ -40,7 +40,7 @@ def api(env, tmp_path):
     migrations = tmp_path / "migrations"
     (migrations / "claims").mkdir(parents=True)
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
-    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn())
+    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(), submit_agent=lambda fn: fn())
     mac_api.configure(state)
     holder = {"llm": None, "repos": lambda: FAKE_REPOS}
     planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
@@ -467,31 +467,20 @@ def test_review_closes_the_loop_from_the_console_or_from_jira(api):
     assert client.post(f"/api/mac/knowledge/{page}/review", json={"status": "maybe"}).status_code == 422
 
 
-def test_chat_answers_from_the_knowledge_base_with_sources_and_keeps_the_transcript(api):
+def test_chat_transcripts_are_kept_for_the_console(api):
     client, env, holder = api
-    holder["llm"] = ScriptedLLM("ClaimsAdjudicationService reads CLAIMS_DB and calls the Claims MCP tool [S1] [S2].",
-                                "It needs the DBA sign-off [S1].")
-    res = client.post("/api/mac/chat", json={"message": "What does ClaimsAdjudicationService depend on?"})
-    assert res.status_code == 200, res.text
-    data = res.json()
-    assert data["reply"].startswith("ClaimsAdjudicationService") and data["turns"] == 2
-    assert len(data["sources"]) >= 2 and data["sources"][0]["n"] == 1 and data["sources"][0]["cited"] is True
-    assert all(src["page"] and src["title"] for src in data["sources"])
-    assert [t["phase"] for t in data["trace"]] == ["observation", "reasoning", "outcome"]
-    assert "answered from S1, S2" == data["trace"][1]["text"]
-    system, user = holder["llm"].prompts[0]
-    assert "cite each claim as [S1]" in system and "Question: What does ClaimsAdjudicationService" in user and "[S1]" in user
-
-    second = client.post("/api/mac/chat", json={"chat_id": data["chat_id"], "message": "Which approvals?"}).json()
-    assert second["turns"] == 4
-    assert "Conversation so far:" in holder["llm"].prompts[1][1] and "What does ClaimsAdjudicationService" in holder["llm"].prompts[1][1]
+    turns = [{"role": "user", "text": "What does ClaimsAdjudicationService depend on?", "ts": 1.0},
+             {"role": "assistant", "text": "It reads CLAIMS_DB [link](https://x)", "ts": 2.0,
+              "tools": [{"name": "search_confluence", "args": {"query": "claims"}, "ok": True, "summary": "3 result(s)"}]}]
+    res = client.put("/api/mac/chats/abc123def456", json={"title": "What does ClaimsAdjudicationService depend on?", "turns": turns})
+    assert res.status_code == 200 and res.json()["turns"] == 2
     [listed] = client.get("/api/mac/chats").json()
-    assert listed["id"] == data["chat_id"] and listed["title"].startswith("What does") and listed["turns"] == 4
-    detail = client.get(f"/api/mac/chats/{data['chat_id']}").json()
-    assert [t["role"] for t in detail["turns"]] == ["user", "assistant", "user", "assistant"]
-    assert (env.runner.data_dir / "chats" / f"{data['chat_id']}.json").is_file()
-    assert client.delete(f"/api/mac/chats/{data['chat_id']}").status_code == 200
-    assert client.get(f"/api/mac/chats/{data['chat_id']}").status_code == 404
-    assert client.post("/api/mac/chat", json={"message": "   "}).status_code == 422
-    planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE))
-    assert client.post("/api/mac/chat", json={"message": "hi"}).status_code == 409
+    assert listed["id"] == "abc123def456" and listed["title"].startswith("What does")
+    detail = client.get("/api/mac/chats/abc123def456").json()
+    assert detail["turns"] == turns and detail["created"] <= detail["updated"]
+    again = client.put("/api/mac/chats/abc123def456", json={"title": "same", "turns": turns + [{"role": "user", "text": "and?", "ts": 3.0}]})
+    assert again.json()["turns"] == 3 and client.get("/api/mac/chats/abc123def456").json()["created"] == detail["created"]
+    assert (env.runner.data_dir / "chats" / "abc123def456.json").is_file()
+    assert client.put("/api/mac/chats/x", json={"title": "t", "turns": []}).status_code == 422
+    assert client.delete("/api/mac/chats/abc123def456").status_code == 200
+    assert client.get("/api/mac/chats/abc123def456").status_code == 404

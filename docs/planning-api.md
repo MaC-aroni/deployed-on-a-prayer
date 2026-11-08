@@ -230,15 +230,11 @@ happens in the console: `POST /api/mac/knowledge/{page}/review {"status": "appro
 "rejected", "note"?}` (sign-in) records `reviewed_by` / `reviewed_at`, rewrites the labels and
 returns the page view; `409` for a hand-written page, `404` for an unknown one.
 
-## Chat
+## Chat transcripts
 
-`POST /api/mac/chat {"message": "...", "chat_id"?: "..."}` (sign-in on Fly) → one turn with a
-fresh agent over the whole knowledge base. Retrieval is code: `context_for` picks the graph's
-neighbourhood of what the question names and the most relevant sections (all pages, generated
-included); the model answers from those numbered sources and cites `[S1]`. `409` without an
-LLM, `422` on an empty message, `502` when the model doesn't answer. Reply:
-`{chat_id, title, model, reply (Markdown), sources: [{n, id, page, title, heading, url, cited}],
-trace: [{phase, text}], turns}`; the trace (observation, reasoning, outcome) is written by code
-from what was retrieved and cited. Transcripts live in `<MAC_DATA_DIR>/chats/<id>.json`:
-`GET /api/mac/chats` (newest first), `GET /api/mac/chats/{id}` (turns with their sources and
-traces), `DELETE /api/mac/chats/{id}`.
+The assistant itself is the runner API's `POST /api/mac/chat` ([`api.md`](api.md) → "The
+assistant": a streaming, tool-using agent over Confluence, Jira and MaC's records). That server
+keeps no history, so the console stores each conversation here: `PUT /api/mac/chats/{id}`
+`{title, turns}` (sign-in; id is 6–40 of `[A-Za-z0-9_-]`, the client mints it),
+`GET /api/mac/chats` (newest first), `GET /api/mac/chats/{id}`, `DELETE /api/mac/chats/{id}`.
+Files under `<MAC_DATA_DIR>/chats/`.

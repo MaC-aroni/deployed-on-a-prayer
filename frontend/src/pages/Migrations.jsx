@@ -51,7 +51,7 @@ export default function Migrations() {
         })
         .catch((e) => alive && setError(e));
     load();
-    const id = setInterval(load, 5000);
+    const id = setInterval(load, 10000);
     return () => {
       alive = false;
       clearInterval(id);

@@ -31,6 +31,49 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Backend for the chat assistant (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `POST /api/mac/chat` (`mac/assistant.py`): an LLM with read-only tools over Confluence (search,
+  read page), Jira (JQL search, read issue with comments) and MaC's own runs and approvals. It
+  streams `tool` events while it looks things up, then the `answer` (Markdown with links).
+  It can't change anything. Sign-in required on Fly. `docs/api.md` → "The assistant".
+
+#### What you need to do
+- **Elathius (UI):** the chat panel posts the whole conversation each time, reads the stream with
+  `fetch` (not `EventSource`), shows `tool` events as progress lines, and renders `answer` as
+  Markdown. Answers can take a minute with Grok, so show the progress.
+
+### 2026-11-08: Deploys no longer take the site down (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **The cause of the 3-minute outage on deploy:** Fly stopped the server while a "learn" job
+  waited on Grok; uvicorn stopped accepting requests at once but Python waited for the job's
+  thread, so nothing answered until Grok timed out.
+- Agent jobs (ingest, learn, plan, investigate) now run on daemon threads, so they never keep a
+  stopping server alive; a restart marks them failed ("start it again"). Previously the restart
+  cleanup would also have tried to *undo* them as if they were pipelines.
+- The Deploy workflow first waits (up to 30 min) until `GET /api/mac/activity` reports nothing
+  in flight. `kill_timeout` is back to 60 s.
+- LLM calls: default timeout 300 s (`MAC_LLM_TIMEOUT`), and a timeout or 5xx is retried once.
+
+#### What you need to do
+- Pressing Deploy while a Rehearse runs now waits for it; that's expected.
+- **Elathius (UI):** `planning_api` jobs should be started with `state.submit_agent`, not
+  `state.submit` (the four existing ones are switched). The console polls `/api/mac/plans` and
+  `/api/mac/migrations` several times a second; once every few seconds is plenty.
+
+### 2026-11-08: The knowledge base ships in the Docker image (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The first real prod Rehearse ran end to end (table, roles, data copy, both Lambdas, access
+  grant, smoke test failing on the planted date bug, full rollback, Grok's explanation), but the
+  explanation couldn't cite the date rule because `demo-data/confluence` wasn't in the image.
+  It is now, so diagnoses on Fly cite the standards like they do locally.
+
+#### What you need to do
+- Nothing.
+
 ### 2026-11-08: ui_v2 round 2: review loop for generated pages, Chat, wording (Elathius, with Claude Code)
 
 #### What changed
@@ -40,17 +83,18 @@ differently**. Keep it short; link to the docs instead of repeating them.
   rejects on the page itself (`/knowledge/<page>`, `POST /api/mac/knowledge/{page}/review`).
   Approved pages lose `needs-review`; cards and rows show "review needed · MAC-n" → "written
   by MaC" → "page rejected", with a **Review page** door while pending.
-- **Chat** (`/chat`, sidebar "Ask"): a Claude-style chat over the whole knowledge base. Each
-  question spins up a fresh agent (spinning cog while it works): retrieval in code (graph
-  neighbourhood + relevant sections), the configured model answers with `[S1]` citations,
-  sources as chips, a collapsible "how I answered" trace, transcripts kept per chat.
-  `POST /api/mac/chat`, `GET/DELETE /api/mac/chats[/id]`.
+- **Chat** (`/chat`, sidebar "Ask"): a Claude-style chat on ob1-can-obi's assistant
+  (`POST /api/mac/chat`, #30): the whole conversation is posted each time, the stream's `tool`
+  events show as lookup lines under a spinning cog, the `answer` renders as Markdown, and a
+  collapsible "how I answered" lists the lookups. Transcripts are kept per chat by the planning
+  API (`PUT/GET/DELETE /api/mac/chats[/id]`) so they survive reloads and list in the rail.
 - Wording: the service primary is **Build Migration Pipeline**; the "Also open a PR" toggle and
   the toolbar "Learn knowledge base" moved into each card's ··· menu.
 
 #### How to adapt
 - Chat transcripts live in `<MAC_DATA_DIR>/chats/`; review decisions in the page's sidecar
-  under `<MAC_DATA_DIR>/knowledge/`.
+  under `<MAC_DATA_DIR>/knowledge/`. The Pipelines list polls every 10 s and the sidebar count
+  every 30 s now.
 - On Fly: approving the `KB-*` ticket in Jira resolves the review within 30 s; so does Approve
   in the console.
 
@@ -89,6 +133,7 @@ differently**. Keep it short; link to the docs instead of repeating them.
   backend asks are in `docs/ui-data-needs.md` §8 (`migration`/`based_on` on run summaries,
   `expected_live` for cancelled Deploys).
 - Added repositories live in `<MAC_DATA_DIR>/repos.json`.
+
 
 ### 2026-11-08: Migration flow with agents: Learn, detect-or-plan, breakpoints, investigate (Elathius, with Claude Code)
 
