@@ -12,6 +12,7 @@ labels: [directory, approvers, teams]
 - **dba-team**: owns CLAIMS_DB and `claims-db-migrate`.
 - **qa-team**: owns `claims-smoke-tests`.
 - **platform-engineering**: owns the landing zone and the Platform standards.
+- **finance-team**: owns the IT cost allocation and the Finance pages.
 
 ## Approvers
 

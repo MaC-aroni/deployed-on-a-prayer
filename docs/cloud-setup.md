@@ -69,7 +69,7 @@ Replace `<account-id>` and `<state-bucket>`:
    `MAC_JIRA_ASSIGNEES`, for example
    `{"tech-risk": "712020:...", "manager": "712020:...", "claims-mcp-team": "712020:..."}`.
    Without it, tickets are created unassigned.
-6. **Publish the company knowledge base** (the 14 pages in `demo-data/confluence/`) into
+6. **Publish the company knowledge base** (the 16 pages in `demo-data/confluence/`) into
    the space. It's safe to re-run, and it updates the same pages:
    `mise run mac publish-knowledge demo-data/confluence`
 
@@ -101,7 +101,7 @@ All go in `backend/.env` locally, and in Fly secrets for the deployed app:
 
 1. `aws sts get-caller-identity` shows the runner's user in the right account.
 2. `mise run mac validate examples/claims-adjudication/migration.yaml` passes.
-3. `mise run mac publish-knowledge demo-data/confluence` prints `published 14 pages`.
+3. `mise run mac publish-knowledge demo-data/confluence` prints `published 16 pages`.
 4. `mise run mac build examples/claims-adjudication/migration.yaml` passes all of these:
    - the guardrails
    - the preflight (right account)
