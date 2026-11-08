@@ -15,7 +15,7 @@ and that nothing it writes is ever deployed (Deploy refuses any rehearsal that u
 import json
 import posixpath
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import integrations
 from .codegen import MAX_BYTES, MAX_FILES, allowed_prefix
@@ -57,6 +57,11 @@ Return only JSON:
  "files": [{"path": "<repo-relative path exactly as shown>", "content": "<the whole new file>"}]}"""
 
 
+CULPRIT_SYSTEM = """A check in a migration pipeline failed. Checks only observe; the cause is in the code of
+one of the steps that ran before it. From the log and the list of those steps, pick the step whose
+code most likely caused the failure. Return only JSON: {"step": "<one id from the list>", "why": "<one sentence>"}"""
+
+
 @dataclass
 class Outcome:
     summary: str
@@ -95,16 +100,22 @@ class LLMDiagnostician:
             self.last = outcome
             return explanation
 
-        code = self._code(step, failure)
+        # A failing check only observes the problem; the code to read (and fix) is the step that caused it.
+        culprit, why = self._culprit(spec, step, failure, facts)
+        if culprit is not step:
+            facts += (f"\n## Step whose code is suspected\n{culprit.id} ({culprit.type}) in {culprit.run.repo.slug}"
+                      f" @ {failure.shas.get(culprit.run.repo.key, '')[:12]}: {why}\n")
+            failure = replace(failure, repo=culprit.run.repo.key, sha=failure.shas.get(culprit.run.repo.key, failure.sha))
+        code = self._code(culprit, failure)
         report = self.llm.complete(REPORT_SYSTEM, facts + self._code_block(code), max_tokens=3000).strip()
-        self.store.save_report(failure.run_id, step.id, mode, report)
+        self.store.save_report(failure.run_id, culprit.id, mode, report)
         outcome.report = report
         summary = explanation + f"\n\nReport ready: GET /api/mac/runs/{failure.run_id}/report.md"
         if mode == Mode.REPORT:
             self.last = outcome
             return summary
 
-        summary += "\n\n" + self._autofix(spec, step, failure, facts, code, report, outcome)
+        summary += "\n\n" + self._autofix(spec, culprit, failure, facts, code, report, outcome)
         self.last = outcome
         return summary
 
@@ -124,6 +135,25 @@ class LLMDiagnostician:
                             f"MaC auto-fix: {spec.metadata.service} rehearsal failure", body)
 
     # ---- pieces --------------------------------------------------------------------------------
+
+    def _culprit(self, spec: Spec, step: Step, failure: Failure, facts: str) -> tuple[Step, str]:
+        """The step whose code to read. The failed step itself, unless it's a check: then the model
+        picks from the steps that ran before it, and code accepts only one of those."""
+        if step.type != StepType.CHECK:
+            return step, ""
+        candidates = [s for s in spec.steps if s.id in failure.completed and s.type != StepType.CHECK]
+        if not candidates:
+            return step, ""
+        listing = "\n".join(f"- {s.id}: {s.type} in {s.run.repo.slug}, {s.run.path or s.run.entrypoint}" for s in candidates)
+        try:
+            pick = parse_json(self.llm.complete(CULPRIT_SYSTEM, facts + "\n## Steps that ran before the check\n" + listing,
+                                                max_tokens=300))
+            chosen = next((s for s in candidates if s.id == str(pick.get("step"))), None)
+        except (ValueError, AttributeError, TypeError):
+            chosen, pick = None, {}
+        if chosen is None:
+            return step, ""
+        return chosen, str(pick.get("why", "")).strip()
 
     def _catalog(self, step: Step) -> Catalog:
         if not self.sections:

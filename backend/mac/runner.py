@@ -41,6 +41,7 @@ class Runner:
         self.executor = executor
         self.data_dir = Path(data_dir)
         self.diagnostician = diagnostician or NotConfigured()
+        self.diagnosing: set[str] = set()  # runs whose AI help is still working
         self.design_writer = design_writer  # the LLM that writes the design page (text only)
         self.pages = pages  # where the design page is published (Confluence)
         # Rule checks and state changes happen under this lock, so two clicks can't both start
@@ -643,12 +644,16 @@ class Runner:
         repo = step.run.repo.key
         failure = Failure(run_id=run.id, mode=run.mode, step_id=step.id, reason=reason, logs=logs,
                           repo=repo, sha=run.shas.get(repo, ""), spec_path=run.spec_path,
+                          completed=tuple(run.completed), shas=dict(run.shas),
                           attempt=int(run.autofix.get("attempt", 0)), branch=run.autofix.get("branch"),
                           parent=run.autofix.get("parent"))
+        self.diagnosing.add(run.id)  # counts as busy: a deploy waits rather than cut the AI off
         try:
             summary = self.diagnostician.diagnose(spec, failure, Mode(run.diagnostics_mode))
         except Exception as e:  # noqa: BLE001 - AI help failing must never change the run's outcome
             summary = f"AI help failed: {_reason(e)}"
+        finally:
+            self.diagnosing.discard(run.id)
         self._event(run, "diagnosis", summary, step.id)
 
     def _autofix_passed(self, run: RunRecord, spec: Spec) -> None:

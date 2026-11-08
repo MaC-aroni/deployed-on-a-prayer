@@ -46,6 +46,8 @@ class Failure:
     attempt: int = 0  # 0: the original failure; n: the n-th auto-fix attempt failed
     branch: str | None = None  # the auto-fix branch, once one exists
     parent: str | None = None  # the run whose failure started the auto-fix
+    completed: tuple[str, ...] = ()  # steps that ran before the failure, in order
+    shas: dict = None  # RepoRef.key -> commit, for every repo the run used
 
 
 class Diagnostician(Protocol):
