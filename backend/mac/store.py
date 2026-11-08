@@ -57,6 +57,7 @@ class RunRecord(BaseModel):
     reason: str | None = None
     diagnostics_mode: str = "explain"
     report: dict = {}  # Build: guardrails, approvals, plans, issues
+    autofix: dict = {}  # an auto-fix attempt: {parent, branch, attempt, repo, pr?}
     outputs: dict[str, dict[str, str]] = {}  # step id -> declared output name -> value, e.g. the service URL
     based_on: str | None = None  # the Build (for Rehearse) or Rehearse (for Deploy) this relies on
     created: float = Field(default_factory=time.time)
@@ -138,6 +139,10 @@ class Store:
                     run_id TEXT NOT NULL, step TEXT NOT NULL, output TEXT NOT NULL, probe TEXT NOT NULL,
                     ts REAL NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS probes_by_run ON probes (run_id, ts);
+                -- The AI's report for a failed run (Report and Auto-fix modes), as Markdown.
+                CREATE TABLE IF NOT EXISTS reports (
+                    run_id TEXT PRIMARY KEY, step TEXT NOT NULL, mode TEXT NOT NULL,
+                    markdown TEXT NOT NULL, created REAL NOT NULL);
                 -- Each approval's last known Jira state, so the UI can show it without a Build
                 -- and the poller can tell what changed.
                 CREATE TABLE IF NOT EXISTS approval_status (
@@ -204,6 +209,17 @@ class Store:
             rows = self.db.execute("SELECT data FROM probes WHERE run_id = ? ORDER BY ts DESC LIMIT ?",
                                    (run_id, limit)).fetchall()
         return [json.loads(r[0]) for r in rows]
+
+    def save_report(self, run_id: str, step: str, mode: str, markdown: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO reports VALUES (?, ?, ?, ?, ?) ON CONFLICT (run_id) DO UPDATE SET "
+                            "step = excluded.step, mode = excluded.mode, markdown = excluded.markdown, created = excluded.created",
+                            (run_id, step, mode, markdown, time.time()))
+
+    def report(self, run_id: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT step, mode, markdown, created FROM reports WHERE run_id = ?", (run_id,)).fetchone()
+        return {"run_id": run_id, "step": row[0], "mode": row[1], "markdown": row[2], "created": row[3]} if row else None
 
     def ticket_owner(self, key: str) -> tuple[str, str] | None:
         """(migration, digest) whose approval this Jira ticket belongs to, if MaC raised it."""

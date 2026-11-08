@@ -19,12 +19,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .aihelp import LLMDiagnostician, autofix_cycle
 from .design import NIMDesignWriter
 from .executors import Executor, TerraformState
 from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
 from .knowledge import KnowledgeError, load_pages, publish
-from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL
+from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL, NIMChat
 from .runner import GateError, Runner
+from .sources import sections_from_pages
 from .spec import SpecError, load_spec
 from .store import Event, RunRecord, RunStatus, Store
 from .validate import execution_order, validate
@@ -46,7 +48,24 @@ def _env(*names: str) -> str | None:
     return next((os.environ[n] for n in names if os.environ.get(n)), None)
 
 
-def make_runner(data_dir: Path) -> Runner:
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def knowledge_sections(store: Store) -> list:
+    """The company knowledge base, for grounding diagnoses. Empty if the folder isn't there."""
+    directory = Path(os.environ.get("MAC_KNOWLEDGE_DIR") or REPO_ROOT / "demo-data" / "confluence")
+    if not directory.is_dir():
+        return []
+    try:
+        urls = {page: ids[1] for page, ids in store.knowledge_pages().items()} if hasattr(store, "knowledge_pages") else {}
+        return sections_from_pages(load_pages(directory), urls)
+    except (KnowledgeError, OSError, IndexError, TypeError):
+        return []
+
+
+def make_runner(data_dir: Path, submit=None) -> Runner:
+    """submit(fn, *args): how auto-fix's next Build and Rehearse are started. None runs them inline
+    (the CLI); the server passes its worker pool."""
     token = os.environ.get("GITHUB_TOKEN")
     site = _env("ATLASSIAN_SITE", "JIRA_SITE")
     email = _env("ATLASSIAN_EMAIL", "JIRA_EMAIL")
@@ -66,8 +85,18 @@ def make_runner(data_dir: Path) -> Runner:
     bucket = os.environ.get("MAC_TF_STATE_BUCKET")
     tf_state = TerraformState(bucket, os.environ.get("MAC_TF_STATE_REGION", "us-east-1")) if bucket else None
     executor = Executor(GitCheckout(token), data_dir / "work", tf_state)
-    return Runner(Store(data_dir / "mac.db"), GitHubAPI(token), approvals, executor, data_dir,
-                  design_writer=writer, pages=pages)
+    store, github = Store(data_dir / "mac.db"), GitHubAPI(token)
+    diagnostician = None
+    if llm_key:
+        llm = NIMChat(llm_key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL), os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
+        diagnostician = LLMDiagnostician(llm, github, store, knowledge_sections(store))
+    runner = Runner(store, github, approvals, executor, data_dir, diagnostician, design_writer=writer, pages=pages)
+    if diagnostician is not None:
+        if submit is None:
+            diagnostician.continue_with = lambda path, overrides, autofix: autofix_cycle(runner, path, overrides, autofix)
+        else:
+            diagnostician.continue_with = lambda path, overrides, autofix: submit(autofix_cycle, runner, path, overrides, autofix)
+    return runner
 
 
 def _print_event(event: Event) -> None:

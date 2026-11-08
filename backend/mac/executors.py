@@ -192,7 +192,9 @@ class Executor:
         }
         tf = {"TF_IN_AUTOMATION": "1", "TF_PLUGIN_CACHE_DIR": str(self.plugin_cache),
               "TF_VAR_mac_env": ctx.env_name, "TF_VAR_mac_run_id": ctx.run_id,
-              "AWS_REGION": region, "PYTHONUNBUFFERED": "1"}
+              # boto3 reads AWS_DEFAULT_REGION; Terraform and the AWS CLI read AWS_REGION. Set both,
+              # so no script has to know the target region itself.
+              "AWS_REGION": region, "AWS_DEFAULT_REGION": region, "PYTHONUNBUFFERED": "1"}
         return {**os.environ, **tf, **mac, **ctx.extra_env}
 
     def _run(self, cmd: list[str], cwd: Path, ctx: StepContext, action: str, label: str,

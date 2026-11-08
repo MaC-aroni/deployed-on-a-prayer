@@ -445,3 +445,39 @@ def test_a_missing_declared_output_fails_the_step_and_undoes_everything(env, spe
     assert run.status == RunStatus.FAILED and run.failed_step == "deploy_service"
     assert "didn't produce its declared output(s): url" in run.reason
     assert run.steps["provision_storage"] == "rolled_back"
+
+
+def test_undo_can_be_retried_after_a_failed_rollback(env, spec_path):
+    env.runner.build(spec_path)
+    env.executor.fail[("db_migrate", "run")] = "migrate.py exited with code 1"
+    env.executor.fail[("db_migrate", "rollback")] = "rollback.py: no region"
+    run = env.runner.rehearse(spec_path)
+    run = env.runner.play(run.id, "db_migrate")
+    assert run.status == RunStatus.ROLLBACK_FAILED
+    assert run.steps["db_migrate"] == "rollback_failed" and run.steps["provision_iam"] == "rolled_back"
+
+    del env.executor.fail[("db_migrate", "rollback")]  # the cause is fixed; retry
+    before = len(env.executor.calls)
+    run = env.runner.undo(run.id)
+    assert run.status == RunStatus.UNDONE
+    retried = env.executor.calls[before:]
+    assert retried == [("db_migrate", "rollback", "rehearsal")]  # only what wasn't undone yet
+    assert run.steps["db_migrate"] == "rolled_back"
+
+
+def test_recover_queues_the_undo_of_a_run_cut_off_mid_work(env, spec_path):
+    env.runner.build(spec_path)
+    stuck = env.runner.start_rehearse(spec_path)
+    stuck.next_action = None
+    stuck.steps = {"preflight": StepState.SUCCEEDED, "provision_storage": StepState.SUCCEEDED,
+                   "provision_iam": StepState.RUNNING}
+    stuck.completed = ["preflight", "provision_storage"]
+    env.store.save(stuck)
+    queued = env.runner.recover()
+    assert queued == [stuck.id]
+    after = env.store.get(stuck.id)
+    assert after.failed_step == "provision_iam" and after.next_action == "undo"
+    done = env.runner.execute(stuck.id)
+    assert done.status == RunStatus.UNDONE
+    assert [c for c in env.executor.calls if c[1] == "rollback"] == [
+        ("provision_iam", "rollback", "rehearsal"), ("provision_storage", "rollback", "rehearsal")]

@@ -169,7 +169,24 @@ def open_pull_request(api: "GitHubAPI", slug: str, base: str, branch: str, files
         return _request(f"{api.api}/repos/{slug}{path}", api.headers, method=method, body=payload)
 
     base_sha = call(f"/git/ref/heads/{urllib.parse.quote(base, safe='')}")["object"]["sha"]
-    call("/git/refs", "POST", {"ref": f"refs/heads/{branch}", "sha": base_sha})
+    push_branch(api, slug, base_sha, branch, files, message)
+    return open_pr(api, slug, base, branch, title, body)
+
+
+def push_branch(api: "GitHubAPI", slug: str, base_sha: str, branch: str, files: dict[str, str],
+                message: str) -> str:
+    """Creates `branch` at `base_sha` if it doesn't exist, then commits `files` onto it.
+    Returns the branch's new head sha."""
+    def call(path, method="GET", payload=None):
+        return _request(f"{api.api}/repos/{slug}{path}", api.headers, method=method, body=payload)
+
+    try:
+        call(f"/git/ref/heads/{urllib.parse.quote(branch, safe='')}")
+    except IntegrationError as e:
+        if e.status != 404:
+            raise
+        call("/git/refs", "POST", {"ref": f"refs/heads/{branch}", "sha": base_sha})
+    head = base_sha
     for path, text in files.items():
         quoted = urllib.parse.quote(path)
         try:
@@ -182,7 +199,23 @@ def open_pull_request(api: "GitHubAPI", slug: str, base: str, branch: str, files
                    "content": base64.b64encode(text.encode("utf-8")).decode()}
         if existing:
             payload["sha"] = existing
-        call(f"/contents/{quoted}", "PUT", payload)
+        reply = call(f"/contents/{quoted}", "PUT", payload) or {}
+        head = (reply.get("commit") or {}).get("sha") or head
+    return head
+
+
+def open_pr(api: "GitHubAPI", slug: str, base: str, branch: str, title: str, body: str) -> str:
+    """Opens the pull request for an existing branch (or returns the open one's URL)."""
+    def call(path, method="GET", payload=None):
+        return _request(f"{api.api}/repos/{slug}{path}", api.headers, method=method, body=payload)
+
+    owner = slug.split("/")[0]
+    try:
+        existing = call(f"/pulls?state=open&head={urllib.parse.quote(owner + ':' + branch, safe=':')}&base={urllib.parse.quote(base, safe='')}")
+    except IntegrationError:
+        existing = []
+    if existing:
+        return existing[0]["html_url"]
     return call("/pulls", "POST", {"title": title, "head": branch, "base": base, "body": body})["html_url"]
 
 

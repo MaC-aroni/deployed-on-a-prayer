@@ -29,6 +29,28 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: AI help is connected; region bug; undo retries (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **The first real Rehearse on prod failed at `db_migrate` with `NoRegionError`:** the runner set
+  `AWS_REGION` but boto3 reads `AWS_DEFAULT_REGION`. Both are set now; no script needs to know
+  the region. Terraform had already undone the table and roles, so AWS was left clean.
+- **Explain · Report · Auto-fix work for real** (`mac/aihelp.py`, on the configured LLM):
+  Explain puts a grounded diagnosis on the run; Report reads the step's code at the commit that
+  ran and writes `GET /runs/{id}/report.md`; Auto-fix pushes guardrail-checked changes to
+  `mac/autofix/<run>` and re-runs Build + Rehearse up to 3 times, opening the PR when it passes.
+- **Undo can be retried** on a `rollback_failed` run (only what wasn't undone). After a restart,
+  a cut-off Rehearse/Deploy gets its undo queued, not just a label. Fly waits up to 5 minutes
+  for the app to exit on deploy or stop.
+
+#### What you need to do
+- **Elathius (UI):** `diagnosis` events are now Markdown (render them); show a "Download report"
+  button when the run view's `ai_report` is true (`GET /runs/{id}/report.md`); show
+  `run.autofix` (branch, attempt, PR link) on auto-fix runs; enable **Undo** on `rollback_failed`
+  runs ("Retry undo"). `docs/api.md`.
+- Everyone: the AI mode's answers now take 10–60 s after a failure (LLM calls); the run is
+  already final by then, so nothing waits on them.
+
 ### 2026-11-08: Step outputs and probes: show the service answering from AWS (ob1-can-obi, with Claude Code)
 
 #### What changed
