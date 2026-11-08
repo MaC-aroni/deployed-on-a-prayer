@@ -17,10 +17,13 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .design import NIMDesignWriter
 from .executors import Executor, TerraformState
 from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
 from .knowledge import KnowledgeError, load_pages, publish
+
 from .runner import GateError, Runner
 from .spec import SpecError, load_spec
 from .store import Event, RunRecord, RunStatus, Store
@@ -135,6 +138,9 @@ def cmd_publish_knowledge(runner: Runner, directory: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Local secrets (backend/.env, gitignored). Real environment variables win, so Fly secrets
+    # and CI settings are never overridden by a stray file.
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
     parser = argparse.ArgumentParser(prog="mac", description="Migration as Code runner")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -168,6 +174,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--migration")
     p = sub.add_parser("publish-knowledge", help="publish a folder of knowledge-base pages to Confluence")
     p.add_argument("directory", type=Path)
+    for name, text in (("ingest", "build the knowledge graph from the knowledge base"),
+                       ("plan", "write a migration.yaml for a goal, from the knowledge graph"),
+                       ("guide", "write the cited migration guide into Confluence"),
+                       ("codegen", "write a codegen: llm step's code, as a PR")):
+        p = sub.add_parser(name, help=text)
+        if name == "plan":
+            p.add_argument("goal")
+        elif name != "ingest":
+            p.add_argument("spec", type=Path)
+        if name == "codegen":
+            p.add_argument("step")
+        p.add_argument("--knowledge", type=Path, default=Path("demo-data/confluence"))
+        if name in ("plan", "codegen"):
+            p.add_argument("--pr", action="store_true", help="open a pull request with the result")
 
     args = parser.parse_args(argv)
     if args.command == "validate":
@@ -176,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
     runner = make_runner(Path(os.environ.get("MAC_DATA_DIR", ".mac")).resolve())
     if args.command == "publish-knowledge":
         return cmd_publish_knowledge(runner, args.directory)
+    if args.command in ("ingest", "plan", "guide", "codegen"):
+        from .agents_cli import run_agent  # keeps the runner commands free of agent imports
+        return run_agent(args, runner)
     if args.command in ("build", "rehearse", "deploy", "play", "resume", "undo"):
         runner.store.listeners.append(_print_event)
     try:

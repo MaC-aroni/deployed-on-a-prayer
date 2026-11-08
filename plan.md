@@ -22,11 +22,35 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
 | Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
 | Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review (set up locally, waiting to be created) |
-| Not built yet | AWS account and state bucket (Zafeer), Atlassian site (Zafeer), UI, the agents (graph, planner, guide writer, code writer) |
+| Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
+| Not built yet | Real credentials (Zafeer), UI, API endpoints for the agents |
 
 ---
 
 ## Entries
+
+### 2026-11-07: The four agents (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Knowledge graph** (`mise run mac ingest`): facts from every knowledge page, each citing its
+  section. Code drops anything uncited or made up.
+- **Planner** (`mise run mac plan "<goal>" --pr`): writes `migration.yaml` and checks it in a
+  loop: `mac validate`, real citations, only documented repos and approvers. It opens a PR
+  into `mac-migrations`.
+- **Guide writer** (`mise run mac guide <spec>`): a Confluence page tree, one page per stage.
+  **Every paragraph must cite a source, enforced by code** (retried, then ungrounded text is
+  removed). Citations are links.
+- **Code writer** (`mise run mac codegen <spec> <step> --pr`): only for `codegen: llm` steps,
+  only inside the step's folder, never tests, CI or lock files. Delivered as a PR.
+- Spec: steps and approvals have optional `sources:` (knowledge-base section ids). The demo
+  spec cites its sources, and a test checks every citation exists.
+- 164 tests. The agents are tested with a scripted LLM that misbehaves on purpose.
+
+#### How to adapt
+- Read [`docs/agents.md`](docs/agents.md). The agents need `NVIDIA_API_KEY`; the guide also
+  needs Confluence.
+- **UI:** these are CLI commands for now. API endpoints for them are next; ask if you need
+  them sooner.
 
 ### 2026-11-07: Company knowledge base, codegen setting, migrations repo (ob1-can-obi, with Claude Code)
 

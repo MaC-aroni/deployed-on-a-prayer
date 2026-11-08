@@ -110,6 +110,7 @@ class Step(_Model):
     # Who writes this step's code from the migration guide: the engineers, or the LLM (always as
     # a pull request a person reviews). Engineers choose per step how far they trust the LLM.
     codegen: Literal["engineer", "llm"] = "engineer"
+    sources: tuple[str, ...] = ()  # knowledge-base sections this step follows, e.g. "platform-naming#resource-names"
     run: Action
     verify: Verify | None = None
     rollback: Rollback | Literal["none"] | None = None
@@ -139,6 +140,7 @@ class Approval(_Model):
     justification: str | None = None  # the ticket's body
     after: tuple[str, ...] = ()  # approvals that must be approved before this ticket is raised
     design_doc: bool = False  # link the design page; the ticket waits until the page exists
+    sources: tuple[str, ...] = ()  # knowledge-base sections that require this approval
 
 
 class Environment(_Model):

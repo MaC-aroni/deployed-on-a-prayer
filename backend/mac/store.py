@@ -110,6 +110,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS knowledge (
                     id TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
                     title TEXT NOT NULL, updated REAL NOT NULL);
+                -- The migration guide's pages, so re-writing updates them in place.
+                CREATE TABLE IF NOT EXISTS guide_pages (
+                    migration TEXT NOT NULL, key TEXT NOT NULL, page_id TEXT NOT NULL, url TEXT NOT NULL,
+                    PRIMARY KEY (migration, key));
                 CREATE TABLE IF NOT EXISTS designs (
                     migration TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
                     digest TEXT NOT NULL, updated REAL NOT NULL);
@@ -175,6 +179,17 @@ class Store:
                             "page_id = excluded.page_id, url = excluded.url, digest = excluded.digest, "
                             "updated = excluded.updated",
                             (migration, page.page_id, page.url, page.digest, time.time()))
+
+    def guide_pages(self, migration: str) -> dict[str, tuple[str, str]]:
+        with self.lock:
+            rows = self.db.execute("SELECT key, page_id, url FROM guide_pages WHERE migration = ?",
+                                   (migration,)).fetchall()
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    def save_guide_page(self, migration: str, key: str, page_id: str, url: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO guide_pages VALUES (?, ?, ?, ?) ON CONFLICT (migration, key) DO UPDATE "
+                            "SET page_id = excluded.page_id, url = excluded.url", (migration, key, page_id, url))
 
     def knowledge_pages(self) -> dict[str, tuple[str, str, str]]:
         """Our page id -> (Confluence page id, url, title)."""

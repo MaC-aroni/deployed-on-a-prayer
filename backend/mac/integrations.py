@@ -159,6 +159,42 @@ class GitHubAPI:
         return Check("reviewed", False, f"PR #{merged[0]['number']} was merged without an approval")
 
 
+def open_pull_request(api: "GitHubAPI", slug: str, base: str, branch: str, files: dict[str, str],
+                      title: str, body: str, message: str) -> str:
+    """Puts `files` (path -> text) on a new branch off `base` and opens a PR. Returns its URL.
+    How every agent's output reaches people: as a pull request someone reviews."""
+    def call(path, method="GET", payload=None):
+        return _request(f"{api.api}/repos/{slug}{path}", api.headers, method=method, body=payload)
+
+    base_sha = call(f"/git/ref/heads/{urllib.parse.quote(base, safe='')}")["object"]["sha"]
+    call("/git/refs", "POST", {"ref": f"refs/heads/{branch}", "sha": base_sha})
+    for path, text in files.items():
+        quoted = urllib.parse.quote(path)
+        try:
+            existing = call(f"/contents/{quoted}?ref={urllib.parse.quote(branch, safe='')}")["sha"]
+        except IntegrationError as e:
+            if e.status != 404:
+                raise
+            existing = None
+        payload = {"message": message, "branch": branch,
+                   "content": base64.b64encode(text.encode("utf-8")).decode()}
+        if existing:
+            payload["sha"] = existing
+        call(f"/contents/{quoted}", "PUT", payload)
+    return call("/pulls", "POST", {"title": title, "head": branch, "base": base, "body": body})["html_url"]
+
+
+def read_files(api: "GitHubAPI", slug: str, sha: str, prefix: str) -> dict[str, str]:
+    """Every text file under `prefix` at commit `sha`: what a code writer may see and change."""
+    tree = _request(f"{api.api}/repos/{slug}/git/trees/{sha}?recursive=1", api.headers)["tree"]
+    files = {}
+    for item in tree:
+        if item["type"] == "blob" and item["path"].startswith(prefix) and item.get("size", 0) <= 100_000:
+            blob = _request(f"{api.api}/repos/{slug}/git/blobs/{item['sha']}", api.headers)
+            files[item["path"]] = base64.b64decode(blob["content"]).decode("utf-8", "replace")
+    return files
+
+
 class GitCheckout:
     """Fetches exactly one commit with git. Works for any commit GitHub can serve."""
 
