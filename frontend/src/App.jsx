@@ -1,22 +1,111 @@
+import "./styles.css";
+import Shell, { EmptyState } from "./components/Shell.jsx";
+import Agents from "./pages/Agents.jsx";
+import Demo from "./pages/Demo.jsx";
+import Knowledge from "./pages/Knowledge.jsx";
+import Migrate from "./pages/Migrate.jsx";
+import Migration from "./pages/Migration.jsx";
+import Migrations from "./pages/Migrations.jsx";
+import Planning from "./pages/Planning.jsx";
+import Runs from "./pages/Runs.jsx";
 import Excuses from "./Excuses.jsx";
 import Home from "./Home.jsx";
-import Console from "./mac/Console.jsx";
+import { RouterProvider, matchPath, usePath } from "./router.jsx";
 
-// The MaC console is the app. The original placeholder pages stay at their own paths.
-const PAGES = { "/hello": Home, "/excuses": Excuses };
+// The MaC console is the app. The starter's placeholder pages stay at /hello and /excuses.
+// ob1-can-obi's first console (src/mac/Console.jsx) is superseded by these pages and is not
+// routed; see plan.md.
+
+const ORG = { label: "MaC-aroni", to: "/" };
+
+function Routes() {
+  const path = usePath();
+  let m;
+
+  if (path === "/" || path === "/migrations") {
+    return (
+      <Shell crumbs={[ORG, { label: "Pipelines" }]}>
+        <Migrations />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/migrations/:name", path))) {
+    const initialRun = new URLSearchParams(window.location.search).get("run");
+    return (
+      <Shell crumbs={[ORG, { label: m.name }]}>
+        <Migration key={`m:${m.name}`} source={{ kind: "migration", id: m.name }} initialRun={initialRun} />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/plans/:runId", path))) {
+    const initialRun = new URLSearchParams(window.location.search).get("run");
+    return (
+      <Shell crumbs={[ORG, { label: `plan ${m.runId}` }]}>
+        <Migration key={`p:${m.runId}`} source={{ kind: "plan", id: m.runId }} initialRun={initialRun} />
+      </Shell>
+    );
+  }
+  if (path === "/migrate") {
+    return (
+      <Shell crumbs={[ORG, { label: "Migration" }]}>
+        <Migrate />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/agents/:runId", path))) {
+    return (
+      <Shell crumbs={[ORG, { label: m.runId === "demo" ? "Agents · demo" : `agents ${m.runId}` }]}>
+        <Agents key={m.runId} runId={m.runId} />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/knowledge/:pageId", path))) {
+    return (
+      <Shell crumbs={[ORG, { label: "Knowledge", to: "/migrate" }, { label: m.pageId }]}>
+        <Knowledge key={m.pageId} pageId={m.pageId} />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/migrate/:runId", path))) {
+    return (
+      <Shell crumbs={[ORG, { label: `planning ${m.runId}` }]}>
+        <Planning key={m.runId} runId={m.runId} />
+      </Shell>
+    );
+  }
+  if (path === "/runs") {
+    return (
+      <Shell crumbs={[ORG, { label: "Runs" }]}>
+        <Runs />
+      </Shell>
+    );
+  }
+  if (path === "/demo") {
+    return (
+      <Shell crumbs={[ORG, { label: "Pitch demo" }]}>
+        <Demo />
+      </Shell>
+    );
+  }
+  if (path === "/hello" || path === "/excuses") {
+    const Page = path === "/hello" ? Home : Excuses;
+    return (
+      <Shell crumbs={[ORG, { label: path === "/hello" ? "Hello" : "Excuses" }]}>
+        <Page />
+      </Shell>
+    );
+  }
+  return (
+    <Shell crumbs={[ORG, { label: "Not found" }]}>
+      <EmptyState title="Not found" body="Try Build → Migration, or Pipelines." />
+    </Shell>
+  );
+}
 
 export default function App() {
-  const Page = PAGES[window.location.pathname];
-  if (!Page) return <Console />;
-
   return (
-    <main style={{ fontFamily: "system-ui", padding: 32, maxWidth: 640, margin: "0 auto" }}>
-      <nav style={{ display: "flex", gap: 16, marginBottom: 24 }}>
-        <a href="/">MaC console</a>
-        <a href="/hello">Hello</a>
-        <a href="/excuses">Excuse generator</a>
-      </nav>
-      <Page />
-    </main>
+    <RouterProvider>
+      <Routes />
+    </RouterProvider>
   );
 }

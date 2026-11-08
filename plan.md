@@ -23,11 +23,91 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
 | Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
-| Not built yet | Real credentials (Zafeer), UI, API endpoints for the agents |
+| UI | `frontend/`: the console at `/` (Build → Migrate · Pipelines, live DAG, step logs, approvals, Build report, runs), mock pitch page at `/demo`; rules in [`UI.md`](UI.md) |
+| Planning API | `/api/mac/services`, `/plan`, `/ingest`, `/plans/...` in `backend/app/planning_api.py`, contract in [`docs/planning-api.md`](docs/planning-api.md) |
+| Not built yet | API endpoints for the guide and code writers; the Diagnostician behind Explain · Report · Auto-fix |
 
 ---
 
 ## Entries
+
+### 2026-11-08: Migration flow with agents: Learn, detect-or-plan, breakpoints, investigate (Elathius, with Claude Code)
+
+#### What changed
+- **Sidebar:** Build → **Migration** and **Pipelines (count)** are the two big items; pipelines
+  only exist once a migration started, and the empty Pipelines page says so.
+- **Migration page:** every service and every repo has two doors, **Confluence** (the page, or
+  the console's copy at `/knowledge/<page>` until it's published) and **GitHub**. One primary per
+  service: **Launch agent** (learn if needed → detect an existing `migration.yaml` or write one →
+  render the pipeline → start Build) or **Open pipeline** when one exists. Undocumented repos get
+  **Learn**: an agent writes the knowledge page from the repository, merges the graph and raises
+  a Jira review ticket; the service then shows "under review · MAC-n".
+- **Agent view** at `/agents/<run>`: the hierarchy (Director → Readers / References / … →
+  Compiler) with each agent's observation → reasoning → action → outcome and model. Every
+  running agent shows the working-agent icon (`frontend/src/assets/greenloading.gif`); clicking
+  it opens this page. `/agents/demo` replays a mock Learn for the pitch.
+- **Pipeline:** `when: manual` steps are drawn as breakpoints; the primary button reads
+  **Continue · <step>** while the run waits there. On a failed run **Investigate** launches the
+  Diagnostician (Logs · Code · Fixer → Compiler raises the approval ticket); its card shows the
+  root cause and the proposed fix with **Approve fix**, which opens the pull request. Nothing
+  merges by itself.
+- **Planning API** (`backend/app/planning_api.py`, own module, nothing in `mac_api.py` touched):
+  `POST /learn`, `GET /knowledge/{page}`, `POST /runs/{id}/investigate`,
+  `POST /runs/{id}/approve-fix`; `POST /plan` takes `reuse` and `build`; `GET /services` adds
+  `page_url`, `generated`, `review`, `migration`. Every run emits `agent` events (JSON message:
+  agent, parent, role, model, phase, status, text). Contract: `docs/planning-api.md`.
+- Fixed: status dots were grey everywhere (the `.status` default outranked the tone classes).
+- [`docs/ui-data-needs.md`](docs/ui-data-needs.md) rewritten: screen by screen, what renders
+  from what and when, what's still a gap (auto-diagnosis wiring, `needs`, failure tail, agent
+  events from the runner's own agents, Confluence URLs on Fly), plus the Endpoints card to come.
+
+#### How to adapt
+- Generated knowledge pages live in `<MAC_DATA_DIR>/knowledge/` (`/data` on Fly), proposed fixes
+  in `<MAC_DATA_DIR>/fixes/`; both survive deploys with the volume.
+- Review and fix-approval tickets go through the runner's Jira integration (`ATLASSIAN_*`); with
+  it unset the runs say "not raised" and finish anyway.
+- The Confluence doors open Confluence only where `publish-knowledge` ran (it records the URLs
+  in the store); otherwise they open the console's page view.
+- Frontend: `follow()` now also streams `agent`, `approval` and `failure` event kinds.
+
+### 2026-11-08: The console at `/`, the Migrate flow, planning endpoints (Elathius, with Claude Code)
+
+#### What changed
+- **`/` is the full console** (`frontend/src/pages/`, `components/`), replacing the consoles from
+  #12 and #16, which stay in `frontend/src/mac/` unrouted as a reference until the team agrees to
+  remove them. Their step info panel is adopted here as the pipeline's step inspector. It keeps the rules in `UI.md`: every call goes through
+  `frontend/src/mac/api.js`, `409` reasons are shown as they are, sign-in is the server's cookie
+  (`GET /api/auth/me` drives the Sign-in button), the server decides.
+  - Sidebar **Build → Migrate · Pipelines**, then Runs and a mock Pitch demo (`/demo`).
+  - Pipeline lines are one chain in the runner's execution order (a failure skips the rest),
+    plus explicit `needs`. Clicking a step opens a panel with live logs, repo and locked commit,
+    undo, ▶ for manual steps. Tabs: Approvals, Build report, Activity, History.
+- **Migrate flow:** `/migrate` lists the services in the knowledge graph with their repos;
+  "Migrate to AWS" runs the Planner and shows each attempt live (`/migrate/<run>`), then
+  "Open pipeline" lands on the generated plan (`/plans/<run>`) where Build / Rehearse / Deploy
+  work as for a reviewed spec.
+- **Planning endpoints** in a module of their own, `backend/app/planning_api.py`, mounted by
+  one line in `backend/app/main.py`: `GET /api/mac/services`, `POST /api/mac/plan`,
+  `POST /api/mac/ingest`, `GET /api/mac/plans`, `GET /api/mac/plans/{run}`,
+  `POST /api/mac/plans/{run}/build|rehearse|deploy`. Plans and ingests are ordinary runs
+  (modes `plan`, `ingest`), so `/runs/{id}`, `/events` and `/stream` follow them unchanged.
+  Contract: [`docs/planning-api.md`](docs/planning-api.md). It's separate from `mac_api.py`
+  (not what `UI.md` says) so the UI team's additions never touch the runner API's module;
+  it imports `mac_api`, `auth` and `mac.agents_cli` and changes none of them.
+- `backend/.env.example` says, for every variable, what it is and where to get it.
+- [`docs/ui-data-needs.md`](docs/ui-data-needs.md): what the console wants from the API that it
+  doesn't get yet (real `needs`, failure details, timings, agent reasoning events, approval
+  events). Requests, not changes; for the backend team to pick up.
+- Look: dark, calm dashboard with one purple accent; tokens in `frontend/src/styles.css` only.
+  One primary action per page (the next step), everything else in the ··· menu.
+- Frontend dependency: `lucide-react` (icons).
+
+#### How to adapt
+- Run the knowledge-graph ingest once before a demo (`/migrate` → Ingest, or `mise run mac
+  ingest`); it's 14 LLM calls. The API and CLI share `.mac/` at the repo root.
+- **Nemotron track:** the live site's `MAC_LLM_BASE_URL` / `MAC_LLM_MODEL` currently point at
+  Grok. Point them at NVIDIA NIM (and set `NVIDIA_API_KEY`) before the pitch.
+- New step states or run statuses need a colour in `frontend/src/status.js`.
 
 ### 2026-11-08: Cancel, and tickets that survive plan changes (ob1-can-obi, with Claude Code)
 
