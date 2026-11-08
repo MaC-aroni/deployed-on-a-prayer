@@ -73,7 +73,8 @@ def setup(tmp_path, monkeypatch):
 def test_entrypoint_runs_with_mac_environment(setup):
     executor, workspace, ctx, lines, _ = setup
     executor.execute(ctx("db_migrate"), "run")
-    assert "copying for rehearsal 000000000000" in lines
+    account = parse_spec(DEMO_SPEC.read_text(encoding="utf-8")).target.account
+    assert f"copying for rehearsal {account}" in lines
     assert workspace.checkouts == [(DB, "b" * 40)]
 
 
