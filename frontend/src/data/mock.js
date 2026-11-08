@@ -295,7 +295,7 @@ export const MIGRATIONS = [
 function hierarchy(director, workers, compiler, opts = {}) {
   const t0 = Math.floor(Date.now() / 1000) - 120;
   let seq = 0;
-  const ev = (step, data) => ({ run_id: "demo", seq: ++seq, ts: t0 + seq * 3, step, kind: "agent", message: JSON.stringify(data) });
+  const ev = (step, data) => ({ run_id: "a7c21e4d9f03", seq: ++seq, ts: t0 + seq * 3, step, kind: "agent", message: JSON.stringify(data) });
   const out = [
     ev(opts.step ?? "agent", { agent: "director", role: "Director", model: SUPER, phase: "observation", status: "running", text: director.observation }),
     ev(opts.step ?? "agent", { agent: "director", phase: "reasoning", text: director.reasoning }),

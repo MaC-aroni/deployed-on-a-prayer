@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Activity, ChevronRight, Github, Hammer, MessageSquare, PanelLeft, Presentation, Radio, Search, Workflow, Wand2 } from "lucide-react";
+import { Activity, ChevronRight, Github, Hammer, MessageSquare, Moon, PanelLeft, Presentation, Radio, Search, Sun, Workflow, Wand2 } from "lucide-react";
 import logo from "../assets/maclogo.png";
 import { SIGN_IN_URL, api, signOut } from "../mac/api.js";
 import { Link, usePath } from "../router.jsx";
@@ -22,12 +22,34 @@ const NAV = [
     items: [
       { to: "/services", label: "Services", Icon: Radio, hint: "live endpoints", match: (p) => p.startsWith("/services") },
       { to: "/runs", label: "Runs", Icon: Activity, match: (p) => p.startsWith("/runs") || p.startsWith("/agents") },
-      { to: "/demo", label: "Pitch demo", Icon: Presentation, match: (p) => p.startsWith("/demo") },
+      { to: "/demo", label: "Demo", Icon: Presentation, match: (p) => p.startsWith("/demo") },
     ],
   },
 ];
 
 const COLLAPSE_KEY = "mac.sidebar.collapsed";
+const THEME_KEY = "mac.theme";
+
+// Light or dark: the viewer's choice, else the system preference. Applied as data-theme on <html>
+// so the token swap in styles.css takes effect everywhere, the gate included.
+export function readTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "light" || saved === "dark") return saved;
+  } catch {
+    /* no storage */
+  }
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+export function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* per-viewer convenience only */
+  }
+}
 const SEEN_KEY = "mac.pipelines.seen";
 export const SEEN_EVENT = "mac:pipelines-seen";
 
@@ -97,6 +119,15 @@ function Account({ me }) {
 export default function Shell({ crumbs = [], actions, children }) {
   const path = usePath();
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [theme, setTheme] = useState(readTheme);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    applyTheme(next);
+    setTheme(next);
+  };
   const [me, setMe] = useState(null);
   const [signinProblem, setSigninProblem] = useState(() => {
     const p = new URLSearchParams(window.location.search).get("signin");
@@ -225,6 +256,10 @@ export default function Shell({ crumbs = [], actions, children }) {
           ))}
 
           <div className="sidebar-foot">
+            <button className="theme-toggle" onClick={toggleTheme} title={theme === "light" ? "Switch to the dark theme" : "Switch to the light theme"}>
+              {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+              <span>{theme === "light" ? "Dark theme" : "Light theme"}</span>
+            </button>
             <div className="env">
               <span className="env-dot" />
               <span>Prayerwell Health · AWS</span>

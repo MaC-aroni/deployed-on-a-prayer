@@ -56,7 +56,7 @@ function Routes() {
   }
   if ((m = matchPath("/agents/:runId", path))) {
     return (
-      <Shell crumbs={[ORG, { label: m.runId === "demo" ? "Agents · demo" : `agents ${m.runId}` }]}>
+      <Shell crumbs={[ORG, { label: m.runId === "demo" ? "Agents" : `agents ${m.runId}` }]}>
         <Agents key={m.runId} runId={m.runId} />
       </Shell>
     );
@@ -98,7 +98,7 @@ function Routes() {
   }
   if (path === "/demo") {
     return (
-      <Shell crumbs={[ORG, { label: "Pitch demo" }]}>
+      <Shell crumbs={[ORG, { label: "Demo" }]}>
         <Demo />
       </Shell>
     );

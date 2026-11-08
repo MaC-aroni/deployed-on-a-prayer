@@ -13,7 +13,7 @@ import { cx } from "../lib.js";
 // The agent view: every agent a run launched, as a hierarchy. A Director directs workers (one
 // reads and compresses pages, one checks references, …) whose results feed a Compiler that
 // writes the page or the plan and raises the Jira ticket. Everything comes from the run's
-// `agent` events (docs/planning-api.md); /agents/demo replays a mock Learn for the pitch.
+// `agent` events (docs/planning-api.md); /agents/demo replays a recorded run.
 
 const COLLAPSE_AT = 6;
 
@@ -70,12 +70,12 @@ function titleOf(run) {
 function backLink(run) {
   if (!run) return { to: "/migrate", label: "Migration" };
   if (run.mode === "plan") return { to: `/migrate/${run.id}`, label: "planning run" };
-  if (run.id === "demo") return { to: "/demo", label: "pitch demo" };
+  if (run.id === "demo") return { to: "/demo", label: "the run" };
   if (run.mode === "diagnose") return { to: `/migrations/${encodeURIComponent(run.migration)}?run=${run.based_on ?? ""}`, label: "pipeline" };
   return { to: "/migrate", label: "Migration" };
 }
 
-// Which mock hierarchy to replay: /agents/demo?for=<step id of the pitch pipeline>.
+// Which recorded hierarchy to replay: /agents/demo?for=<step id of the demo pipeline>.
 function demoSet() {
   const key = new URLSearchParams(window.location.search).get("for");
   return DEMO_AGENT_SETS[key] ?? DEMO_AGENT_SETS.learn_kb;
@@ -198,15 +198,6 @@ export default function Agents({ runId }) {
       {toast && (
         <div className={cx("toast", `tone-${toast.tone}`)} role="status" onClick={() => setToast(null)}>
           {toast.text}
-        </div>
-      )}
-      {demo && (
-        <div className="demo-banner">
-          <Sparkles size={14} className="nemotron" />
-          Pitch rehearsal: a mock agent run. Live agent runs open here from any working-agent icon.
-          <button className="link-btn" onClick={replay.restart} style={{ marginLeft: "auto" }}>
-            Replay
-          </button>
         </div>
       )}
 

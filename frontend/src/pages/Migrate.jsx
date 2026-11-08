@@ -39,42 +39,34 @@ function Step({ label, status, text }) {
 }
 
 // The two doors: the Confluence page (or the console's copy of it) and the GitHub repository.
-// Where the Confluence door goes: the recorded page URL; else a Confluence search for the page's
-// title when the site is known; else the console's copy of the page.
-function confluenceHref(pageUrl, pageTitle, site) {
-  if (pageUrl) return pageUrl;
-  if (site && pageTitle) return `${site}/wiki/search?text=${encodeURIComponent(pageTitle)}`;
-  return null;
-}
-
-function Doors({ pageUrl, pageId, pageTitle, site, repoUrl, learn, create, review, busy = false, size = "sm", stop = true }) {
+// One Confluence door per page. A page MaC wrote and nobody has signed off yet opens in the
+// console, where the review bar and the Confluence link are; a reviewed or hand-written page
+// opens Confluence itself (published on the spot when it only exists here). No page at all:
+// Learn writes one, into Confluence.
+function Doors({ pageUrl, pageId, review, repoUrl, learn, publish, busy = false, size = "sm", stop = true }) {
   const onClick = stop ? (e) => e.stopPropagation() : undefined;
-  const href = confluenceHref(pageUrl, pageTitle, site);
+  const openConfluence = (e) => {
+    onClick?.(e);
+    if (pageUrl) return window.open(pageUrl, "_blank", "noopener");
+    if (publish) return publish();
+    navigate(`/knowledge/${pageId}`);
+  };
   return (
     <span className={cx("doors", size)}>
-      {review && pageId && (
-        <Link className="btn door door-review" to={`/knowledge/${pageId}`} onClick={onClick} title="MaC wrote this page; a person signs it off">
-          <ClipboardCheck size={14} /> Review page
+      {pageId && review ? (
+        <Link className="btn door door-review" to={`/knowledge/${pageId}`} onClick={onClick} title="MaC wrote this page; a person signs it off here, then it opens in Confluence">
+          <ClipboardCheck size={14} /> Confluence · review
         </Link>
-      )}
-      {href ? (
-        <a className="btn door" href={href} target="_blank" rel="noreferrer" onClick={onClick} title={pageUrl ? "Open the Confluence page" : "Search Confluence for this page"}>
-          <BookOpen size={14} /> Confluence <ExternalLink size={11} />
-        </a>
-      ) : pageId && create ? (
-        <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), create())} disabled={busy} title="Create this page in Confluence and link it here from now on">
-          <BookOpen size={14} /> {busy ? "Creating…" : "Create in Confluence"}
+      ) : pageId ? (
+        <button type="button" className="btn door" onClick={openConfluence} disabled={busy} title={pageUrl ? "Open the Confluence page" : publish ? "Create this page in Confluence and open it" : "Open the page"}>
+          <BookOpen size={14} /> {busy ? "Creating…" : "Confluence"} {pageUrl && <ExternalLink size={11} />}
         </button>
-      ) : pageId && !review ? (
-        <Link className="btn door" to={`/knowledge/${pageId}`} onClick={onClick} title="Confluence isn't configured here: open the console's copy of the page">
-          <BookOpen size={14} /> Page
-        </Link>
-      ) : pageId ? null : learn ? (
-        <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), learn())} disabled={busy} title="Launch an agent to write this repository's knowledge page and raise a review ticket">
+      ) : learn ? (
+        <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), learn())} disabled={busy} title="Launch an agent to write this repository's Confluence page and raise a review ticket">
           <Sparkles size={14} /> {busy ? "Launching…" : "Learn"}
         </button>
       ) : (
-        <span className="btn door" aria-disabled>
+        <span className="btn door" aria-disabled title="No page yet; Learn needs the LLM configured">
           <BookOpen size={14} /> no page
         </span>
       )}
@@ -94,7 +86,6 @@ function Doors({ pageUrl, pageId, pageTitle, site, repoUrl, learn, create, revie
 export default function Migrate() {
   const { locked, health } = useAuth();
   const noLlm = health ? !health.llm : false;
-  const site = health?.confluence_site ?? null;
   const llmHint = noLlm ? "No LLM is configured here: set MAC_LLM_API_KEY (or NVIDIA_API_KEY) in backend/.env and restart" : undefined;
   const [data, setData] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -162,6 +153,7 @@ export default function Migrate() {
     try {
       const res = await api.publishKnowledge(pageId);
       setToast({ tone: "green", text: `Confluence page created: ${res.url}` });
+      window.open(res.url, "_blank", "noopener");
       await load();
     } catch (err) {
       fail(err);
@@ -258,7 +250,7 @@ export default function Migrate() {
                 <Step label="Plan" status={planStatus} text={svc.migration ? "yaml found" : latestPlan ? `${latestPlan.iterations ?? "?"} attempt${latestPlan.iterations === 1 ? "" : "s"}` : "detect or write"} />
                 <Step label="Build" status={buildMeta ? buildMeta.tone : "grey"} text={buildMeta ? buildMeta.label.toLowerCase() : "runner"} />
               </div>
-              <Doors pageUrl={svc.page_url} pageId={svc.page} pageTitle={svc.page_title} site={site} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} create={health?.confluence && svc.page ? () => createPage(svc.page) : null} review={review === "pending" || review === "rejected"} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
+              <Doors pageUrl={svc.page_url} pageId={svc.page} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} publish={health?.confluence && svc.page ? () => createPage(svc.page) : null} review={review === "pending" || review === "rejected"} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
               <footer className="card-foot">
                 <button className={cx("btn btn-primary", { hint: locked })} onClick={primary.onClick} disabled={busy === svc.name || busy === "ingest" || (primary.needsLlm && noLlm)} title={primary.needsLlm && llmHint ? llmHint : primary.title}>
                   {primary.icon} {busy === svc.name ? "Launching…" : primary.label}
@@ -332,7 +324,7 @@ export default function Migrate() {
                   {r.custom && <Pill tone="grey">added by hand</Pill>}
                 </div>
                 <div className="cell-actions">
-                  <Doors pageUrl={r.page_url} pageId={r.page} pageTitle={r.page_title} site={site} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} create={health?.confluence && r.page ? () => createPage(r.page) : null} review={svc?.review?.status === "pending" || svc?.review?.status === "rejected"} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
+                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} publish={health?.confluence && r.page ? () => createPage(r.page) : null} review={svc?.review?.status === "pending" || svc?.review?.status === "rejected"} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
                   {r.licence && !r.licence.accepted && r.licence.risk !== "ok" && (
                     <button className={cx("btn door door-confirm", { hint: locked })} onClick={() => acceptRepo(r)} title={r.licence.risk === "confirm" ? "No licence file was found. Confirm the team may use this repository." : "Proceed despite the licence finding; the ticket stays for the record."}>
                       <Check size={14} /> {r.licence.risk === "confirm" ? "Confirm use" : "Proceed anyway"}

@@ -8,8 +8,9 @@ import { RUN_STATUS, STATUS } from "../status.js";
 import { cx, fmtClock, fmtDuration } from "../lib.js";
 import { navigate } from "../router.jsx";
 
-// Pitch rehearsal page: the brief's frozen snapshot (smoke test failed → rollback → Diagnostician
-// mid-fix) on mock data, with Nemotron reasoning traces. The live console is under Migrations.
+// The demo run: a complete migration story (knowledge → plan → approvals → build → deploy →
+// smoke test fails → rollback → Diagnostician mid-fix) on recorded data, with a timeline to
+// move through it. The live console is under Build → Pipelines.
 
 function useReplay() {
   const keys = useMemo(() => {
@@ -108,11 +109,6 @@ export default function Demo() {
 
   return (
     <>
-      <div className="demo-banner">
-        <Sparkles size={14} className="nemotron" />
-        Pitch rehearsal on mock data. The live console is under <strong>Build → Pipelines</strong>.
-      </div>
-
       <div className="run-head">
         <div className="run-head-main">
           <Pill tone={rs.tone} className="pill-lg">
@@ -165,9 +161,9 @@ export default function Demo() {
       {tab === "pipeline" && (
         <>
           <div className="toolbar pipeline-toolbar">
-            <span className="label">Replay</span>
+            <span className="label">Timeline</span>
             <div className="replay">
-              <button className="icon-btn" onClick={replay.toggle} aria-label={replay.playing ? "Pause" : "Replay run"}>
+              <button className="icon-btn" onClick={replay.toggle} aria-label={replay.playing ? "Pause" : "Play the run"}>
                 {replay.playing ? <Pause size={14} /> : <Play size={14} />}
               </button>
               <input type="range" min={0} max={1} step={0.001} value={replay.p} onChange={(e) => replay.setP(Number(e.target.value))} aria-label="Run timeline" />
