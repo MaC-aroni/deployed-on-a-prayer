@@ -119,14 +119,16 @@ def test_tech_risk_ticket_links_the_design_page(env, spec_path):
     assert {"mac", TR} <= set(tr.labels)
 
 
-def test_tickets_are_raised_once_per_spec_version(env, spec_path):
+def test_tickets_are_raised_once_and_kept_across_plan_versions(env, spec_path):
     env.runner.build(spec_path)
     env.runner.build(spec_path)
     assert env.approvals.raised_ids() == [TR, MGR, OWNER]
     data = demo_data()
-    data["approvals"][0]["justification"] = "A different plan needs fresh sign-off."
-    env.runner.build(write_spec(spec_path, data))
-    assert env.approvals.raised_ids() == [TR, MGR, OWNER] * 2
+    data["approvals"][0]["justification"] = "A different plan, same approvals."
+    run = env.runner.build(write_spec(spec_path, data))
+    assert env.approvals.raised_ids() == [TR, MGR, OWNER]  # kept, not re-raised
+    assert run.report["approvals"][TR]["ticket"] == "MAC-1"
+    assert sorted(c[0] for c in env.approvals.comments) == ["MAC-1", "MAC-2", "MAC-3"]
 
 
 def test_jira_down_during_build_is_reported_not_fatal(env, spec_path):
@@ -481,3 +483,49 @@ def test_recover_queues_the_undo_of_a_run_cut_off_mid_work(env, spec_path):
     assert done.status == RunStatus.UNDONE
     assert [c for c in env.executor.calls if c[1] == "rollback"] == [
         ("provision_iam", "rollback", "rehearsal"), ("provision_storage", "rollback", "rehearsal")]
+
+
+def test_a_changed_plan_keeps_its_tickets_and_tells_the_approver(env, spec_path, tmp_path):
+    env.approvals.default = "pending"
+    env.runner.build(spec_path)
+    first = env.approvals.raised_ids()
+    assert first == ["APPR-TR-001", "APPR-MGR-001"]
+    changed = tmp_path / "migration.yaml"
+    changed.write_text(spec_path.read_text(encoding="utf-8").replace("owner_team: claims-platform", "owner_team: claims-core"),
+                       encoding="utf-8")
+    env.runner.build(changed)
+    assert env.approvals.raised_ids() == first  # nothing re-raised
+    assert [c[0] for c in env.approvals.comments] == ["MAC-1", "MAC-2"]
+    assert "plan was updated" in env.approvals.comments[0][1]
+
+
+def test_cancel_a_waiting_run_undoes_everything(env, spec_path):
+    env.runner.build(spec_path)
+    run = env.runner.rehearse(spec_path)
+    assert run.status == RunStatus.WAITING
+    run = env.runner.request_cancel(run.id)
+    run = env.runner.execute(run.id)
+    assert run.status == RunStatus.CANCELLED and run.reason == "cancelled"
+    assert run.steps["provision_iam"] == "rolled_back" and run.steps["db_migrate"] == "skipped"
+    assert [c for c in env.executor.calls if c[1] == "rollback"] == [
+        ("provision_iam", "rollback", "rehearsal"), ("provision_storage", "rollback", "rehearsal")]
+
+
+def test_cancel_mid_run_stops_at_the_next_step_and_undoes(env, spec_path):
+    env.runner.build(spec_path)
+    # The cancel arrives while provision_storage is running: it finishes, provision_iam never starts.
+    env.executor.during[("provision_storage", "run")] = lambda: env.store.request_cancel(env.store.runs()[0].id)
+    run = env.runner.rehearse(spec_path)
+    assert run.status == RunStatus.CANCELLED
+    assert run.steps["provision_storage"] == "rolled_back" and run.steps["provision_iam"] == "skipped"
+    assert ("provision_iam", "run", "rehearsal") not in env.executor.calls
+    assert env.diagnostician.calls == []  # a cancel is not a failure to diagnose
+
+
+def test_cancel_a_build_just_stops(env, spec_path):
+    env.executor.during[("provision_storage", "plan")] = lambda: env.store.request_cancel(env.store.runs()[0].id)
+    run = env.runner.build(spec_path)
+    assert run.status == RunStatus.CANCELLED
+    assert [c for c in env.executor.calls if c[1] == "rollback"] == []
+    with pytest.raises(GateError, match="nothing to cancel"):
+        env.runner.request_cancel(run.id)

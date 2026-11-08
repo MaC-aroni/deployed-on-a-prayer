@@ -33,6 +33,7 @@ class RunStatus(StrEnum):
     FAILED = "failed"  # a step failed and everything was undone cleanly
     ROLLBACK_FAILED = "rollback_failed"  # undo didn't finish; a person has to clean up
     UNDONE = "undone"  # someone pressed undo
+    CANCELLED = "cancelled"  # someone pressed cancel: stopped, and everything it did was undone
 
     @property
     def active(self) -> bool:
@@ -143,6 +144,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS reports (
                     run_id TEXT PRIMARY KEY, step TEXT NOT NULL, mode TEXT NOT NULL,
                     markdown TEXT NOT NULL, created REAL NOT NULL);
+                -- Cancel requests, in their own table so a worker's save() can't overwrite one.
+                CREATE TABLE IF NOT EXISTS cancels (run_id TEXT PRIMARY KEY, ts REAL NOT NULL);
                 -- Each approval's last known Jira state, so the UI can show it without a Build
                 -- and the poller can tell what changed.
                 CREATE TABLE IF NOT EXISTS approval_status (
@@ -192,6 +195,25 @@ class Store:
         with self.lock, self.db:
             self.db.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?)",
                             (migration, digest, ticket.approval, ticket.key, ticket.url, time.time()))
+
+    def latest_ticket(self, migration: str, approval: str) -> Ticket | None:
+        """The most recent ticket for this approval, whatever plan version raised it."""
+        with self.lock:
+            row = self.db.execute("SELECT key, url FROM tickets WHERE migration = ? AND approval = ? "
+                                  "ORDER BY created DESC LIMIT 1", (migration, approval)).fetchone()
+        return Ticket(approval=approval, key=row[0], url=row[1]) if row else None
+
+    def request_cancel(self, run_id: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT OR REPLACE INTO cancels VALUES (?, ?)", (run_id, time.time()))
+
+    def cancel_requested(self, run_id: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM cancels WHERE run_id = ?", (run_id,)).fetchone() is not None
+
+    def clear_cancel(self, run_id: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("DELETE FROM cancels WHERE run_id = ?", (run_id,))
 
     def tickets(self, migration: str, digest: str) -> dict[str, "Ticket"]:
         with self.lock:

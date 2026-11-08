@@ -386,3 +386,16 @@ def test_report_download(api):
     resp = client.get(f"/api/mac/runs/{run['id']}/report.md")
     assert resp.status_code == 200 and resp.text.startswith("# Root cause") and "markdown" in resp.headers["content-type"]
     assert client.get(f"/api/mac/runs/{run['id']}").json()["ai_report"] is True
+
+
+def test_cancel_endpoint(api):
+    client, env, _ = api
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    run = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()
+    assert latest_run(client, run["id"])["status"] == "waiting"
+    resp = client.post(f"/api/mac/runs/{run['id']}/cancel")
+    assert resp.status_code == 202
+    after = latest_run(client, run["id"])
+    assert after["status"] == "cancelled" and after["steps"]["provision_iam"] == "rolled_back"
+    resp = client.post(f"/api/mac/runs/{run['id']}/cancel")
+    assert resp.status_code == 409 and "nothing to cancel" in resp.json()["detail"]

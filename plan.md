@@ -109,6 +109,22 @@ differently**. Keep it short; link to the docs instead of repeating them.
   Grok. Point them at NVIDIA NIM (and set `NVIDIA_API_KEY`) before the pitch.
 - New step states or run statuses need a colour in `frontend/src/status.js`.
 
+### 2026-11-08: Cancel, and tickets that survive plan changes (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Tickets are raised once.** Editing `migration.yaml` no longer raises fresh Jira tickets: the
+  existing ticket keeps its status and gets a comment that the plan was updated (the design
+  page is rewritten in place). Re-running Build never duplicates anything.
+- **Cancel:** `POST /api/mac/runs/{id}/cancel` stops any running or waiting run and undoes
+  everything it did; a running script is killed, a running Terraform command finishes first.
+  New run status **`cancelled`** (terminal, everything undone). A cancelled Build just stops.
+- Reminder: only **Deploy** waits for approvals. Rehearse never does.
+
+#### What you need to do
+- **Elathius (UI):** add a **Cancel** button on active runs (`running`, `waiting`), with a
+  confirmation ("stop and undo everything this run did"), and colour the new `cancelled`
+  status like `undone` (purple). `docs/api.md`.
+
 ### 2026-11-08: AI help is connected; region bug; undo retries (ob1-can-obi, with Claude Code)
 
 #### What changed
