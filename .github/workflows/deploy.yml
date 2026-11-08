@@ -1,7 +1,9 @@
 name: Deploy
 
-# Manual only: a maintainer clicks "Run workflow" on main (Actions → Deploy).
+# Every merge to main deploys. A maintainer can also click "Run workflow" on main (Actions → Deploy).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # One deploy at a time; a second click waits for the first to finish.
@@ -11,27 +13,18 @@ concurrency:
 
 jobs:
   deploy:
-    # Maintainers only (listed in AGENTS.md). Anyone else gets a skipped run, not a deploy.
+    # A merge to main (it passed CI as a PR), or a maintainer's manual run on main.
     if: >-
-      contains(fromJSON('["ob1-can-obi", "Elathius", "Zafeer-R"]'), github.actor)
-      && github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || contains(fromJSON('["ob1-can-obi", "Elathius", "Zafeer-R"]'), github.actor))
     runs-on: ubuntu-latest
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      # A deploy restarts the one machine. Wait (up to 30 min) for anything in flight — a Rehearse,
-      # a Deploy, an agent job — so it finishes instead of being cut off and undone.
-      - name: Wait for running work to finish
-        run: |
-          for i in $(seq 1 120); do
-            busy=$(curl -fsS --retry 3 https://deployed-on-a-prayer.fly.dev/api/mac/activity | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(r['mode'] + ':' + r['id'] + ':' + r['status'] for r in d['active']))" || echo "")
-            [ -z "$busy" ] && { echo "nothing running; deploying"; exit 0; }
-            echo "waiting for: $busy"
-            sleep 15
-          done
-          echo "::warning::still busy after 30 minutes; deploying anyway (the server undoes cut-off runs on restart)"
+      # No waiting: a deploy restarts the one machine at once. A Build, Rehearse or Deploy cut off
+      # by it is undone when the server comes back; an agent run (plan, learn) is marked failed.
 
       # App keys live in Fly's secret store (fly secrets / the Fly dashboard), not here.
       # flyctl comes from GitHub's release downloads, which 504 now and then (for an hour, once);

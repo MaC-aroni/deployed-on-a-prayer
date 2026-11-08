@@ -20,11 +20,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .aihelp import LLMDiagnostician, autofix_cycle
-from .design import NIMDesignWriter
+from .design import LLMDesignWriter
 from .executors import Executor, TerraformState
 from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
 from .knowledge import KnowledgeError, load_pages, publish
-from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL, NIMChat
+from .llm import llm_from_env
 from .runner import GateError, Runner
 from .sources import sections_from_pages
 from .spec import SpecError, load_spec
@@ -77,18 +77,14 @@ def make_runner(data_dir: Path, submit=None) -> Runner:
                                   issue_type=os.environ.get("JIRA_ISSUE_TYPE", "Task"), assignees=assignees)
         if os.environ.get("CONFLUENCE_SPACE_KEY"):
             pages = ConfluencePages(site, email, api_token, os.environ["CONFLUENCE_SPACE_KEY"])
-    writer = None
-    llm_key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
-    if llm_key:
-        writer = NIMDesignWriter(llm_key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
-                                 os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
+    llm = llm_from_env()  # follows the console's Nemotron/Grok switch
+    writer = LLMDesignWriter(llm) if llm is not None else None
     bucket = os.environ.get("MAC_TF_STATE_BUCKET")
     tf_state = TerraformState(bucket, os.environ.get("MAC_TF_STATE_REGION", "us-east-1")) if bucket else None
     executor = Executor(GitCheckout(token), data_dir / "work", tf_state)
     store, github = Store(data_dir / "mac.db"), GitHubAPI(token)
     diagnostician = None
-    if llm_key:
-        llm = NIMChat(llm_key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL), os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
+    if llm is not None:
         diagnostician = LLMDiagnostician(llm, github, store, knowledge_sections(store))
     runner = Runner(store, github, approvals, executor, data_dir, diagnostician, design_writer=writer, pages=pages)
     if diagnostician is not None:

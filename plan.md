@@ -19,7 +19,7 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
 | Demo pipeline | `migrations/claims-adjudication/migration.yaml` in `MaC-aroni/mac-migrations` (mirrored by the server; [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml) is the bundled copy): 8 steps, 4 repos, 3 approvals |
 | Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` on GitHub in `MaC-aroni`, protected and reviewed |
-| How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
+| How to ship | branch → PR → CI passes → merge (no review). **The merge deploys to Fly** |
 | Knowledge base | 16 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
 | Migrations repo | `MaC-aroni/mac-migrations`: every `migrations/<name>/migration.yaml` merged there is what the console shows (mirrored every 60 s); the Planner's PRs go there |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
@@ -31,6 +31,54 @@ differently**. Keep it short; link to the docs instead of repeating them.
 ---
 
 ## Entries
+
+### 2026-11-08: Every merge to main deploys, without waiting (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `.github/workflows/deploy.yml` runs on every push to `main` (and still by hand). The "wait for
+  running work" step is gone: the deploy restarts the machine at once.
+
+#### What you need to do
+- **Everyone:** merging is shipping. Don't merge while a Rehearse or Deploy is running in prod: it is
+  cut off and undone when the server comes back (agent runs are marked failed).
+### 2026-11-08: Grok means grok-4.20 non-reasoning (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The Grok option defaults to `grok-4.20-0309-non-reasoning` (was `grok-4.7`, a reasoning model). Measured on the
+  knowledge base: the slowest page went from about 4.5 min to 8 s, all 16 pages from about 12 min to 22 s, and
+  the planner wrote a valid 8-step, 3-approval migration.yaml on its first attempt in 13 s. `GROK_MODEL` overrides.
+
+#### What you need to do
+- Nothing.
+
+### 2026-11-08: Knowledge base is read six pages at a time (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `extract` (ingest, and the knowledge step of the first plan) sends pages to the model in
+  parallel, `MAC_INGEST_WORKERS` at once (default 6), and assembles the graph in page order so the
+  result is the same as before. A reasoning model takes a minute or more per page; 18 pages went
+  from half an hour to a few minutes. Cancel stops the pages not started yet.
+
+#### What you need to do
+- Nothing.
+
+### 2026-11-08: Model switch (Nemotron | Grok) and Cancel on every run (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Model switch** in the sidebar footer: the agents, the design page, AI help and Chat use
+  whichever provider is chosen, from their next call. Providers come from the keys set:
+  `nemotron` (`NVIDIA_API_KEY`, or `MAC_LLM_*`) and `grok` (`GROK_API_KEY`, `GROK_MODEL`,
+  `GROK_BASE_URL`). `GET /health` lists them (`llm_providers`, `llm_provider`);
+  `POST /api/mac/settings/llm {provider}` switches; the choice is kept in `MAC_DATA_DIR/settings.json`.
+  Prod on Nemotron 3 Ultra took over 6 minutes on the first knowledge page; Grok is the fast lane.
+- **Cancel everywhere:** a visible Cancel button on the pipeline page (next to the primary
+  action) and on the planning and agents pages. `POST /runs/{id}/cancel` now also stops agent
+  runs (plan, learn, describe, investigate) before their next model call; they end `cancelled`.
+
+#### What you need to do
+- **ob1-can-obi:** `fly secrets set GROK_API_KEY=…` to make Grok selectable in prod.
+- **Elathius (UI):** `health.llm_providers` / `api.setLlm(id)` if you move the switch; the Cancel
+  buttons use the existing `api.cancel(runId)`.
 
 ### 2026-11-08: Reasoning models that think past their budget no longer fail a run (ob1-can-obi, with Claude Code)
 

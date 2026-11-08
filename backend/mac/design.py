@@ -75,6 +75,16 @@ def facts(spec: Spec, shas: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+class LLMDesignWriter:
+    """Writes the design page through any LLM client (the routed one follows the model switch)."""
+
+    def __init__(self, llm):
+        self.llm = llm
+
+    def write(self, facts_text: str) -> str:
+        return self.llm.complete(SYSTEM_PROMPT, "Write the design document for this migration.\n\n" + facts_text)
+
+
 class NIMDesignWriter:
     """Writes the design page through the shared LLM client (mac/llm.py)."""
 
