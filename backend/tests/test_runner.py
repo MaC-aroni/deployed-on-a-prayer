@@ -405,3 +405,23 @@ def test_any_llm_crash_never_fails_the_build(env, spec_path):
     env.writer.write = crash
     run = env.runner.build(spec_path)
     assert run.status == RunStatus.SUCCEEDED and "timed out" in run.report["design_page"]["status"]
+
+
+def test_sync_approvals_before_any_build_does_nothing(env, spec_path):
+    result = env.runner.sync_approvals(spec_path)
+    assert result["statuses"] == {} and env.approvals.raised == []
+
+
+def test_sync_approvals_raises_the_next_link_of_the_chain(env, spec_path):
+    env.approvals.default = "pending"
+    env.runner.build(spec_path)
+    assert env.approvals.raised_ids() == ["APPR-TR-001", "APPR-MGR-001"]  # MCP waits for the manager
+    first = env.runner.sync_approvals(spec_path)
+    assert first["changed"] == [] and first["raised"] == []
+    env.approvals.by_approval["APPR-MGR-001"] = "approved"
+    second = env.runner.sync_approvals(spec_path)
+    assert second["changed"] == ["APPR-MGR-001"] and second["raised"] == ["APPR-MCP-001"]
+    assert second["statuses"]["APPR-MCP-001"]["status"] == "pending"
+    build = env.store.runs()[0]
+    records = env.store.approval_records(build.migration, build.spec_digest)
+    assert records["APPR-MGR-001"].status == "approved"

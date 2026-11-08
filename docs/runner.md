@@ -56,6 +56,12 @@ steps each approval unblocks), never written by a model. Rules:
   them. Statuses map by name: `Approved` or `Done` approves; `Rejected`, `Declined` or
   `Won't Do` rejects; anything else is pending.
 - Build's report lists every approval with its status, ticket and why it's waiting.
+- **Approvals follow Jira on their own.** The server asks Jira about every outstanding approval
+  every `MAC_APPROVAL_POLL_SECONDS` (default 30, 0 turns it off), and Jira can push changes to
+  `POST /api/mac/jira/webhook?token=<MAC_JIRA_WEBHOOK_SECRET>`. Either way `Runner.sync_approvals`
+  records the new statuses, raises the next ticket of an `after` chain the moment its
+  predecessor is approved, and continues every Deploy that was waiting (a rejection fails it and
+  undoes everything). Nobody has to press "Check approvals".
 
 ## The design page (the one LLM call)
 

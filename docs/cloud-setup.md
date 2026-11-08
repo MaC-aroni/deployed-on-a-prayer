@@ -90,6 +90,8 @@ All go in `backend/.env` locally, and in Fly secrets for the deployed app:
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (or `AWS_PROFILE` locally) | the runner's credentials |
 | `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the state bucket, and `us-east-1` |
 | `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | the site URL, the token's account email, and the token |
+| `MAC_APPROVAL_POLL_SECONDS` | how often the server asks Jira about pending approvals (default 30; 0 = off) |
+| `MAC_JIRA_WEBHOOK_SECRET` | optional. Set it, then in Jira: **Settings → System → WebHooks → Create**, URL `https://deployed-on-a-prayer.fly.dev/api/mac/jira/webhook?token=<the secret>`, events *Issue: updated*. Approvals then reach MaC within a second instead of at the next poll |
 | `CONFLUENCE_SPACE_KEY` | `CLAIMS` |
 | `JIRA_PROJECT` | `MAC` (the default) |
 | `MAC_JIRA_ASSIGNEES` | optional, see above |

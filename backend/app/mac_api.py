@@ -13,6 +13,9 @@ import asyncio
 import json
 import logging
 import os
+import secrets
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -40,6 +43,8 @@ class State:
     runner: Runner
     migrations_dir: Path
     submit: Callable[[Callable[[], None]], None]  # runs work in the background
+    poll_seconds: int = 0  # how often to ask Jira about pending approvals; 0 = never
+    webhook_secret: str | None = None  # MAC_JIRA_WEBHOOK_SECRET; None = the Jira webhook is off
 
 
 _state: State | None = None
@@ -58,6 +63,8 @@ def _default_state() -> State:
         runner=make_runner(data_dir),
         migrations_dir=Path(os.environ.get("MAC_MIGRATIONS_DIR", ROOT / "examples")),
         submit=pool.submit,
+        poll_seconds=int(os.environ.get("MAC_APPROVAL_POLL_SECONDS", "30")),
+        webhook_secret=os.environ.get("MAC_JIRA_WEBHOOK_SECRET") or None,
     )
 
 
@@ -70,8 +77,49 @@ def get_state() -> State:
         state.runner.executor.prune(set(queued))
         for run_id in queued:
             state.submit(lambda r=run_id: _execute(state, r))
+        if state.poll_seconds > 0:
+            threading.Thread(target=_poll_loop, args=(state,), name="mac-approvals", daemon=True).start()
         _state = state
     return _state
+
+
+# ---- Approvals that follow Jira on their own ------------------------------------------------
+
+
+def sync_migration_approvals(state: State, path: Path) -> dict:
+    """One sync for one migration: raises due tickets, records statuses, and starts the runs
+    that were waiting on an approval. Safe to call from any thread."""
+    result = state.runner.sync_approvals(path)
+    for run_id in result["resumed"]:
+        state.submit(lambda r=run_id: _execute(state, r))
+    return result
+
+
+def poll_approvals_once(state: State) -> list[dict]:
+    """Every valid migration with tickets outstanding gets one Jira check."""
+    results = []
+    for name, (path, spec, _) in _find(state).items():
+        if spec is None:
+            continue
+        try:
+            result = sync_migration_approvals(state, path)
+        except Exception:  # noqa: BLE001 - one migration's Jira trouble mustn't stop the others
+            log.exception("approval sync failed for %s", name)
+            continue
+        if result["changed"] or result["raised"] or result["resumed"]:
+            log.info("approvals for %s: changed=%s raised=%s resumed=%s", name,
+                     result["changed"], result["raised"], result["resumed"])
+        results.append(result)
+    return results
+
+
+def _poll_loop(state: State) -> None:
+    while True:
+        time.sleep(state.poll_seconds)
+        try:
+            poll_approvals_once(state)
+        except Exception:  # noqa: BLE001
+            log.exception("approval poll crashed; will try again")
 
 
 router = APIRouter(prefix="/api/mac", tags=["mac"])
@@ -175,14 +223,55 @@ def get_migration(name: str, state: State = Depends(get_state)):
         ticket = tickets.get(approval.id)
         approvals.append(approval.model_dump(mode="json")
                          | {"ticket": ticket.model_dump(exclude={"approval"}) if ticket else None})
+    # Live statuses: the poller, the webhook, Build and a waiting Deploy all record them here.
+    records = store.approval_records(name, spec.digest())
+    for item in approvals:
+        record = records.get(item["id"])
+        item["status"] = record.status if record else ("pending" if item["ticket"] else "not_requested")
+        item["detail"] = record.detail if record else None
+        item["checked"] = record.checked if record else None
     page = store.design(name)
     return {
         "name": name, "service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
         "target": spec.target.model_dump(mode="json"), "diagnostics_default": spec.diagnostics.mode,
         "stages": _stages(spec), "approvals": approvals,
+        "approvals_checked": max((r.checked for r in records.values()), default=None),
+        "approvals_live": state.poll_seconds > 0 or state.webhook_secret is not None,
         "design_page": {"url": page.url, "current": page.digest == spec.digest()} if page else None,
         "issues": problems, "latest": _latest(state, name), "active_run": _summary(active),
     }
+
+
+@router.post("/migrations/{name}/approvals/sync")
+def sync_approvals(name: str, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
+    """Check Jira now, instead of waiting for the poller."""
+    path, _, _ = _migration(state, name)
+    return sync_migration_approvals(state, path)
+
+
+@router.post("/jira/webhook", include_in_schema=False)
+async def jira_webhook(request: Request, token: str | None = Query(default=None),
+                       state: State = Depends(get_state)):
+    """Jira Cloud calls this when an issue changes (no sign-in: the URL carries a shared secret).
+    Only tickets MaC raised are looked at; anything else is ignored."""
+    if state.webhook_secret is None:
+        raise HTTPException(404, "the Jira webhook isn't enabled (MAC_JIRA_WEBHOOK_SECRET)")
+    if not token or not secrets.compare_digest(token, state.webhook_secret):
+        raise HTTPException(401, "wrong webhook token")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    key = (body.get("issue") or {}).get("key")
+    owner = state.runner.store.ticket_owner(key) if key else None
+    if owner is None:
+        return {"issue": key, "synced": None}
+    migration = owner[0]
+    found = _find(state).get(migration)
+    if found is None or found[1] is None:
+        return {"issue": key, "synced": None}
+    result = await asyncio.to_thread(sync_migration_approvals, state, found[0])
+    return {"issue": key, "synced": migration, **{k: result[k] for k in ("changed", "raised", "resumed")}}
 
 
 def _start(state: State, starter: Callable[[], RunRecord], user: str | None) -> dict:
