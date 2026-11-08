@@ -299,3 +299,17 @@ def test_a_rejection_found_by_the_poller_fails_the_deploy_and_undoes_it(api):
     mac_api.poll_approvals_once(state)
     after = latest_run(client, deploy["id"])
     assert after["status"] == "failed" and "rejected" in after["reason"]
+
+
+def test_access_log_masks_the_webhook_secret_and_sign_in_codes():
+    import logging
+
+    from app.main import RedactSecrets
+    record = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+                               ("1.2.3.4", "POST", "/api/mac/jira/webhook?token=s3cret&x=1", "1.1", 200), None)
+    RedactSecrets().filter(record)
+    assert "s3cret" not in record.getMessage() and "token=***&x=1" in record.getMessage()
+    record = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '"%s %s"',
+                               ("GET", "/api/auth/callback?code=abc123&state=xyz"), None)
+    RedactSecrets().filter(record)
+    assert "abc123" not in record.getMessage() and "xyz" not in record.getMessage()

@@ -91,7 +91,7 @@ All go in `backend/.env` locally, and in Fly secrets for the deployed app:
 | `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the state bucket, and `us-east-1` |
 | `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | the site URL, the token's account email, and the token |
 | `MAC_APPROVAL_POLL_SECONDS` | how often the server asks Jira about pending approvals (default 30; 0 = off) |
-| `MAC_JIRA_WEBHOOK_SECRET` | optional. Set it, then in Jira: **Settings → System → WebHooks → Create**, URL `https://deployed-on-a-prayer.fly.dev/api/mac/jira/webhook?token=<the secret>`, events *Issue: updated*. Approvals then reach MaC within a second instead of at the next poll |
+| `MAC_JIRA_WEBHOOK_SECRET` | optional; makes approvals instant instead of every 30 s. **`mise run mac-jira-webhook`** sets it on Fly and registers the Jira webhook (Issue updated, project `MAC`) in one go, without printing the secret; run it again to rotate. The access log masks the secret |
 | `CONFLUENCE_SPACE_KEY` | `CLAIMS` |
 | `JIRA_PROJECT` | `MAC` (the default) |
 | `MAC_JIRA_ASSIGNEES` | optional, see above |

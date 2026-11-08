@@ -29,6 +29,18 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Instant approvals through a Jira webhook (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `mise run mac-jira-webhook` sets `MAC_JIRA_WEBHOOK_SECRET` on Fly and registers a Jira webhook
+  (issue updated, project `MAC`) that calls MaC. Approving a ticket now reaches the console in
+  about a second; the 30 s poller stays on as a safety net.
+- The access log masks `token=`, `code=` and `state=` in URLs, so the webhook secret and GitHub
+  sign-in codes never land in `fly logs`.
+
+#### What you need to do
+- Nothing. **Elathius:** no API change; approvals just update sooner.
+
 ### 2026-11-08: Approvals follow Jira on their own (ob1-can-obi, with Claude Code)
 
 #### What changed
