@@ -25,12 +25,40 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
 | UI | `frontend/`: the console at `/` (Build → Migrate · Pipelines, live DAG, step logs, approvals, Build report, runs), mock pitch page at `/demo`; rules in [`UI.md`](UI.md) |
 | Planning API | `/api/mac/services`, `/plan`, `/ingest`, `/plans/...` in `backend/app/planning_api.py`, contract in [`docs/planning-api.md`](docs/planning-api.md) |
-| Cost estimate | Build's `report.cost`: Terraform plan × usage figures from Confluence × AWS Price List, every line sourced. `mac/cost.py`, `mac/usage.py`, `mac/pricing.py`, `backend/app/cost_api.py`; rules in [`docs/runner.md`](docs/runner.md) ("The cost estimate"), JSON in [`docs/api.md`](docs/api.md) ("Cost estimate"). No UI yet |
+| Cost estimate | Build's `report.cost`: Terraform plan × usage figures from Confluence × AWS Price List, every line sourced. `mac/cost.py`, `mac/usage.py`, `mac/pricing.py`, `backend/app/cost_api.py`; rules in [`docs/runner.md`](docs/runner.md) ("The cost estimate"), JSON in [`docs/api.md`](docs/api.md) ("Cost estimate"). UI: the pipeline's **Cost** tab (`frontend/src/components/CostPanel.jsx`) |
 | Not built yet | API endpoints for the guide and code writers; the Diagnostician behind Explain · Report · Auto-fix |
 
 ---
 
 ## Entries
+
+### 2026-11-08: The Cost tab: the estimate, with every source, in the console (Zafeer-R, with Claude Code)
+
+#### What changed
+- **Pipeline page** (`pages/Migration.jsx`) gets three things:
+  - **Cost tab**, between Endpoints and Build report (`components/CostPanel.jsx`). It shows AWS
+    per month, the one-time cost, on-prem today and the saving, then the "not priced yet" list
+    with the Jira questions, every cost line with its formula and price, today's on-prem lines and
+    what costs nothing. Click a line to see each input's source: the Confluence quote (linked),
+    the Terraform attribute, the AWS rule, and AWS's price with its SKU. The saving shows only
+    once the estimate is complete.
+  - **Header chip** "≈ $5.04/month on AWS" (plus "partial"), which opens the tab.
+  - **"Read usage figures"** in the ··· menu. It starts the usage reader and opens it on the
+    agents page, whose back link returns to the Cost tab (`?tab=cost` works for any tab).
+- The tab asks `GET /migrations/{name}/cost`, so new usage figures show without another Build.
+  **Recalculate** asks again.
+- `usage` is an agent run mode (`status.js`): the runs list and History open it on the agents
+  page. History now sends every agent run (investigate, usage) there, and the pipeline no longer
+  picks an agent run as the run it shows.
+- Menu items: a long description now wraps beside the label instead of squeezing it (this also
+  fixes "Sync with Jira").
+- Backend: the usage reader's summary says "asked in Jira" only for tickets that were really
+  raised.
+
+#### How to adapt
+- **Locally, "Read usage figures" raises real Jira tickets** if `backend/.env` has `JIRA_*` or
+  `ATLASSIAN_*` set, the same as Build does. One question per missing figure, raised once.
+- To see the tab: Build (it records the resources) → Read usage figures → the tab updates.
 
 ### 2026-11-08: The Migration page shows migrations, from mac-migrations (ob1-can-obi, with Claude Code)
 
