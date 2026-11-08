@@ -43,6 +43,14 @@
   --orange-soft: rgba(255, 158, 92, 0.14);
   --grey: var(--faint);
   --grey-soft: rgba(255, 255, 255, 0.05);
+  --hover: #2f3140;
+  --hover-strong: #363848;
+  --active-soft: #33314a;
+  --on-accent-2: #0b1f1b;
+  --shimmer: #343648;
+  --log-bg: #15161d;
+  --log-fg: #d9dbe6;
+  --topbar-bg: rgba(24, 26, 34, 0.85);
 
   --radius: 16px;
   --radius-sm: 10px;
@@ -89,7 +97,8 @@ a {
   transition: color var(--t);
 }
 a:hover {
-  color: #7df0da;
+  color: var(--accent-2);
+  filter: brightness(1.15);
 }
 button {
   font: inherit;
@@ -399,7 +408,7 @@ p {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: linear-gradient(var(--bg), rgba(24, 26, 34, 0.85));
+  background: linear-gradient(var(--bg), var(--topbar-bg));
   backdrop-filter: blur(8px);
 }
 .topbar-left {
@@ -476,7 +485,8 @@ p {
   box-shadow: 0 8px 20px -10px rgba(124, 92, 255, 0.8);
 }
 .btn-primary:hover {
-  background: #8d71ff;
+  background: var(--accent);
+  filter: brightness(1.12);
   color: #fff;
 }
 .btn-ghost {
@@ -668,7 +678,7 @@ a.pill-link:hover {
 }
 .status.is-succeeded,
 .status.is-approved {
-  color: #0b1f1b;
+  color: var(--on-accent-2);
 }
 
 .node .status,
@@ -1338,7 +1348,7 @@ a.row-title:hover {
   transition: background var(--t), opacity var(--t), box-shadow var(--t);
 }
 .node:hover {
-  background: #2f3140;
+  background: var(--hover);
 }
 .node.selected {
   box-shadow: inset 0 0 0 1.5px var(--accent);
@@ -2008,7 +2018,7 @@ a.row-title:hover {
   color: var(--fg);
 }
 .btn-secondary:hover {
-  background: #31344a;
+  background: var(--hover-strong);
 }
 
 /* service cards: the primary action spans the card */
@@ -2104,10 +2114,10 @@ a.row-title:hover {
   margin: 2px 0;
 }
 .nav-item.primary:hover {
-  background: #30323f;
+  background: var(--hover);
 }
 .nav-item.primary.active {
-  background: #33314a;
+  background: var(--active-soft);
 }
 .nav-item.primary.active::before {
   top: 8px;
@@ -2210,7 +2220,7 @@ a.row-title:hover {
   white-space: nowrap;
 }
 .doors .door:hover {
-  background: #363848;
+  background: var(--hover-strong);
 }
 .doors .door[aria-disabled] {
   opacity: 0.45;
@@ -2247,7 +2257,7 @@ a.row-title:hover {
   justify-content: center;
 }
 .repo-row.documented .doors.md .door:first-child {
-  background: #33314a;
+  background: var(--active-soft);
 }
 .chip-link {
   color: var(--muted);
@@ -2422,7 +2432,7 @@ a.row-title:hover {
 .skeleton {
   display: inline-block;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--surface-2) 25%, #343648 50%, var(--surface-2) 75%);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--shimmer) 50%, var(--surface-2) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
 }
@@ -2934,7 +2944,7 @@ a.row-title:hover {
   transition: background var(--t), transform var(--t);
 }
 .chat-suggestion:hover:not(:disabled) {
-  background: #363848;
+  background: var(--hover-strong);
 }
 .chat-turn {
   display: flex;
@@ -2983,7 +2993,7 @@ a.row-title:hover {
 }
 .chat-avatar.working {
   background: var(--accent-2);
-  color: #0b1f1b;
+  color: var(--on-accent-2);
 }
 .chat-thinking {
   display: inline-flex;
@@ -3303,4 +3313,86 @@ a.row-title:hover {
   font-size: 13px;
   max-width: 420px;
   text-align: center;
+}
+
+
+/* =====================================================================================
+   Light theme: the same tokens, swapped. Set by the toggle in the sidebar (data-theme on <html>);
+   without a choice the system preference decides.
+   ===================================================================================== */
+:root[data-theme="light"] {
+  --bg: #f3f4f9;
+  --surface: #ffffff;
+  --surface-2: #eceef5;
+  --surface-3: rgba(20, 24, 40, 0.05);
+  --line: rgba(20, 24, 40, 0.08);
+  --line-strong: rgba(20, 24, 40, 0.14);
+  --fg: #171923;
+  --muted: #5c6174;
+  --faint: #8a8fa3;
+  --accent: #6a4ee6;
+  --accent-soft: rgba(106, 78, 230, 0.12);
+  --accent-2: #0f9f8a;
+  --accent-2-soft: rgba(15, 159, 138, 0.12);
+  --warn: #c98a16;
+  --warn-soft: rgba(201, 138, 22, 0.14);
+  --bad: #d9365a;
+  --bad-soft: rgba(217, 54, 90, 0.12);
+  --orange: #d97a2b;
+  --orange-soft: rgba(217, 122, 43, 0.14);
+  --grey-soft: rgba(20, 24, 40, 0.06);
+  --hover: #e3e6f0;
+  --hover-strong: #d9dcea;
+  --active-soft: #e4dffb;
+  --on-accent-2: #ffffff;
+  --shimmer: #dfe2ec;
+  --topbar-bg: rgba(243, 244, 249, 0.85);
+  --shadow: 0 10px 30px -18px rgba(20, 24, 40, 0.25);
+  --inset: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="light"] body::before {
+  background: radial-gradient(900px 600px at 0% 0%, rgba(106, 78, 230, 0.08), transparent 70%);
+}
+:root[data-theme="light"] .log,
+:root[data-theme="light"] .log-trace,
+:root[data-theme="light"] .yaml {
+  background: var(--log-bg);
+  color: var(--log-fg);
+}
+:root[data-theme="light"] .nav-item.primary:hover {
+  background: var(--hover);
+}
+:root[data-theme="light"] .nav-item.primary.active {
+  background: var(--active-soft);
+}
+:root[data-theme="light"] .brand-logo img,
+:root[data-theme="light"] .chat-logo img,
+:root[data-theme="light"] .gate-logo {
+  filter: none;
+}
+
+/* ---------- theme toggle ---------- */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  width: 100%;
+  text-align: left;
+  transition: background var(--t), color var(--t);
+}
+.theme-toggle:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shell.collapsed .theme-toggle span {
+  display: none;
 }

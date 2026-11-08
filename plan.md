@@ -71,6 +71,22 @@ differently**. Keep it short; link to the docs instead of repeating them.
   there is logged, never fatal. Fly needs nothing new (the Price List is public).
 - `test_planning_api.py::test_build_runs_on_a_generated_plan` fails on Windows only (a `\` vs `/`
   path check); it fails the same way on `main`, and passes on Linux CI.
+### 2026-11-08: Light theme, one Confluence door, the demo reads as a real run (Elathius, with Claude Code)
+
+#### What changed
+- **Light theme** for the whole console: a token swap under `:root[data-theme="light"]` in
+  `frontend/src/styles.css`; the toggle sits in the sidebar footer, the choice is remembered per
+  browser, and without a choice the system preference decides. Log panels stay dark in both.
+- **One Confluence door** per page on the Migration page: a page under review opens in the
+  console (review bar + Confluence link); a reviewed or hand-written page opens Confluence,
+  created on the spot when it only exists here; no page at all → **Learn** writes one (into
+  Confluence when it's configured). The separate "Review page" and "Create" doors are gone.
+- **Demo:** the rehearsal banners are gone, the menu item is **Demo**, the replay control is a
+  timeline; it reads as a real run.
+
+#### What you need to do
+- Nothing. New colours go in as tokens with a light value in the same block.
+
 ### 2026-11-08: Sign-in gate and the mark-only logo (Elathius, with Claude Code)
 
 #### What changed
