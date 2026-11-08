@@ -1897,9 +1897,8 @@ a.row-title:hover {
 .stepper {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: nowrap;
-  overflow: hidden;
+  gap: 8px 12px;
+  flex-wrap: wrap;
 }
 .step-dot-text,
 .step-dot-label {
@@ -2241,8 +2240,14 @@ a.row-title:hover {
   align-items: center;
   justify-content: flex-end;
 }
-.repos-table .row-action {
-  width: 150px;
+.doors.md .door {
+  height: 40px;
+  padding: 0 18px;
+  min-width: 140px;
+  justify-content: center;
+}
+.repo-row.documented .doors.md .door:first-child {
+  background: #33314a;
 }
 .chip-link {
   color: var(--muted);

@@ -38,7 +38,7 @@ function Step({ label, status, text }) {
 }
 
 // The two doors: the Confluence page (or the console's copy of it) and the GitHub repository.
-function Doors({ pageUrl, pageId, repoUrl, learn, size = "sm", stop = true }) {
+function Doors({ pageUrl, pageId, repoUrl, learn, busy = false, size = "sm", stop = true }) {
   const onClick = stop ? (e) => e.stopPropagation() : undefined;
   return (
     <span className={cx("doors", size)}>
@@ -51,8 +51,8 @@ function Doors({ pageUrl, pageId, repoUrl, learn, size = "sm", stop = true }) {
           <BookOpen size={14} /> Confluence
         </Link>
       ) : learn ? (
-        <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), learn())} title="Launch an agent to write this repository's knowledge page and raise a review ticket">
-          <Sparkles size={14} /> Learn
+        <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), learn())} disabled={busy} title="Launch an agent to write this repository's knowledge page and raise a review ticket">
+          <Sparkles size={14} /> {busy ? "Launching…" : "Learn"}
         </button>
       ) : (
         <span className="btn door" aria-disabled>
@@ -217,19 +217,16 @@ export default function Migrate() {
       <div className="toolbar" style={{ marginTop: 32 }}>
         <span className="label">Repositories in the organisation</span>
         <span className="spacer" />
-        <span className="muted small">{data.repos.length} repositories · undocumented ones get a page when you press Learn</span>
+        <span className="muted small">{data.repos.length} repositories · pipelines start from the services above · Learn writes a page for an undocumented repo</span>
       </div>
       {data.repos_error && <p className="muted small">{data.repos_error}</p>}
       {data.repos.length > 0 && (
         <div className="table repos-table">
           {data.repos.map((r) => {
             const svc = r.service ? data.services.find((s) => s.name === r.service) : null;
-            const act = svc
-              ? () => (svc.migration ? navigate(`/migrations/${encodeURIComponent(svc.migration)}`) : svc.plans[0] ? navigate(`/plans/${svc.plans[0]}`) : plan(svc))
-              : () => learnRepo(r);
-            const rowBusy = busy === r.full_name || (svc && busy === svc.name);
+            const learning = busy === r.full_name;
             return (
-              <button type="button" className={cx("tr row-btn repo-row", { documented: Boolean(svc) })} key={r.full_name} onClick={act} disabled={rowBusy}>
+              <div className={cx("tr repo-row", { documented: Boolean(svc) })} key={r.full_name}>
                 <div className="cell-title">
                   <span className="row-title">{r.name}</span>
                   <span className="muted small">{r.description || "no description"}</span>
@@ -246,10 +243,9 @@ export default function Migrate() {
                   )}
                 </div>
                 <div className="cell-actions">
-                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : () => learnRepo(r)} />
-                  <span className={cx("btn btn-ghost row-action", { hint: locked })}>{rowBusy ? "Launching…" : svc ? (svc.migration || svc.plans[0] ? "Open pipeline" : "Launch agent") : "Learn"}</span>
+                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : () => learnRepo(r)} busy={learning} size="md" stop={false} />
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
