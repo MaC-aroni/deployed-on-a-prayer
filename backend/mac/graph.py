@@ -4,6 +4,7 @@ merges duplicates across pages. Stored as JSON (MAC.md: a JSON graph, not Neo4j)
 
 import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,18 +138,28 @@ def extract(sections: list[Section], llm: LLM, log=print, workers: int | None = 
     catalogs = {doc_id: Catalog([s for s in sections if s.doc_id == doc_id]) for doc_id in doc_ids}
     workers = workers or int(os.environ.get("MAC_INGEST_WORKERS", "6"))
 
+    stop = threading.Event()  # set when a page raised (a Cancel, a crash): queued pages don't start
+
     def read(doc_id: str):
+        if stop.is_set():
+            return None
         if on_start is not None:
             on_start(doc_id)  # the console's Reader card turns "running" for this page
         try:
             return parse_json(llm.complete(EXTRACT_PROMPT, catalogs[doc_id].prompt_block(), max_tokens=4096))
-        except ValueError as e:
+        except BaseException as e:
+            if not isinstance(e, (ValueError, IntegrationError)):
+                stop.set()
+                raise
+            return _failed(doc_id, e)
+
+    def _failed(doc_id: str, e: BaseException) -> str:
+        if isinstance(e, ValueError):
             return f"{doc_id}: unreadable reply ({e})"
-        except IntegrationError as e:
-            # One page the model couldn't read mustn't lose the other pages' facts; the page is
-            # reported as dropped and the next ingest picks it up.
-            log(f"skipped {doc_id}: {e}")
-            return f"{doc_id}: skipped, the model didn't answer ({str(e)[:160]})"
+        # One page the model couldn't read mustn't lose the other pages' facts; the page is
+        # reported as dropped and the next ingest picks it up.
+        log(f"skipped {doc_id}: {e}")
+        return f"{doc_id}: skipped, the model didn't answer ({str(e)[:160]})"
 
     pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(doc_ids) or 1)), thread_name_prefix="mac-ingest")
     futures = {doc_id: pool.submit(read, doc_id) for doc_id in doc_ids}
@@ -159,6 +170,7 @@ def extract(sections: list[Section], llm: LLM, log=print, workers: int | None = 
             if isinstance(results[doc_id], dict):
                 log(f"extracted {doc_id}")
     except BaseException:  # a Cancel (or a crash): pages not started yet are dropped, in-flight ones finish alone
+        stop.set()
         pool.shutdown(wait=False, cancel_futures=True)
         raise
     pool.shutdown(wait=True)
