@@ -95,12 +95,15 @@ class FakeDesignWriter:
 
 
 class FakePages:
-    def __init__(self):
-        self.published: list[tuple[str, str, str | None]] = []  # (title, html, page_id passed in)
 
-    def publish(self, title, storage_html, page_id):
-        self.published.append((title, storage_html, page_id))
-        return page_id or "page-1", "https://example.atlassian.net/wiki/spaces/MAC/pages/1"
+    def __init__(self):
+        self.published = []  # (title, html, page_id passed in, parent_id)
+        self._ids: dict[str, str] = {}
+
+    def publish(self, title, storage_html, page_id, parent_id=None):
+        self.published.append((title, storage_html, page_id, parent_id))
+        page_id = page_id or self._ids.setdefault(title, f"page-{len(self._ids) + 1}")
+        return page_id, f"https://example.atlassian.net/wiki/spaces/MAC/pages/{page_id.split('-')[-1]}"
 
 
 class FakeExecutor:

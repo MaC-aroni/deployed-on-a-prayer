@@ -106,6 +106,10 @@ class Store:
                     key TEXT NOT NULL, url TEXT NOT NULL, created REAL NOT NULL,
                     PRIMARY KEY (migration, digest, approval));
                 -- One design page per migration, updated in place for each new spec version.
+                -- The knowledge base as published: our page id -> Confluence page, for citations.
+                CREATE TABLE IF NOT EXISTS knowledge (
+                    id TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
+                    title TEXT NOT NULL, updated REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS designs (
                     migration TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
                     digest TEXT NOT NULL, updated REAL NOT NULL);
@@ -171,6 +175,18 @@ class Store:
                             "page_id = excluded.page_id, url = excluded.url, digest = excluded.digest, "
                             "updated = excluded.updated",
                             (migration, page.page_id, page.url, page.digest, time.time()))
+
+    def knowledge_pages(self) -> dict[str, tuple[str, str, str]]:
+        """Our page id -> (Confluence page id, url, title)."""
+        with self.lock:
+            rows = self.db.execute("SELECT id, page_id, url, title FROM knowledge").fetchall()
+        return {r[0]: (r[1], r[2], r[3]) for r in rows}
+
+    def save_knowledge_page(self, page: str, page_id: str, url: str, title: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO knowledge VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET "
+                            "page_id = excluded.page_id, url = excluded.url, title = excluded.title, "
+                            "updated = excluded.updated", (page, page_id, url, title, time.time()))
 
     def add_event(self, run_id: str, kind: str, message: str, step: str | None = None) -> Event:
         with self.lock, self.db:

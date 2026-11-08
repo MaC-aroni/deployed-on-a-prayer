@@ -107,6 +107,9 @@ class Step(_Model):
     needs: tuple[str, ...] = ()
     requires_approval: tuple[str, ...] = ()
     when: Literal["auto", "manual"] = "auto"  # manual: waits for someone to press play
+    # Who writes this step's code from the migration guide: the engineers, or the LLM (always as
+    # a pull request a person reviews). Engineers choose per step how far they trust the LLM.
+    codegen: Literal["engineer", "llm"] = "engineer"
     run: Action
     verify: Verify | None = None
     rollback: Rollback | Literal["none"] | None = None

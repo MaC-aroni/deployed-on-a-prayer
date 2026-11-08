@@ -20,11 +20,60 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
 | Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` (built and tested; waiting to be created on GitHub) |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
-| Not built yet | AWS account and state bucket (Zafeer), Atlassian site, UI, the remaining agents |
+| Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
+| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review (set up locally, waiting to be created) |
+| Not built yet | AWS account and state bucket (Zafeer), Atlassian site (Zafeer), UI, the agents (graph, planner, guide writer, code writer) |
 
 ---
 
 ## Entries
+
+### 2026-11-07: Company knowledge base, codegen setting, migrations repo (ob1-can-obi, with Claude Code)
+
+**Where this is going:**
+1. The agents read the company's Confluence docs and build a knowledge graph, with the source
+   page of every fact.
+2. They generate the `migration.yaml`, with approvals and citations, as a PR into
+   `mac-migrations`.
+3. An LLM writes a migration guide page tree in Confluence: every step, how to write and run
+   its code, citations on everything.
+4. For steps marked `codegen: llm`, an LLM writes the code from the guide, as a reviewed PR.
+
+This entry is the groundwork for that.
+
+#### What changed
+- **Knowledge base:** 14 Confluence pages for the *fictional* **Prayerwell Health** in
+  `demo-data/confluence/`:
+  - Platform: landing zone, Terraform, naming and tagging, Lambda, MCP tools
+  - Access: requesting MCP access (manager, then owner)
+  - Tech Risk: migration policy (needs a design doc)
+  - Data: claims migration, which says Oracle `DD-MON-YY` dates must become ISO 8601, so the
+    planted bug breaks a documented rule
+  - Engineering: change management and MaC
+  - Services: the claims service and the Claims MCP tool
+  - QA: smoke testing
+  - The teams and approvers directory
+
+  They match what's built. **`test_knowledge.py` fails if the docs and the demo pipeline
+  disagree** (repos, approvers, approval types, stage order, paths, the date rule).
+- **`mise run mac publish-knowledge <dir>`** publishes them as one Confluence page tree and
+  records each page's URL for citations. Re-running updates the same pages in place.
+- **Spec: per-step `codegen: engineer | llm`** (default `engineer`) says who writes that step's
+  code. The demo trusts the LLM with `provision_storage`.
+- **The `mac-migrations` repo** (set up locally, waiting to be created on GitHub):
+  - CI runs MaC's own validator, checked out from this repo, so the rules never drift.
+  - `main` will need one approving review.
+- The four demo repos' first PRs are merged, and **Build's GitHub guardrails pass for real on
+  all four** (CI green, protected branch, approved PR).
+
+#### How to adapt
+1. **Changing the pipeline or a demo repo?** Update `demo-data/confluence/` to match. The
+   tests will tell you if you forgot.
+2. **Atlassian (Zafeer):** once the site and space exist, set `ATLASSIAN_SITE`,
+   `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` and `CONFLUENCE_SPACE_KEY`, then run
+   `mise run mac publish-knowledge demo-data/confluence`.
+3. **UI:** steps now have `codegen` in `GET /migrations/{name}`. Show it on the card (for
+   example a small "AI writes this" badge).
 
 ### 2026-11-07: MCP tool, MaC-raised approvals, LLM design page, demo repos (ob1-can-obi, with Claude Code)
 

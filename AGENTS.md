@@ -12,6 +12,11 @@ Read `docs/runner.md` before changing it or writing a repo it runs. It must stay
 no model calls in `runner.py` or `executors.py`. Any step failing undoes everything. Run the
 tests with `mise run test`.
 
+**The company knowledge base** (the fictional Prayerwell Health's Confluence docs) is drafted
+in `demo-data/confluence/` and published with `mise run mac publish-knowledge demo-data/confluence`.
+The agents plan migrations from it and cite it, so it must agree with the demo pipeline;
+`backend/tests/test_knowledge.py` checks that. Change both together.
+
 **The UI talks to the runner only through `/api/mac`** (`backend/app/mac_api.py`), whose
 contract is `docs/api.md`. Keep that doc in sync when you change the API. The server enforces
 the run rules; the UI shows its answers instead of re-implementing them.
