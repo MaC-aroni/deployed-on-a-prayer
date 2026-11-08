@@ -23,8 +23,15 @@ tests with `mise run test`.
 
 ## Rules
 
-- Never commit to `main`. Use a branch and open a PR (`gh pr create`). No review is needed;
-  merge it once CI passes.
+- **HARD RULE, no exceptions: every change goes through a branch and a PR into `main`.**
+  This applies to everyone (humans and coding agents, maintainers included) and to every
+  change, however small (typos, docs, config, hotfixes).
+  - Never commit or push directly to `main`, and never force-push it.
+  - If you are on `main`, create a branch first (`git checkout -b <type>/<short-name>`),
+    commit there, push it, and open a PR with `gh pr create --base main`.
+  - If a direct push to `main` is attempted or has happened, stop and tell a maintainer
+    instead of "fixing" it with a force-push.
+  - No review is needed: merge the PR once CI passes.
 - Don't add AI attribution to commits: no `Co-Authored-By: Claude ...` (or any other agent)
   trailer, and no "Generated with ..." lines in commit messages.
 - Never put API keys in code, and never commit `.env` files. New keys: add the name to
