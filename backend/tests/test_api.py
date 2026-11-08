@@ -3,7 +3,7 @@ import shutil
 import pytest
 from fastapi.testclient import TestClient
 
-from app import mac_api
+from app import auth, mac_api
 from app.main import app
 from mac.store import RunStatus
 
@@ -18,11 +18,12 @@ def api(env, tmp_path):
     (migrations / "claims").mkdir(parents=True)
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
     # Background work runs inline, so each response already reflects the finished work.
-    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(),
-                          token=None, require_token=False)
+    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn())
     mac_api.configure(state)
+    auth.configure(auth.AuthConfig(required=False, repo="MaC-aroni/deployed-on-a-prayer", github=None, key=b"k" * 32))
     yield TestClient(app), env, state
     mac_api.configure(None)
+    auth.configure(None)
 
 
 def latest_run(client, run_id):
@@ -170,23 +171,6 @@ def test_runs_list(api):
     client.post(f"/api/mac/migrations/{NAME}/build")
     runs = client.get("/api/mac/runs", params={"migration": NAME}).json()
     assert [r["mode"] for r in runs] == ["build", "build"]
-
-
-def test_token_required_when_configured(api):
-    client, _, state = api
-    state.require_token, state.token = True, "s3cret"
-    assert client.get("/api/mac/migrations").status_code == 401
-    assert client.get("/api/mac/migrations", headers={"Authorization": "Bearer nope"}).status_code == 401
-    assert client.get("/api/mac/migrations", headers={"Authorization": "Bearer s3cret"}).status_code == 200
-    assert client.get("/api/mac/migrations", params={"token": "s3cret"}).status_code == 200
-    assert client.get("/api/health").status_code == 200  # the rest of the app stays public
-
-
-def test_production_without_a_token_is_off(api):
-    client, _, state = api
-    state.require_token, state.token = True, None
-    resp = client.post(f"/api/mac/migrations/{NAME}/build")
-    assert resp.status_code == 503 and "MAC_API_TOKEN" in resp.json()["detail"]
 
 
 def test_invalid_migration_is_listed_but_cannot_run(api):

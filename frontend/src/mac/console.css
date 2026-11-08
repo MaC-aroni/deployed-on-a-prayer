@@ -17,7 +17,7 @@
 
 .topbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .logo { font-weight: 800; font-size: 18px; color: var(--purple); }
-.token { width: 220px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); }
+.account { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 
 .layout { display: flex; }
 .sidebar { width: 240px; min-height: calc(100vh - 49px); border-right: 1px solid var(--line); padding: 12px 8px; background: var(--panel); }
@@ -30,6 +30,7 @@ h1 { margin: 0 0 4px; font-size: 22px; }
 h3 { margin: 0 0 8px; font-size: 14px; }
 
 .banner { background: #fdf1dd; color: #6b4a00; border: 1px solid #e9be74; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; cursor: pointer; }
+.banner-info { background: #e9f3fc; color: #0b4a85; border-color: #a5cdf2; cursor: default; }
 .title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .controls { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
@@ -40,6 +41,8 @@ h3 { margin: 0 0 8px; font-size: 14px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
 .btn-danger { color: var(--red); }
+.btn-github { background: #24292f; border-color: #24292f; color: #fff; text-decoration: none; }
+.mac a.btn-github { color: #fff; }
 .link { border: 0; background: none; color: var(--blue); cursor: pointer; }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .segmented button { border: 0; background: var(--panel); color: var(--text); padding: 6px 10px; cursor: pointer; }

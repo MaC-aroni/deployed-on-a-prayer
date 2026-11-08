@@ -13,7 +13,7 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | | |
 |---|---|
 | Repo | https://github.com/MaC-aroni/deployed-on-a-prayer (public, org `MaC-aroni`) |
-| Live app | https://deployed-on-a-prayer.fly.dev: the MaC console at `/` (paste the MaC API token top right; ask ob1-can-obi). Real AWS, Jira and Confluence behind it. Run history on the Fly volume `mac_data` |
+| Live app | https://deployed-on-a-prayer.fly.dev: the MaC console at `/`. Anyone can watch; the buttons need **Sign in with GitHub** and write access to this repo. Real AWS, Jira and Confluence behind it. Run history on the Fly volume `mac_data` |
 | Stack | FastAPI backend (`backend/`), React + Vite frontend (`frontend/`), one Fly.io app |
 | MaC runner | `backend/mac/`, spec `mac/v0.3`, rules in [`docs/runner.md`](docs/runner.md) |
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
@@ -28,6 +28,21 @@ differently**. Keep it short; link to the docs instead of repeating them.
 ---
 
 ## Entries
+
+### 2026-11-08: Sign in with GitHub replaces the MaC API token (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The live console has a **Sign in with GitHub** button instead of the token box. Anyone can
+  open the site and watch runs; pressing a button (Build, Rehearse, Deploy, ▶, Check
+  approvals, Undo) needs a GitHub account with write access to `MaC-aroni/deployed-on-a-prayer`.
+- `MAC_API_TOKEN` is gone. Every `GET` under `/api/mac` is now open; every `POST` needs the
+  sign-in on Fly. New endpoints under `/api/auth` (`docs/api.md`, Access).
+- Each run's log says who started it: `requested by @login`.
+- Locally nothing changes: `mise run dev-local` needs no sign-in.
+
+#### What you need to do
+- Nothing locally. On the live site, click **Sign in with GitHub** once; it lasts 7 days.
+- UI work: read `GET /api/auth/me` for who's signed in. Don't add tokens or headers.
 
 ### 2026-11-08: The console is live on Fly (ob1-can-obi, with Claude Code)
 

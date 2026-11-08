@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, follow, getToken, setToken } from "./api.js";
+import { api, follow, SIGN_IN_URL, signOut } from "./api.js";
 import "./console.css";
 
 const ICON = {
@@ -7,6 +7,20 @@ const ICON = {
   skipped: "»", rolled_back: "↺", rollback_failed: "!", none: "–",
 };
 const AI_MODES = [["explain", "Explain"], ["report", "Report"], ["autofix", "Auto-fix"]];
+const SIGN_IN_PROBLEMS = {
+  "no-access": "That GitHub account can't push to MaC-aroni/deployed-on-a-prayer, so it can't run pipelines.",
+  expired: "The sign-in took too long or was started in another tab. Try again.",
+  failed: "GitHub didn't complete the sign-in. Try again.",
+};
+
+function Account({ me }) {
+  if (!me || (!me.required && !me.login)) return null; // locally: no sign-in
+  if (me.login) {
+    return <span className="account">@{me.login} <button className="link" onClick={signOut}>Sign out</button></span>;
+  }
+  if (!me.available) return <span className="muted small">Sign-in isn't set up here</span>;
+  return <a className="btn btn-github" href={SIGN_IN_URL}>Sign in with GitHub</a>;
+}
 
 function StatusBadge({ status }) {
   return <span className={`badge badge-${status}`}>{status?.replace("_", " ")}</span>;
@@ -21,7 +35,7 @@ function JobCard({ step, state, selected, onSelect, onPlay }) {
       <span className="job-name">{step.id}</span>
       {step.codegen === "llm" && <span className="tag tag-ai" title="codegen: llm — the LLM writes this step's code, as a reviewed PR">AI</span>}
       {step.requires_approval.length > 0 && <span className="tag" title={step.requires_approval.join(", ")}>🔒{step.requires_approval.length}</span>}
-      {s === "waiting" && (
+      {s === "waiting" && onPlay && (
         <button className="play" onClick={(e) => { e.stopPropagation(); onPlay(step.id); }} title="Run this manual step">▶</button>
       )}
     </div>
@@ -99,13 +113,19 @@ export default function Console() {
   const [events, setEvents] = useState([]);
   const [selected, setSelected] = useState(null);
   const [ai, setAi] = useState("explain");
-  const [error, setError] = useState(null);
-  const [needsToken, setNeedsToken] = useState(false);
+  const [me, setMe] = useState(null);
+  const [error, setError] = useState(() => {
+    const problem = new URLSearchParams(window.location.search).get("signin");
+    return problem ? SIGN_IN_PROBLEMS[problem] || "Sign-in failed." : null;
+  });
 
-  const fail = useCallback((e) => {
-    if (e.status === 401 || e.status === 503) setNeedsToken(true);
-    setError(e.message);
+  const fail = useCallback((e) => setError(e.message), []);
+  useEffect(() => {
+    api.me().then(setMe).catch(() => setMe({ login: null, required: false, available: false }));
+    if (window.location.search.includes("signin=")) window.history.replaceState(null, "", window.location.pathname);
   }, []);
+  // In prod the buttons need a signed-in org member; the server enforces it, this only greys them out.
+  const locked = Boolean(me?.required && !me.login);
 
   const refresh = useCallback(async (migration = name, id = runId) => {
     if (!migration) return;
@@ -159,7 +179,7 @@ export default function Console() {
   };
 
   const latest = detail?.latest || {};
-  const busy = Boolean(detail?.active_run);
+  const busy = Boolean(detail?.active_run) || locked;
   const lastBuild = useMemo(() => runs.find((r) => r.mode === "build"), [runs]);
   const [buildRun, setBuildRun] = useState(null);
   useEffect(() => { if (lastBuild) api.run(lastBuild.id).then(setBuildRun).catch(() => {}); }, [lastBuild?.id, lastBuild?.status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,8 +189,7 @@ export default function Console() {
       <header className="topbar">
         <span className="logo">MaC</span><span className="muted">Migration as Code</span>
         <span className="spacer" />
-        <input className="token" type="password" placeholder="API token (Fly only)" defaultValue={getToken()}
-               onBlur={(e) => { setToken(e.target.value.trim()); if (needsToken) window.location.reload(); }} />
+        <Account me={me} />
       </header>
       <div className="layout">
         <aside className="sidebar">
@@ -184,7 +203,9 @@ export default function Console() {
         </aside>
         <main className="main">
           {error && <div className="banner" onClick={() => setError(null)}>{error}</div>}
-          {needsToken && <div className="banner">This server needs the MaC API token: paste it top right.</div>}
+          {locked && me.available && (
+            <div className="banner banner-info">You can watch everything. To run a pipeline, <a href={SIGN_IN_URL}>sign in with GitHub</a>.</div>
+          )}
           {detail && (
             <>
               <div className="title-row">
@@ -222,15 +243,15 @@ export default function Console() {
                   <span className="muted">{new Date(run.created * 1000).toLocaleString()}</span>
                   {run.reason && <span className="reason">{run.reason}</span>}
                   <span className="spacer" />
-                  {run.status === "waiting" && <button className="btn" onClick={() => act(() => api.resume(run.id))}>Check approvals</button>}
+                  {run.status === "waiting" && <button className="btn" disabled={locked} onClick={() => act(() => api.resume(run.id))}>Check approvals</button>}
                   {(run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded")) && (
-                    <button className="btn btn-danger" onClick={() => act(() => api.undo(run.id))}>Undo</button>
+                    <button className="btn btn-danger" disabled={locked} onClick={() => act(() => api.undo(run.id))}>Undo</button>
                   )}
                 </div>
               )}
 
               <Pipeline detail={detail} run={run} selected={selected} onSelect={setSelected}
-                        onPlay={(step) => act(() => api.play(run.id, step))} />
+                        onPlay={locked ? null : (step) => act(() => api.play(run.id, step))} />
 
               <div className="grid">
                 {run && <LogPanel run={run} events={events} step={selected} onClose={() => setSelected(null)} />}
