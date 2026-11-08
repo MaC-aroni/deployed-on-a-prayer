@@ -104,11 +104,11 @@ def test_confluence_missing_space_is_a_clear_error(http):
 def test_nim_request_and_reply(http):
     http.route("POST", "/v1/chat/completions",
                {"choices": [{"message": {"content": "<think>planning...</think>\n## Overview\nText"}}]})
-    writer = NIMDesignWriter("nv-key", "nvidia/nemotron-3-super-120b-a12b", base_url=f"{http.url}/v1")
+    writer = NIMDesignWriter("nv-key", "nvidia/nemotron-3-ultra-550b-a55b", base_url=f"{http.url}/v1")
     assert writer.write("the facts") == "## Overview\nText"  # reasoning removed
     req = http.requests[0]
     assert req["headers"]["Authorization"] == "Bearer nv-key"
-    assert req["body"]["model"] == "nvidia/nemotron-3-super-120b-a12b"
+    assert req["body"]["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
     system, user = req["body"]["messages"]
     assert system["role"] == "system" and "Rollback plan" in system["content"]
     assert user["role"] == "user" and user["content"].endswith("the facts")

@@ -10,7 +10,7 @@ from typing import Protocol
 
 from .integrations import IntegrationError, _request
 
-DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"  # the 120b "super" model 404s on NIM's chat API
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 

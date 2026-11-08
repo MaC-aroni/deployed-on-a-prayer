@@ -29,6 +29,27 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Default Nemotron model changed to the 550B (Zafeer-R, with Claude Code)
+
+#### What changed
+- The default model is now `nvidia/nemotron-3-ultra-550b-a55b`. The old default,
+  `nvidia/nemotron-3-super-120b-a12b`, is listed by NIM's `/v1/models` but returns **HTTP 404**
+  on `/v1/chat/completions` (tested 2026-11-08 with a real key), so every default-model call
+  failed: the agents, and the design page, which then silently never appeared.
+- Tested through `NIMDesignWriter` with the 550B: 200 in about 9 seconds, all 7 design-page
+  headings, no `<think>` text.
+- `cli.py` no longer has its own copy of the default: it uses `DEFAULT_MODEL` and
+  `DEFAULT_BASE_URL` from `mac/llm.py`, the one place to change them.
+- `.env.example` now lists `MAC_LLM_MODEL` and `MAC_LLM_BASE_URL`.
+
+#### What you need to do
+- Nothing, if you already set `MAC_LLM_MODEL` (the live app uses Grok through it).
+- If you use Nemotron and had no override, pull `main`; the new default applies.
+- **ob1-can-obi:** to run Nemotron on Fly, set the secrets `NVIDIA_API_KEY` and
+  `MAC_LLM_MODEL=nvidia/nemotron-3-ultra-550b-a55b`, and clear `MAC_LLM_API_KEY` and
+  `MAC_LLM_BASE_URL` if they point at Grok (`MAC_LLM_API_KEY` wins over `NVIDIA_API_KEY`).
+- The 550B is larger than the old default, so expect slower calls and watch the rate limits.
+
 ### 2026-11-08: Sign in with GitHub replaces the MaC API token (ob1-can-obi, with Claude Code)
 
 #### What changed
