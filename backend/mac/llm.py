@@ -44,6 +44,22 @@ class NIMChat:
         return strip_reasoning(text)
 
 
+    def chat(self, messages: list[dict], tools: list[dict] | None = None, *, max_tokens: int = 2048) -> dict:
+        """One turn of an OpenAI-style conversation with function calling. Returns the assistant
+        message: {"content": str | None, "tool_calls": [{"id", "function": {"name", "arguments"}}]}."""
+        body = {"model": self.model, "temperature": 0.2, "max_tokens": max_tokens, "messages": messages}
+        if tools:
+            body["tools"], body["tool_choice"] = tools, "auto"
+        reply = _request(self.url, self.headers, method="POST", body=body, timeout=self.timeout, retries=2)
+        try:
+            message = reply["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise IntegrationError(f"unexpected LLM response: {json.dumps(reply)[:300]}") from e
+        if message.get("content"):
+            message["content"] = strip_reasoning(message["content"])
+        return message
+
+
 def strip_reasoning(text: str) -> str:
     """Reasoning models may prepend their thinking; callers only want the answer."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()

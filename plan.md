@@ -31,6 +31,19 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Backend for the chat assistant (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `POST /api/mac/chat` (`mac/assistant.py`): an LLM with read-only tools over Confluence (search,
+  read page), Jira (JQL search, read issue with comments) and MaC's own runs and approvals. It
+  streams `tool` events while it looks things up, then the `answer` (Markdown with links).
+  It can't change anything. Sign-in required on Fly. `docs/api.md` → "The assistant".
+
+#### What you need to do
+- **Elathius (UI):** the chat panel posts the whole conversation each time, reads the stream with
+  `fetch` (not `EventSource`), shows `tool` events as progress lines, and renders `answer` as
+  Markdown. Answers can take a minute with Grok, so show the progress.
+
 ### 2026-11-08: Deploys no longer take the site down (ob1-can-obi, with Claude Code)
 
 #### What changed
