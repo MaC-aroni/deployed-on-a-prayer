@@ -209,3 +209,19 @@ def test_recover_after_restart(env, spec_path):
     assert env.runner.recover() == [queued_build.id]
     assert env.store.get(stuck.id).status == RunStatus.ROLLBACK_FAILED
     assert env.runner.execute(queued_build.id).status == RunStatus.SUCCEEDED
+
+
+def test_a_crash_mid_build_is_failed_not_rollback_failed(api, env):
+    client, env, state = api
+    env.runner.execute = lambda run_id: (_ for _ in ()).throw(TimeoutError("The read operation timed out"))
+    run_id = client.post(f"/api/mac/migrations/{NAME}/build").json()["id"]
+    run = latest_run(client, run_id)
+    assert run["status"] == "failed" and "timed out" in run["reason"]
+
+
+def test_recover_fails_a_build_cut_short(env, spec_path):
+    stuck = env.runner.start_build(spec_path)
+    stuck.next_action, stuck.status = None, RunStatus.RUNNING
+    env.store.save(stuck)
+    assert env.runner.recover() == []
+    assert env.store.get(stuck.id).status == RunStatus.FAILED

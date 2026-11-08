@@ -169,11 +169,14 @@ class Runner:
 
     def recover(self) -> list[str]:
         """After a restart: returns runs that were queued but never picked up (execute them again),
-        and marks runs that were mid-work as rollback_failed, since what they left behind is unknown."""
+        and marks runs that were mid-work as rollback_failed, since what they left behind is unknown.
+        A Build changes nothing, so one cut short is just failed."""
         queued = []
         for run in self.store.runs(limit=500):
             if run.next_action is not None and run.status.active:
                 queued.append(run.id)
+            elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK) and run.mode == "build":
+                self._finish(run, RunStatus.FAILED, "the runner restarted in the middle of this Build; run it again")
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK):
                 self._finish(run, RunStatus.ROLLBACK_FAILED,
                              "the runner restarted in the middle of this run; check what it left behind")
