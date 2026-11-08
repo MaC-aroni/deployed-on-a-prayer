@@ -32,6 +32,20 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Reasoning models that think past their budget no longer fail a run (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The first real plan on prod (Nemotron 3 Ultra on NIM) failed at once with "the LLM returned an
+  empty response": the model spent the whole `max_tokens` thinking and had nothing left for the
+  answer. The LLM client now sees that (empty content with `finish_reason: length`, or an unclosed
+  `<think>`) and asks again with 4x the budget, up to `MAC_LLM_MAX_TOKENS` (32768).
+  `MAC_LLM_THINKING=off` sends NIM's `enable_thinking: false` instead.
+- Ingest skips a page the model wouldn't read (logged, listed under `dropped`) instead of failing
+  the whole plan; the next ingest picks it up.
+
+#### What you need to do
+- Nothing. If a plan still fails with an empty response, set `MAC_LLM_THINKING=off` on Fly.
+
 ### 2026-11-08: The Cost tab: the estimate, with every source, in the console (Zafeer-R, with Claude Code)
 
 #### What changed
