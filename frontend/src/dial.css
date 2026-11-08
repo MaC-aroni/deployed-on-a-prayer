@@ -1544,3 +1544,11 @@ h2,
   min-width: 140px;
   justify-content: center;
 }
+/* a run's reason is shown as written, two lines in the list; the full text is on hover and on the run */
+.all-runs .tr > .reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
