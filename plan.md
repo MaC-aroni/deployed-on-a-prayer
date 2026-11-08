@@ -71,6 +71,19 @@ differently**. Keep it short; link to the docs instead of repeating them.
   there is logged, never fatal. Fly needs nothing new (the Price List is public).
 - `test_planning_api.py::test_build_runs_on_a_generated_plan` fails on Windows only (a `\` vs `/`
   path check); it fails the same way on `main`, and passes on Linux CI.
+### 2026-11-08: Sign-in gate and the mark-only logo (Elathius, with Claude Code)
+
+#### What changed
+- Where sign-in is required (Fly) and nobody is signed in, the console shows a plain page with
+  the large logo and one **Sign in with GitHub** button instead of the read-only console; while
+  `/api/auth/me` is still loading it shows the logo alone. Locally nothing changes.
+- The logo is the mark-only `maclogoonly` file: `frontend/src/assets/maclogo.png` (256px) for the
+  sidebar and chat, `frontend/public/maclogo-64.png` for the favicon, `public/maclogo.png`
+  (768px) for the gate; the original is `public/maclogo-full.png`.
+
+#### What you need to do
+- Nothing. (Viewers who used to watch without signing in now sign in first.)
+
 ### 2026-11-08: Pitch demo retold, logo, chat polish, Retry AI help (Elathius, with Claude Code)
 
 #### What changed

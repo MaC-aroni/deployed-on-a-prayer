@@ -3257,3 +3257,50 @@ a.row-title:hover {
 .chat-avatar.chat-logo.bad {
   box-shadow: 0 0 0 2px var(--bad);
 }
+
+
+/* ---------- the gate: plain background, the logo, one button ---------- */
+.gate {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg);
+  padding: 40px 16px;
+  animation: rise 0.25s ease-out;
+}
+.gate-logo {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+  margin-bottom: 12px;
+}
+.gate-title {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+.gate-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.gate-btn {
+  margin-top: 24px;
+  height: 48px;
+  padding: 0 28px;
+  font-size: 15px;
+  border-radius: 14px;
+}
+.gate-problem {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
+  font-size: 13px;
+  max-width: 420px;
+  text-align: center;
+}

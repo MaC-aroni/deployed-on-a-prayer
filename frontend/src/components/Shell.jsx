@@ -156,6 +156,30 @@ export default function Shell({ crumbs = [], actions, children }) {
     };
   }, [path]);
 
+  // Before the console: a plain page with the logo. While we don't yet know who is signed in it
+  // shows the logo alone; where sign-in is required and nobody is, it shows the one button.
+  if (me === null || locked) {
+    return (
+      <div className="gate" role={locked ? "main" : undefined} aria-busy={me === null}>
+        <img className="gate-logo" src={logo} alt="MaC" width={220} height={220} />
+        {locked && (
+          <>
+            <h1 className="gate-title">MaC</h1>
+            <p className="gate-sub">Migration as Code</p>
+            {signinProblem && <p className="gate-problem">{signinProblem}</p>}
+            {me.available ? (
+              <a className="btn btn-primary gate-btn" href={SIGN_IN_URL}>
+                <Github size={16} /> Sign in with GitHub
+              </a>
+            ) : (
+              <p className="gate-sub">Sign-in isn't set up on this deployment.</p>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <AuthContext.Provider value={{ me, locked, health }}>
       <div className={cx("shell", { collapsed })}>
@@ -232,11 +256,6 @@ export default function Shell({ crumbs = [], actions, children }) {
             {signinProblem && (
               <div className="banner tone-red" onClick={() => setSigninProblem(null)}>
                 {signinProblem}
-              </div>
-            )}
-            {locked && me?.available && (
-              <div className="banner tone-blue">
-                You can watch everything. To run a pipeline, <a href={SIGN_IN_URL}>sign in with GitHub</a>. Buttons here make real AWS, Jira and Confluence changes.
               </div>
             )}
             {children}
