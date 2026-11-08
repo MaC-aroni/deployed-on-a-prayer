@@ -189,7 +189,7 @@ Configuration comes from environment variables:
 | Variable | Purpose |
 |---|---|
 | `GITHUB_TOKEN` | read access to the pipeline's repos |
-| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | one Atlassian site for Jira and Confluence, e.g. `https://mac-aroni.atlassian.net`. Without them, approval steps wait |
+| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | one Atlassian site for Jira and Confluence, e.g. `https://<your-site>.atlassian.net`. Without them, approval steps wait |
 | `JIRA_PROJECT` (default `MAC`), `JIRA_ISSUE_TYPE` (default `Task`) | where tickets go |
 | `MAC_JIRA_ASSIGNEES` | optional JSON, approver name → Jira accountId, e.g. `{"manager": "712020:…"}` |
 | `CONFLUENCE_SPACE_KEY` | the space for design pages. Without it, no page (Build still passes) |

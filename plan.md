@@ -147,17 +147,38 @@ This entry is the groundwork for that.
    Confluence space. Set the `ATLASSIAN_*` and `CONFLUENCE_SPACE_KEY` variables listed in
    `docs/runner.md`. Add a "Rejected" status to the Jira workflow, or use "Won't Do".
 
-### 2026-11-07: Cloud setup guide for AWS, Jira and Confluence (Zafeer-R, with Claude Code)
+### 2026-11-07: Cloud setup, corrected for what's built (ob1-can-obi, with Claude Code)
+
+This replaces Zafeer-R's earlier cloud-setup entry and its Confluence pages, which were written
+against the morning's plan (VPC/ECS/RDS, DBA and Security approvals, hand-made Jira tickets).
 
 #### What changed
-- New [`docs/cloud-setup.md`](docs/cloud-setup.md): the AWS layout (one organization, management,
-  rehearsal and production accounts, teammates through Identity Center), the Jira project
-  `MAC` and the statuses the runner reads, the Confluence space, and every variable.
-- `backend/.env.example` lists the runner's variable names.
+- **[`docs/cloud-setup.md`](docs/cloud-setup.md) rewritten:**
+  - **one AWS account**, because of the budget. Rehearsal and production are separated by
+    name and state
+  - the runner's **exact IAM policy**, scoped to `mac-claims-*` and the state bucket
+  - the Jira `MAC` project with `Approved`/`Rejected` statuses, and **no hand-made
+    tickets**, since MaC raises them
+  - the Confluence space **`CLAIMS`**
+  - the NVIDIA key
+  - every variable, and the checks in order
+- **Removed** `examples/claims-adjudication/confluence/` (the 10 pages from the design doc's
+  first list), `scripts/load_confluence.py` and the `load-confluence` task. **The one
+  knowledge base is `demo-data/confluence/`,** published with `mise run mac publish-knowledge
+  demo-data/confluence`, which builds the page tree and records page URLs for citations.
 
 #### How to adapt
-- Nothing changes in code yet. Zafeer-R is creating the accounts; send AWS, Jira and
-  state-bucket values to ob1-can-obi privately for the Fly secrets.
+- **Zafeer:** follow the new `docs/cloud-setup.md`:
+  - one account
+  - the policy as written
+  - space key `CLAIMS`
+  - don't create tickets by hand; if `MAC-1` to `MAC-3` already exist, close them as
+    "Won't Do"
+
+  Send the account ID, state bucket, runner keys, the Atlassian site URL, email, API token
+  and the NVIDIA key to ob1-can-obi privately.
+- If you loaded the old 10 pages into Confluence already, delete them from the `CLAIMS` space
+  so the agents only read the current knowledge base.
 
 ### 2026-11-07: Runner API for the UI (ob1-can-obi, with Claude Code)
 
