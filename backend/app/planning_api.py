@@ -35,7 +35,7 @@ from mac.graph import Graph, extract
 from mac.integrations import GitHubAPI, IntegrationError, TicketRequest, _request, open_pull_request, read_files
 from mac.knowledge import KnowledgeError, KnowledgePage, load_pages, publish
 from mac.knowledge import render as render_page
-from mac.llm import DEFAULT_MODEL, LLM, parse_json
+from mac.llm import LLM, describe_providers, parse_json, providers as llm_providers, set_provider
 from mac.planner import plan, pr_body
 from mac.runner import GateError
 from mac.sources import sections_from_pages
@@ -79,9 +79,8 @@ def configure(config: Planning | None) -> None:
 
 
 def _default_config() -> Planning:
-    has_key = bool(os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY"))
     return Planning(
-        llm_factory=agents_cli._llm if has_key else None,
+        llm_factory=agents_cli._llm if llm_providers() else None,
         knowledge_dir=Path(os.environ.get("MAC_KNOWLEDGE_DIR", ROOT / "demo-data" / "confluence")),
     )
 
@@ -170,6 +169,50 @@ def _finish(state: mac_api.State, run: RunRecord, status: RunStatus, reason: str
 
 def _model_name(llm: LLM) -> str | None:
     return getattr(llm, "model", None) or os.environ.get("MAC_LLM_MODEL")
+
+
+class Cancelled(Exception):
+    """Someone pressed Cancel on an agent run: raised before the next model call."""
+
+
+class _Cancellable:
+    """The agent's LLM, checking for a Cancel before every call. Agent runs change nothing that
+    needs undoing (they write files and open PRs only at the very end), so stopping between model
+    calls is a clean stop."""
+
+    def __init__(self, llm, store, run_id: str):
+        self.llm, self.store, self.run_id = llm, store, run_id
+
+    @property
+    def model(self):
+        return getattr(self.llm, "model", None)
+
+    def _check(self) -> None:
+        if self.store.cancel_requested(self.run_id):
+            raise Cancelled()
+
+    def complete(self, system: str, user: str, *, max_tokens: int = 4096) -> str:
+        self._check()
+        return self.llm.complete(system, user, max_tokens=max_tokens)
+
+    def chat(self, messages, tools=None, *, max_tokens: int = 2048):
+        self._check()
+        return self.llm.chat(messages, tools, max_tokens=max_tokens)
+
+
+def _cancellable(state: mac_api.State, run_id: str, llm):
+    return None if llm is None else _Cancellable(llm, state.runner.store, run_id)
+
+
+def _cancelled(state: mac_api.State, run: RunRecord, e: Exception, emit, trace: "_Trace") -> bool:
+    """True when the failure was a Cancel: the run ends as cancelled, not failed."""
+    if not isinstance(e, Cancelled):
+        return False
+    state.runner.store.clear_cancel(run.id)
+    emit("step", f"{trace.step}: cancelled", trace.step)
+    trace("director", "outcome", "cancelled: stopped before the next step", status="failed")
+    _finish(state, run, RunStatus.CANCELLED, "cancelled")
+    return True
 
 
 class _Trace:
@@ -474,6 +517,8 @@ def _execute_ingest(state: mac_api.State, config: Planning, run_id: str, llm: LL
         _finish(state, run, RunStatus.SUCCEEDED,
                 f"{len(graph.nodes)} facts and {len(graph.edges)} relations from {len(pages)} pages")
     except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        if _cancelled(state, run, e, emit, trace):
+            return
         log.exception("ingest %s failed", run_id)
         emit("step", f"knowledge: failed: {e}", KNOWLEDGE_STEP)
         trace("director", "outcome", f"failed: {e}", status="failed")
@@ -486,6 +531,7 @@ def ingest(state: mac_api.State = Depends(mac_api.get_state), config: Planning =
     llm = _llm(config)
     _refuse_if_active(state, "knowledge", "ingest")
     run = _new_run(state, "ingest", "knowledge")
+    llm = _cancellable(state, run.id, llm)
     state.runner.store.add_event(run.id, "run", "Ingest started: building the knowledge graph"
                                  + (f" (requested by @{user})" if user else ""))
     state.submit_agent(lambda: _execute_ingest(state, config, run.id, llm))
@@ -696,6 +742,8 @@ def _execute_learn(state: mac_api.State, config: Planning, run_id: str, slug: st
         trace("director", "outcome", f"{service} learned from {slug}; a person reviews the page next", status="succeeded")
         _finish(state, run, RunStatus.SUCCEEDED, outcome)
     except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        if _cancelled(state, run, e, emit, trace):
+            return
         log.exception("learn %s failed", run_id)
         emit("step", f"knowledge: failed: {e}", KNOWLEDGE_STEP)
         trace("director", "outcome", f"failed: {e}", status="failed")
@@ -718,6 +766,7 @@ def learn(body: LearnBody, state: mac_api.State = Depends(mac_api.get_state), co
     migration = f"knowledge/{slug.split('/')[-1]}"
     _refuse_if_active(state, migration, "learn")
     run = _new_run(state, "ingest", migration)
+    llm = _cancellable(state, run.id, llm)
     state.runner.store.add_event(run.id, "run", f"Learn started: {slug}" + (f" (requested by @{user})" if user else ""))
     state.submit_agent(lambda: _execute_learn(state, config, run.id, slug, llm))
     return mac_api._run_view(run)
@@ -779,7 +828,7 @@ def _execute_describe(state: mac_api.State, config: Planning, run_id: str, name:
                 if "##" not in markdown:
                     raise ValueError("the reply has no sections")
                 model = trace.model
-            except Exception as e:  # noqa: BLE001 - the page is written either way
+            except (IntegrationError, ValueError, OSError) as e:  # the page is written either way
                 emit("log", f"writer: the model's reply couldn't be used ({str(e)[:200]}); writing the facts instead", DESCRIBE_STEP)
                 markdown = describe.fallback_markdown(spec)
         else:
@@ -819,6 +868,8 @@ def _execute_describe(state: mac_api.State, config: Planning, run_id: str, name:
         emit("step", f"describe: {outcome}", DESCRIBE_STEP)
         _finish(state, run, RunStatus.SUCCEEDED, outcome)
     except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        if _cancelled(state, run, e, emit, trace):
+            return
         log.exception("describe %s failed", run_id)
         emit("step", f"describe: failed: {e}", DESCRIBE_STEP)
         trace("director", "outcome", f"failed: {e}", status="failed")
@@ -841,6 +892,7 @@ def describe_migration(name: str, state: mac_api.State = Depends(mac_api.get_sta
             llm = None
     _refuse_if_active(state, f"page/{name}", "describe")
     run = _new_run(state, "ingest", f"page/{name}")
+    llm = _cancellable(state, run.id, llm)
     state.runner.store.add_event(run.id, "run", f"Describe started: {name}" + (f" (requested by @{user})" if user else ""))
     state.submit_agent(lambda: _execute_describe(state, config, run.id, name, path, spec, llm))
     return mac_api._run_view(run)
@@ -851,16 +903,35 @@ def describe_migration(name: str, state: mac_api.State = Depends(mac_api.get_sta
 
 @router.get("/health")
 def health(state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config)):
-    """Which integrations this deployment has, so the console can explain a 409 before the click."""
+    """Which integrations this deployment has, so the console can explain a 409 before the click.
+    `llm_providers` are the models that can be switched between; `llm_provider` is the one in use."""
     llm = config.llm_factory is not None
-    return {"llm": llm,
-            "model": (os.environ.get("MAC_LLM_MODEL") or DEFAULT_MODEL) if llm else None,
+    chosen = describe_providers()
+    model = next((p["model"] for p in chosen["llm_providers"] if p["active"]), None)
+    return {"llm": llm, "model": model if llm else None, **chosen,
             "github": bool(os.environ.get("GITHUB_TOKEN")),
             "jira": not isinstance(state.runner.approvals, mac_cli._NoJira),
             "confluence": state.runner.pages is not None,
             "confluence_site": (os.environ.get("ATLASSIAN_SITE") or os.environ.get("JIRA_SITE") or "").rstrip("/") or None,
             "aws": bool(os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE")),
             "approvals_live": state.poll_seconds > 0 or state.webhook_secret is not None}
+
+
+class LlmBody(BaseModel):
+    provider: str  # "nemotron" | "grok", as listed in GET /health llm_providers
+
+
+@router.post("/settings/llm")
+def choose_llm(body: LlmBody, state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config),
+               user: str | None = Depends(signed_in)):
+    """The model switch: every agent, the design page, AI help and the chat use the chosen
+    provider from the next call on. Kept in MAC_DATA_DIR/settings.json. Returns GET /health."""
+    try:
+        set_provider(body.provider.strip().lower())
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    log.info("LLM provider set to %s%s", body.provider, f" by {user}" if user else "")
+    return health(state, config)
 
 
 # ---- Run index: the run list with the fields the console's lists need --------------------------
@@ -1061,6 +1132,8 @@ def _execute_add_repo(state: mac_api.State, config: Planning, run_id: str, slug:
         trace("director", "outcome", outcome, status="succeeded")
         _finish(state, run, RunStatus.SUCCEEDED, outcome)
     except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        if _cancelled(state, run, e, emit, trace):
+            return
         log.exception("add repo %s failed", run_id)
         emit("step", f"licence: failed: {e}", "licence")
         trace("director", "outcome", f"failed: {e}", status="failed")
@@ -1082,6 +1155,7 @@ def add_repo(body: RepoBody, state: mac_api.State = Depends(mac_api.get_state), 
     migration = f"repo/{slug.split('/')[1]}"
     _refuse_if_active(state, migration, "licence check")
     run = _new_run(state, "ingest", migration)
+    llm = _cancellable(state, run.id, llm)
     state.runner.store.add_event(run.id, "run", f"Repository added: {slug}" + (f" (by @{user})" if user else ""))
     state.submit_agent(lambda: _execute_add_repo(state, config, run.id, slug, llm, user))
     return mac_api._run_view(run)
@@ -1460,6 +1534,8 @@ def _execute_plan(state: mac_api.State, config: Planning, run_id: str, goal: str
         trace("director", "outcome", f"valid plan in {result.iterations} attempt(s)", status="succeeded")
         _finish(state, run, RunStatus.SUCCEEDED, f"valid after {result.iterations} attempt(s)")
     except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        if _cancelled(state, run, e, emit, trace):
+            return
         log.exception("plan %s failed", run_id)
         emit("step", f"plan: failed: {e}", PLAN_STEP)
         trace("director", "outcome", f"failed: {e}", status="failed")
@@ -1476,6 +1552,7 @@ def start_plan(body: PlanBody, state: mac_api.State = Depends(mac_api.get_state)
     migration = f"plan/{_slug(goal)}"
     _refuse_if_active(state, migration, "plan")
     run = _new_run(state, "plan", migration)
+    llm = _cancellable(state, run.id, llm)
     state.runner.store.add_event(run.id, "run", f"Planning started: {goal}" + (f" (requested by @{user})" if user else ""))
     state.submit_agent(lambda: _execute_plan(state, config, run.id, goal, body, llm))
     return mac_api._run_view(run)
@@ -1701,6 +1778,8 @@ def _execute_investigate(state: mac_api.State, config: Planning, run_id: str, fa
         trace("director", "outcome", f"root cause: {root_cause}", status="succeeded")
         _finish(state, run, RunStatus.SUCCEEDED, f"root cause: {root_cause}"[:200])
     except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        if _cancelled(state, run, e, emit, trace):
+            return
         log.exception("investigate %s failed", run_id)
         emit("step", f"diagnose: failed: {e}", "diagnose")
         trace("director", "outcome", f"failed: {e}", status="failed")
@@ -1720,6 +1799,7 @@ def investigate(run_id: str, body: InvestigateBody | None = None, state: mac_api
     llm = _llm(config)
     _refuse_if_active(state, failed.migration, "investigation", mode="diagnose")
     run = _new_run(state, "diagnose", failed.migration, spec_text=failed.spec_text, based_on=failed.id)
+    llm = _cancellable(state, run.id, llm)
     run.spec_path, run.spec_digest, run.shas = failed.spec_path, failed.spec_digest, dict(failed.shas)
     run.failed_step, run.diagnostics_mode = failed.failed_step, (body.mode if body and body.mode else failed.diagnostics_mode)
     state.runner.store.save(run)

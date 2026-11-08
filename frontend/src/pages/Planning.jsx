@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Bot, ExternalLink, RotateCw, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, ExternalLink, OctagonX, RotateCw, Sparkles } from "lucide-react";
 import Dag from "../components/Dag.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
@@ -132,6 +132,18 @@ export default function Planning({ runId }) {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [selectedLines.length]);
 
+  async function cancel() {
+    setBusy(true);
+    try {
+      await api.cancel(run.id);
+      setRun(await api.run(run.id));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function tryAgain() {
     setBusy(true);
     try {
@@ -184,7 +196,12 @@ export default function Planning({ runId }) {
               Pull request <ExternalLink size={13} />
             </a>
           )}
-          {run.status === "failed" && (
+          {run.active && (
+            <button className={cx("btn btn-danger", { hint: locked })} onClick={cancel} disabled={busy} title="Stop the agent before its next step. Nothing to undo: a plan changes nothing until it opens its PR.">
+              <OctagonX size={14} /> Cancel
+            </button>
+          )}
+          {(run.status === "failed" || run.status === "cancelled") && (
             <button className={cx("btn", { hint: locked })} onClick={tryAgain} disabled={busy}>
               <RotateCw size={14} /> Try again
             </button>

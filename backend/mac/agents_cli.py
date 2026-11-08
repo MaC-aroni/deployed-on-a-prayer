@@ -14,7 +14,7 @@ from .graph import Graph, extract
 from .guide import write_guide
 from .integrations import GitHubAPI, IntegrationError, open_pull_request, read_files
 from .knowledge import KnowledgeError, load_pages
-from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL, NIMChat
+from .llm import llm_from_env
 from .planner import plan, pr_body as plan_pr_body
 from .sources import sections_from_pages
 from .spec import SpecError, load_spec
@@ -23,12 +23,12 @@ MIGRATIONS_REPO = os.environ.get("MAC_MIGRATIONS_REPO", "MaC-aroni/mac-migration
 
 
 def _llm():
-    # Any OpenAI-compatible chat API: NVIDIA NIM by default, or e.g. xAI with MAC_LLM_BASE_URL.
-    key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
-    if not key:
-        raise SystemExit("MAC_LLM_API_KEY (or NVIDIA_API_KEY) isn't set (see docs/cloud-setup.md)")
-    return NIMChat(key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
-                   os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
+    # Nemotron on NVIDIA NIM (NVIDIA_API_KEY) or Grok (GROK_API_KEY), whichever the switch says;
+    # any OpenAI-compatible API through MAC_LLM_API_KEY / MAC_LLM_BASE_URL / MAC_LLM_MODEL.
+    llm = llm_from_env()
+    if llm is None:
+        raise SystemExit("MAC_LLM_API_KEY (or NVIDIA_API_KEY, or GROK_API_KEY) isn't set (see docs/cloud-setup.md)")
+    return llm
 
 
 def _sections(runner, directory: Path):

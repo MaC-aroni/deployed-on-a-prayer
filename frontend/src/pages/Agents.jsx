@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, BookOpen, ExternalLink, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, ExternalLink, OctagonX, Sparkles } from "lucide-react";
 import Dag from "../components/Dag.jsx";
 import FixCard from "../components/FixCard.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
@@ -239,6 +239,26 @@ export default function Agents({ runId }) {
             <Link to={back.to} className="btn">
               <ArrowLeft size={14} /> Back to {back.label}
             </Link>
+            {shownRun.active && !demo && (
+              <button
+                className={cx("btn btn-danger", { hint: locked })}
+                disabled={busy}
+                title="Stop the agent before its next step"
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api.cancel(shownRun.id);
+                    setRun(await api.run(shownRun.id));
+                  } catch (e) {
+                    setToast({ tone: "red", text: e.detail ?? String(e) });
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <OctagonX size={14} /> Cancel
+              </button>
+            )}
             {rep.page && (
               <Link to={`/knowledge/${rep.page}`} className="btn">
                 <BookOpen size={14} /> {rep.migration ? "The page" : "Knowledge page"}

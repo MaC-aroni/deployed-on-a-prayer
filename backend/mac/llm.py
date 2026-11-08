@@ -7,12 +7,16 @@ code around them reads Confluence, validates what the model returns, and opens p
 import json
 import os
 import re
+from pathlib import Path
 from typing import Protocol
 
 from .integrations import IntegrationError, _request
 
 DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"  # the 120b "super" model 404s on NIM's chat API
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
+GROK_MODEL = "grok-4.7"
+GROK_BASE_URL = "https://api.x.ai/v1"
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class LLM(Protocol):
@@ -118,3 +122,104 @@ def parse_json(text: str):
         return json.loads(extract_block(text, "json"))
     except json.JSONDecodeError as e:
         raise ValueError(f"not valid JSON: {e}") from e
+
+
+# ---- Which model: the switch -----------------------------------------------------------------
+#
+# Two providers can be configured at once: "nemotron" (NVIDIA NIM: NVIDIA_API_KEY, or the generic
+# MAC_LLM_API_KEY / MAC_LLM_BASE_URL / MAC_LLM_MODEL) and "grok" (xAI: GROK_API_KEY or XAI_API_KEY,
+# GROK_MODEL, GROK_BASE_URL). The console switches between them at run time; the choice is kept in
+# MAC_DATA_DIR/settings.json, so it survives a restart and applies to every agent at once.
+
+
+def providers() -> dict[str, dict]:
+    """The providers this deployment has keys for: id -> {id, label, model, base_url, key}."""
+    out: dict[str, dict] = {}
+    key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+    if key:
+        model = os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL)
+        out["nemotron"] = {"id": "nemotron", "label": "Nemotron" if "nemotron" in model.lower() else model.split("/")[-1],
+                           "model": model, "base_url": os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL), "key": key}
+    gkey = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY")
+    if gkey:
+        out["grok"] = {"id": "grok", "label": "Grok", "model": os.environ.get("GROK_MODEL", GROK_MODEL),
+                       "base_url": os.environ.get("GROK_BASE_URL", GROK_BASE_URL), "key": gkey}
+    return out
+
+
+def settings_path() -> Path:
+    return Path(os.environ.get("MAC_DATA_DIR", ROOT / ".mac")) / "settings.json"
+
+
+def _settings() -> dict:
+    try:
+        return json.loads(settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def current_provider() -> str | None:
+    """The chosen provider when it's configured, else the first configured one (Nemotron first)."""
+    available = providers()
+    if not available:
+        return None
+    chosen = _settings().get("llm")
+    if chosen in available:
+        return chosen
+    return "nemotron" if "nemotron" in available else next(iter(available))
+
+
+def set_provider(provider: str) -> str:
+    if provider not in providers():
+        raise ValueError(f"no LLM provider {provider!r} is configured here; choose from {sorted(providers())}")
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({**_settings(), "llm": provider}, indent=2), encoding="utf-8")
+    return provider
+
+
+def describe_providers() -> dict:
+    """For GET /health: no keys, just what can be chosen and what is chosen."""
+    current = current_provider()
+    return {"llm_provider": current,
+            "llm_providers": [{"id": p["id"], "label": p["label"], "model": p["model"], "active": p["id"] == current}
+                              for p in providers().values()]}
+
+
+class RoutedLLM:
+    """An LLM that follows the switch: every call goes to whichever provider is chosen now.
+    `provider` pins one instead (the CLI's --llm)."""
+
+    def __init__(self, provider: str | None = None):
+        self.pinned = provider
+        self._clients: dict[tuple, NIMChat] = {}
+
+    def _client(self) -> NIMChat:
+        pid = self.pinned or current_provider()
+        conf = providers().get(pid or "")
+        if conf is None:
+            raise IntegrationError("no LLM is configured here (NVIDIA_API_KEY / MAC_LLM_API_KEY or GROK_API_KEY)")
+        key = (pid, conf["key"], conf["model"], conf["base_url"])
+        if key not in self._clients:
+            self._clients[key] = NIMChat(conf["key"], conf["model"], conf["base_url"])
+        return self._clients[key]
+
+    @property
+    def provider(self) -> str | None:
+        return self.pinned or current_provider()
+
+    @property
+    def model(self) -> str | None:
+        conf = providers().get(self.provider or "")
+        return conf["model"] if conf else None
+
+    def complete(self, system: str, user: str, *, max_tokens: int = 4096) -> str:
+        return self._client().complete(system, user, max_tokens=max_tokens)
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None, *, max_tokens: int = 2048) -> dict:
+        return self._client().chat(messages, tools, max_tokens=max_tokens)
+
+
+def llm_from_env() -> RoutedLLM | None:
+    """The agents' LLM, or None when no provider has a key."""
+    return RoutedLLM() if providers() else None

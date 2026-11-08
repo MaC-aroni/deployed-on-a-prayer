@@ -188,9 +188,18 @@ pipeline page can show "fix proposed" under a failed run.
 
 ## Health, run index, active services
 
-- `GET /api/mac/health` → `{llm, model, github, jira, confluence, confluence_site, aws, approvals_live}`: what this
+- `GET /api/mac/health` → `{llm, model, llm_provider, llm_providers, github, jira, confluence, confluence_site, aws, approvals_live}`: what this
   deployment has configured, names only. The console greys Launch agent, Learn and Investigate
-  when `llm` is false and says why.
+  when `llm` is false and says why. `llm_providers` is `[{id, label, model, active}]`, the models
+  that can be switched between (`nemotron` from `NVIDIA_API_KEY`/`MAC_LLM_*`, `grok` from
+  `GROK_API_KEY`); `llm_provider` and `model` are the one in use.
+- `POST /api/mac/settings/llm {"provider": "grok"}` (sign-in) switches every agent, the design
+  page, AI help and Chat to that provider from their next call; kept in `MAC_DATA_DIR/settings.json`.
+  Returns the health object; `409` for a provider that isn't configured.
+- **Cancel an agent run:** the runner API's `POST /api/mac/runs/{id}/cancel` also takes plan,
+  ingest/learn/describe and investigate runs. The agent stops before its next model call and the
+  run ends `cancelled` (nothing to undo: agents change nothing until their last step). The run
+  gets a `Cancel requested` event; `409` when it has already finished.
 - `GET /api/mac/run-index?migration=&limit=`: `GET /runs` plus `migration`, `based_on`,
   `diagnostics_mode`, `autofix` and `active` per run, so lists can link a run to its pipeline and
   the pipeline page can find the investigation of a failed run.

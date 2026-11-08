@@ -321,7 +321,7 @@ def test_health_says_what_is_configured_without_values(api):
     client, env, holder = api
     h = client.get("/api/mac/health").json()
     assert h["llm"] is True and h["model"] and h["jira"] is True and h["confluence"] is True
-    assert set(h) == {"llm", "model", "github", "jira", "confluence", "confluence_site", "aws", "approvals_live"}
+    assert set(h) == {"llm", "model", "llm_provider", "llm_providers", "github", "jira", "confluence", "confluence_site", "aws", "approvals_live"}
     planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE))
     h = client.get("/api/mac/health").json()
     assert h["llm"] is False and h["model"] is None
@@ -541,3 +541,48 @@ def test_describe_without_an_llm_or_confluence_still_writes_the_page(api):
     assert item["page"]["url"] is None and item["page"]["local"] is True and item["page"]["model"] is None
     body = client.get(f"/api/mac/knowledge/{item['page']['id']}").json()["body"]
     assert body.startswith("## Summary") and "| 1 | preflight |" in body
+
+
+def test_cancel_stops_an_agent_run_before_its_next_model_call(api):
+    client, env, holder = api
+    calls = []
+
+    def reply(user):
+        calls.append(user[:40])
+        if len(calls) == 1:  # someone presses Cancel while the first page is being read
+            run_id = env.store.runs()[0].id
+            res = client.post(f"/api/mac/runs/{run_id}/cancel")
+            assert res.status_code == 202, res.text
+        return json.dumps({"nodes": [], "edges": []})
+
+    holder["llm"] = ScriptedLLM(*([reply] * 30))
+    res = client.post("/api/mac/ingest")
+    assert res.status_code == 202, res.text
+    run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert run["status"] == "cancelled" and run["active"] is False and run["reason"] == "cancelled"
+    assert len(calls) == 1  # the second page was never sent to the model
+    messages = [e["message"] for e in events(client, run["id"])]
+    assert any("Cancel requested" in m for m in messages) and any("knowledge: cancelled" in m for m in messages)
+    assert client.post(f"/api/mac/runs/{run['id']}/cancel").status_code == 409  # nothing left to cancel
+
+
+def test_the_model_switch_is_in_health_and_changes_what_agents_use(api, monkeypatch, tmp_path):
+    client, env, holder = api
+    monkeypatch.setenv("MAC_DATA_DIR", str(tmp_path / "settings-home"))
+    monkeypatch.setenv("NVIDIA_API_KEY", "nv")
+    monkeypatch.setenv("GROK_API_KEY", "xai")
+    monkeypatch.delenv("MAC_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("MAC_LLM_MODEL", raising=False)
+    monkeypatch.delenv("MAC_LLM_BASE_URL", raising=False)
+    health = client.get("/api/mac/health").json()
+    assert health["llm_provider"] == "nemotron" and health["model"].startswith("nvidia/nemotron")
+    assert [p["id"] for p in health["llm_providers"]] == ["nemotron", "grok"]
+    switched = client.post("/api/mac/settings/llm", json={"provider": "grok"}).json()
+    assert switched["llm_provider"] == "grok" and switched["model"] == "grok-4.7"
+    assert client.get("/api/mac/health").json()["llm_provider"] == "grok"  # remembered
+    from mac.llm import RoutedLLM
+    routed = RoutedLLM()
+    assert routed.provider == "grok" and routed.model == "grok-4.7" and routed._client().url.startswith("https://api.x.ai/")
+    assert client.post("/api/mac/settings/llm", json={"provider": "claude"}).status_code == 409
+    monkeypatch.delenv("GROK_API_KEY")
+    assert client.get("/api/mac/health").json()["llm_provider"] == "nemotron"  # a missing key falls back

@@ -32,6 +32,24 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Model switch (Nemotron | Grok) and Cancel on every run (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Model switch** in the sidebar footer: the agents, the design page, AI help and Chat use
+  whichever provider is chosen, from their next call. Providers come from the keys set:
+  `nemotron` (`NVIDIA_API_KEY`, or `MAC_LLM_*`) and `grok` (`GROK_API_KEY`, `GROK_MODEL`,
+  `GROK_BASE_URL`). `GET /health` lists them (`llm_providers`, `llm_provider`);
+  `POST /api/mac/settings/llm {provider}` switches; the choice is kept in `MAC_DATA_DIR/settings.json`.
+  Prod on Nemotron 3 Ultra took over 6 minutes on the first knowledge page; Grok is the fast lane.
+- **Cancel everywhere:** a visible Cancel button on the pipeline page (next to the primary
+  action) and on the planning and agents pages. `POST /runs/{id}/cancel` now also stops agent
+  runs (plan, learn, describe, investigate) before their next model call; they end `cancelled`.
+
+#### What you need to do
+- **ob1-can-obi:** `fly secrets set GROK_API_KEY=…` to make Grok selectable in prod.
+- **Elathius (UI):** `health.llm_providers` / `api.setLlm(id)` if you move the switch; the Cancel
+  buttons use the existing `api.cancel(runId)`.
+
 ### 2026-11-08: Reasoning models that think past their budget no longer fail a run (ob1-can-obi, with Claude Code)
 
 #### What changed

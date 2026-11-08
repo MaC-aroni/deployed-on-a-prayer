@@ -563,11 +563,10 @@ class ChatBody(BaseModel):
 
 def _default_assistant():
     from mac.assistant import AtlassianReader, Assistant
-    from mac.llm import DEFAULT_BASE_URL, DEFAULT_MODEL, NIMChat
-    key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
-    if not key:
+    from mac.llm import llm_from_env
+    llm = llm_from_env()
+    if llm is None:
         return None
-    llm = NIMChat(key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL), os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
     site, email, token = (os.environ.get(k) for k in ("ATLASSIAN_SITE", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN"))
     reader = AtlassianReader(site, email, token, os.environ.get("CONFLUENCE_SPACE_KEY")) if site and email and token else None
     return lambda store: Assistant(llm, store, reader)
@@ -676,8 +675,17 @@ def rerun_ai(run_id: str, body: AiBody, state: State = Depends(get_state), user:
 @router.post("/runs/{run_id}/cancel", status_code=202)
 def cancel(run_id: str, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
     """Stop the run and undo everything it did. A waiting run is undone now; a run mid-step
-    finishes that step first (a running script is killed, Terraform is left to finish)."""
-    _get_run(state, run_id)
+    finishes that step first (a running script is killed, Terraform is left to finish). An agent
+    run (plan, learn, describe, investigate) stops before its next model call; it changed nothing
+    that needs undoing."""
+    run = _get_run(state, run_id)
+    if run.mode not in ("build", "rehearse", "deploy"):
+        if not run.status.active:
+            raise HTTPException(409, f"nothing to cancel: {run.mode} run {run_id} is {run.status}")
+        state.runner.store.request_cancel(run.id)
+        state.runner.store.add_event(run.id, "run", "Cancel requested: the agent stops before its next step"
+                                     + (f" (by @{user})" if user else ""))
+        return _run_view(run)
     try:
         run = state.runner.request_cancel(run_id)
     except GateError as e:
