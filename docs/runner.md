@@ -31,6 +31,11 @@ If the runner itself crashes or restarts mid-run, a Rehearse or Deploy ends `rol
 (what it left behind is unknown), but a Build just ends `failed`: it only reads and plans.
 **Undo** does the same for a finished Deploy, or for a run that's waiting.
 
+**Cancel** stops any active run and undoes everything it did: a waiting run is undone at once;
+a run mid-step finishes that step first (a running script is killed on the spot, a Terraform
+command is left to finish, because a half-applied state is worse than a finished step that gets
+destroyed a moment later). The run ends `cancelled`. A Build that's cancelled just stops.
+
 ## Stages, manual steps and approvals
 
 - `stages` are the pipeline's columns, run left to right. Within a stage, `needs` decides the
@@ -46,8 +51,10 @@ If the runner itself crashes or restarts mid-run, a Rehearse or Deploy ends `rol
 MaC raises the Jira tickets itself, in plain code from the spec (summary, justification, the
 steps each approval unblocks), never written by a model. Rules:
 
-- **One ticket per approval per version of `migration.yaml`.** Re-running never duplicates a
-  ticket; editing the plan raises fresh ones, because an approval covers a specific plan.
+- **One ticket per approval, kept across plan versions.** Re-running never duplicates a ticket,
+  and editing the plan doesn't raise new ones either: the existing ticket gets a Jira comment
+  saying the plan was updated (the design page is rewritten in place), and keeps whatever
+  status the approver gave it. Approvers judge the plan on the design page, not a version hash.
 - **Chains:** an approval with `after: [X]` isn't requested until X is approved. If X is
   rejected, it counts as rejected too. Demo: the MCP team is only asked after the manager.
 - **`design_doc: true`:** the ticket links the design page and isn't raised until the page

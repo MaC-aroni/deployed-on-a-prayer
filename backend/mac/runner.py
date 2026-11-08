@@ -159,6 +159,22 @@ class Runner:
             message = "Retrying the undo" if run.status == RunStatus.ROLLBACK_FAILED else "Undo requested"
             return self._queue(run, "undo", message)
 
+    def request_cancel(self, run_id: str) -> RunRecord:
+        """Stop a run and undo everything it did. A waiting run is undone at once (queued; the
+        caller executes it). A run mid-step finishes that step, then undoes; a running script is
+        killed, a running Terraform command is allowed to finish first."""
+        with self._lock:
+            run, _ = self._existing(run_id)
+            if run.status == RunStatus.ROLLING_BACK:
+                raise GateError(f"run {run_id} is already undoing itself")
+            if not run.status.active:
+                raise GateError(f"nothing to cancel: {run.mode} run {run_id} is {run.status}")
+            self.store.request_cancel(run.id)
+            if run.status == RunStatus.WAITING:
+                return self._queue(run, "undo", "Cancelled: undoing everything this run did")
+            self._event(run, "run", "Cancel requested: stopping after the current step, then undoing everything")
+            return run
+
     # ---- Doing the work (slow) ----------------------------------------------------------------
 
     def execute(self, run_id: str) -> RunRecord:
@@ -174,8 +190,11 @@ class Runner:
         if action == "undo":
             self._skip_unreached(run)
             ok = self._rollback(run, spec, failed=None)
-            return self._finish(run, RunStatus.UNDONE if ok else RunStatus.ROLLBACK_FAILED,
-                                None if ok else "undo didn't finish; see the log for what's left")
+            cancelled = self.store.cancel_requested(run.id)
+            self.store.clear_cancel(run.id)
+            done = RunStatus.CANCELLED if cancelled else RunStatus.UNDONE
+            return self._finish(run, done if ok else RunStatus.ROLLBACK_FAILED,
+                                ("cancelled" if cancelled else None) if ok else "undo didn't finish; see the log for what's left")
         return self._advance(run, spec)
 
     def recover(self) -> list[str]:
@@ -229,6 +248,9 @@ class Runner:
             self._write_design(run, spec)
             self._report_approvals(run, spec)
             for step in execution_order(spec):
+                if self.store.cancel_requested(run.id):
+                    self.store.clear_cancel(run.id)
+                    return self._finish(run, RunStatus.CANCELLED, "cancelled")  # a Build changes nothing
                 if step.type == StepType.IAC:
                     self._build_action(run, spec, step, "plan")
                 elif step.type == StepType.CHECK and not follows_a_change(spec, step):
@@ -247,6 +269,8 @@ class Runner:
         for step in execution_order(spec):
             if run.steps[step.id] == StepState.SUCCEEDED:
                 continue
+            if self.store.cancel_requested(run.id):
+                return self._cancel(run, spec)
 
             if run.mode == "deploy" and step.requires_approval:
                 try:
@@ -288,7 +312,19 @@ class Runner:
             return run
         return self._finish(run, RunStatus.SUCCEEDED)
 
+    def _cancel(self, run: RunRecord, spec: Spec) -> RunRecord:
+        self._event(run, "run", "Cancelled. Undoing everything this run did.")
+        self._skip_unreached(run)
+        ok = self._rollback(run, spec, failed=None)
+        self.store.clear_cancel(run.id)
+        return self._finish(run, RunStatus.CANCELLED if ok else RunStatus.ROLLBACK_FAILED,
+                            "cancelled" if ok else "cancelled, but the undo didn't finish; see the log")
+
     def _fail(self, run: RunRecord, spec: Spec, step: Step, reason: str, ran: bool) -> RunRecord:
+        if self.store.cancel_requested(run.id):  # the step was killed by a cancel, not broken
+            run.steps[step.id] = StepState.SKIPPED if not ran else StepState.FAILED
+            run.failed_step = None
+            return self._cancel(run, spec)
         run.failed_step, run.reason = step.id, reason
         if not ran:
             self._set(run, step, StepState.FAILED)
@@ -413,6 +449,20 @@ class Runner:
         """(approved | pending | rejected, detail). Raises the ticket if its turn has come:
         everything in `after` approved, and the design page written if it needs one."""
         ticket = self.store.ticket(migration, digest, approval.id)
+        if ticket is None:
+            previous = self.store.latest_ticket(migration, approval.id)
+            if previous is not None:
+                # The plan changed but the approval is the same ask: keep the ticket, tell the approver.
+                self.store.save_ticket(migration, digest, previous)
+                comment = getattr(self.approvals, "comment", None)
+                if comment is not None:
+                    try:
+                        comment(previous.key, f"MaC: the migration plan was updated (version {digest[:12]}). "
+                                              "This ticket still covers this approval; the design page is updated in place.")
+                    except IntegrationError as e:
+                        log(f"couldn't comment on {previous.key}: {e}")
+                log(f"{previous.key} still covers {approval.id} for the updated plan")
+                ticket = previous
         if ticket is None:
             for dep in approval.after:
                 dep_status, _ = self._approval_state(migration, digest, spec, spec.approval(dep), log)
@@ -545,7 +595,8 @@ class Runner:
         run_dir = self.data_dir / "runs" / run.id
         run_dir.mkdir(parents=True, exist_ok=True)
         return StepContext(spec=spec, step=step, mode=run.mode, run_id=run.id, shas=run.shas, run_dir=run_dir,
-                           log=lambda line: self.store.add_event(run.id, "log", line, step.id))
+                           log=lambda line: self.store.add_event(run.id, "log", line, step.id),
+                           cancelled=lambda: self.store.cancel_requested(run.id))
 
     def _set(self, run: RunRecord, step: Step, state: StepState) -> None:
         run.steps[step.id] = state

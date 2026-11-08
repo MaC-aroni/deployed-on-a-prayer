@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +49,7 @@ class StepContext:
     run_dir: Path  # persists for the whole run; entrypoints can leave artifacts here
     log: Callable[[str], None]
     extra_env: dict[str, str] = field(default_factory=dict)
+    cancelled: Callable[[], bool] = lambda: False  # asked every second while a command runs
 
     @property
     def env_name(self) -> str:
@@ -208,11 +210,22 @@ class Executor:
         # Read output on a thread so the timeout also catches a command that hangs silently.
         reader = threading.Thread(target=lambda: [ctx.log(line.rstrip("\n")) for line in proc.stdout])
         reader.start()
+        # Terraform is never interrupted (a half-applied state is worse than a finished step that
+        # gets destroyed a moment later); scripts are killed as soon as a cancel is requested.
+        interruptible = cmd[:len(self.terraform)] != self.terraform
+        started = time.monotonic()
         try:
-            code = proc.wait(timeout=self.timeout)
-        except subprocess.TimeoutExpired as e:
-            proc.kill()
-            raise StepFailed(f"{label} took longer than {self.timeout}s") from e
+            while True:
+                try:
+                    code = proc.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired as e:
+                    if time.monotonic() - started > self.timeout:
+                        proc.kill()
+                        raise StepFailed(f"{label} took longer than {self.timeout}s") from e
+                    if interruptible and ctx.cancelled():
+                        proc.kill()
+                        raise StepFailed(f"{label} was cancelled") from e
         finally:
             reader.join(timeout=10)
         if code != 0:
