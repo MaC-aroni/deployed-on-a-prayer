@@ -299,12 +299,21 @@ class Store:
                             "updated = excluded.updated", (page, page_id, url, title, time.time()))
 
     def add_event(self, run_id: str, kind: str, message: str, step: str | None = None) -> Event:
-        with self.lock, self.db:
-            seq = self.db.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?",
-                                  (run_id,)).fetchone()[0]
-            event = Event(run_id=run_id, seq=seq, ts=time.time(), step=step, kind=kind, message=message)
-            self.db.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)",
-                            (run_id, seq, event.ts, step, kind, message))
+        for attempt in range(5):
+            try:
+                with self.lock, self.db:
+                    # The number is taken inside the INSERT, so it's atomic even if another
+                    # connection to the same file writes events for this run at the same time.
+                    ts = time.time()
+                    self.db.execute("INSERT INTO events (run_id, seq, ts, step, kind, message) "
+                                    "SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ? FROM events WHERE run_id = ?",
+                                    (run_id, ts, step, kind, message, run_id))
+                    seq = self.db.execute("SELECT MAX(seq) FROM events WHERE run_id = ?", (run_id,)).fetchone()[0]
+                break
+            except sqlite3.IntegrityError:
+                if attempt == 4:
+                    raise
+        event = Event(run_id=run_id, seq=seq, ts=ts, step=step, kind=kind, message=message)
         for listener in self.listeners:
             listener(event)
         return event

@@ -100,9 +100,18 @@ def _default_state() -> State:
     )
 
 
+_state_lock = threading.Lock()
+
+
 def get_state() -> State:
     global _state
-    if _state is None:
+    if _state is not None:
+        return _state
+    # The first requests after a restart arrive together; only one of them may build the state and
+    # run recover(), or two recoveries race (and collide on event numbers).
+    with _state_lock:
+        if _state is not None:
+            return _state
         state = _default_state()
         queued = state.runner.recover()  # work queued before a restart
         # Checkouts from finished runs are dead weight on a small disk; their logs are in the store.

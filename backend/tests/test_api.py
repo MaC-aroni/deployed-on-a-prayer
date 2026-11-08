@@ -535,3 +535,34 @@ def test_sync_mirrors_the_repo_and_only_touches_what_it_wrote(http, tmp_path):
     result = sync_migrations("o/m", "main", dest, "tok", api=http.url)
     assert result["error"] and result["commit"] == "c2" and (dest / "claims" / "migration.yaml").is_file()
     assert read_manifest(dest)["error"] == result["error"]
+
+
+def test_events_numbering_survives_two_stores_on_one_file(env, tmp_path):
+    from mac.store import Store
+
+    a, b = Store(tmp_path / "x.db"), Store(tmp_path / "x.db")
+    import threading
+    errors = []
+
+    def write(store):
+        try:
+            for i in range(50):
+                store.add_event("r1", "log", f"line {i}")
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=write, args=(s,)) for s in (a, b)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors and sorted(e.seq for e in a.events("r1")) == list(range(1, 101))
+
+
+def test_one_broken_run_never_stops_recovery(env, spec_path):
+    env.runner.build(spec_path)
+    run = env.store.runs()[0]
+    original = env.runner.settle
+    env.runner.settle = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    run.status = RunStatus.RUNNING
+    env.store.save(run)
+    assert env.runner.recover() == []  # logged, not raised
+    env.runner.settle = original

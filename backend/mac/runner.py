@@ -13,6 +13,7 @@ background: `start_*` / `request_*` check the rules and record what should happe
 (`build`, `rehearse`, `play`, ...) do both, for the CLI and tests.
 """
 
+import logging
 import json
 import threading
 import time
@@ -30,6 +31,9 @@ from .store import ApprovalRecord, DesignPage, RunRecord, RunStatus, StepState, 
 from .usage import load_usage
 from .validate import execution_order, follows_a_change, validate
 
+
+
+log = logging.getLogger("mac.runner")
 
 class GateError(Exception):
     """The runner refused to start or continue. The message says what to do instead."""
@@ -213,10 +217,18 @@ class Runner:
         A Build changes nothing, so one cut short is just failed."""
         queued = []
         for run in self.store.runs(limit=500):
+            try:
+                self._recover_one(run, queued)
+            except Exception:  # noqa: BLE001 - one damaged run must never keep the server from starting
+                log.exception("recover: run %s could not be repaired; leaving it as it is", run.id)
+        return queued
+
+    def _recover_one(self, run: RunRecord, queued: list[str]) -> None:
+        if True:
             if run.mode not in ("build", "rehearse", "deploy"):
                 if run.status.active:  # an agent job (ingest, plan, …): nothing in AWS to undo
                     self._finish(run, RunStatus.FAILED, "the server restarted while this was running; start it again")
-                continue
+                return
             if run.next_action is not None and run.status.active:
                 queued.append(run.id)
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK) and run.mode == "build":
@@ -229,7 +241,6 @@ class Runner:
                 queued.append(self.request_undo(run.id).id)  # the caller executes it, like other queued work
             elif not run.status.active and self._unsettled(run):
                 self.settle(run, run.status)  # a finished run from before this repair existed
-        return queued
 
     def _unsettled(self, run: RunRecord) -> bool:
         return any(s in (StepState.RUNNING, StepState.PENDING, StepState.BLOCKED, StepState.WAITING)
