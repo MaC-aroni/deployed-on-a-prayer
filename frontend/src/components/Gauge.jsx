@@ -27,7 +27,9 @@ export function currentIndex(stages) {
   return last;
 }
 
-export default function Gauge({ stages = [], size = 56, active = false, tone = "accent", title, className }) {
+// `runStatus` tints the ring when per-stage states are unknown (list rows): the stages stay neutral
+// index marks and the ring says how the run ended.
+export default function Gauge({ stages = [], size = 56, active = false, tone = "accent", runStatus = null, title, className }) {
   const n = stages.length;
   const c = size / 2;
   const r = c - 3;
@@ -38,7 +40,7 @@ export default function Gauge({ stages = [], size = 56, active = false, tone = "
   const handDeg = idx < 0 ? start : at(idx);
   const label = title ?? (idx >= 0 ? `${stages[idx].name} · ${stages[idx].status}` : "not started");
   return (
-    <svg className={cx("gauge", `tone-${tone}`, { active }, className)} width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label}>
+    <svg className={cx("gauge", `tone-${tone}`, { active }, runStatus && `run-${runStatus}`, className)} width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label}>
       <title>{label}</title>
       <circle className="gauge-ring" cx={c} cy={c} r={r} />
       {stages.map((s, i) => {

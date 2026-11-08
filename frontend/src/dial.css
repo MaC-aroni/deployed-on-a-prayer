@@ -825,7 +825,7 @@ a {
 .gauge-mark.is-running,
 .gauge-mark.is-waiting,
 .gauge-mark.is-blocked,
-.gauge-mark.current {
+.gauge-mark.current:not(.is-failed):not(.is-rollback_failed):not(.is-rolled_back):not(.is-skipped) {
   stroke: var(--accent);
   stroke-width: 1.5;
 }
@@ -1091,5 +1091,267 @@ body::before,
   }
   .page-head h1 {
     font-size: 32px;
+  }
+}
+
+
+/* =====================================================================================
+   Finish-review fixes
+   ===================================================================================== */
+
+/* run-level ring tints for list rows (no per-stage states there) */
+.gauge.run-failed .gauge-ring,
+.gauge.run-rollback_failed .gauge-ring {
+  stroke: var(--bad);
+}
+.gauge.run-running .gauge-ring,
+.gauge.run-waiting .gauge-ring,
+.gauge.run-rolling_back .gauge-ring {
+  stroke: var(--accent);
+}
+.gauge.run-succeeded .gauge-ring {
+  stroke: var(--fg);
+}
+.gauge.run-undone .gauge-ring,
+.gauge.run-cancelled .gauge-ring {
+  stroke: var(--faint);
+}
+.gauge.run-failed .gauge-hand line,
+.gauge.run-failed .gauge-hand circle {
+  stroke: var(--bad);
+  fill: var(--bad);
+}
+
+/* the sidebar is 288px here, whatever the base sheet re-declares */
+.shell,
+.shell:not(.collapsed) {
+  --sidebar-w: 288px;
+}
+.shell.collapsed {
+  --sidebar-w: 64px;
+}
+
+/* the statement: figure and noun on one baseline, captions beneath, no tiles */
+.metrics {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0 48px;
+  padding: 22px 0 20px;
+}
+.metric {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 6px 0;
+}
+.metric + .metric {
+  border-left: 0;
+  padding-left: 0;
+}
+.metric .label {
+  order: 2;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--fg);
+}
+.metric-value {
+  order: 1;
+  font-size: 48px;
+}
+.metric-sub {
+  order: 3;
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 2px;
+  color: var(--muted);
+}
+.metric-link:hover .label,
+.metric-link:hover .metric-value {
+  color: var(--accent);
+}
+
+/* rows hold their line */
+.cell-status {
+  flex-wrap: nowrap;
+}
+.migrations-table .cell-status .small {
+  display: none;
+}
+.migrations-table .row-meta {
+  gap: 4px 14px;
+}
+.tr {
+  min-height: 72px;
+  padding: 14px 32px;
+}
+.stage-chip {
+  font-family: var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10.5px;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+}
+.cell-stages {
+  gap: 4px 14px;
+}
+
+/* gilt you can see on the one primary action */
+.btn-primary,
+.btn-primary:hover {
+  box-shadow: 0 0 0 1px var(--gilt);
+  border-color: var(--bg);
+}
+.btn-primary svg {
+  color: var(--gilt);
+}
+
+/* small text that still reads */
+:root,
+:root[data-theme="light"] {
+  --faint: #6b7084;
+}
+:root[data-theme="dark"] {
+  --faint: #868b9b;
+}
+
+/* hairlines at one device pixel on dense displays */
+@media (min-resolution: 2dppx) {
+  .card,
+  .dag-frame,
+  .table,
+  .inspector,
+  .report,
+  .chat-main,
+  .search,
+  .filter,
+  .node,
+  .btn,
+  .pill,
+  .doors .door,
+  .tr,
+  .tabs,
+  .col-head,
+  .topbar,
+  .sidebar,
+  .metrics,
+  .run-head,
+  .card-foot,
+  .theme-toggle,
+  .nav-item.primary,
+  .stage-chip,
+  .chip,
+  .meta-chip,
+  .filter-input,
+  .add-repo-input,
+  .chat-composer,
+  .chat-suggestion,
+  .review-bar,
+  .probe-result {
+    border-width: 0.5px;
+  }
+  .tab.active {
+    box-shadow: inset 0 -0.5px 0 var(--fg);
+  }
+  .gauge-ring,
+  .gauge-mark {
+    stroke-width: 0.75;
+  }
+  .gauge-mark.current,
+  .gauge-mark.is-failed {
+    stroke-width: 1.25;
+  }
+  .edge {
+    stroke-width: 0.75;
+  }
+}
+
+
+/* ---------- titles you can read: a sturdy serif for words, the Didone only for figures ---------- */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  --title: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+}
+h1,
+h2,
+.page-head h1,
+.run-head h1,
+.chat-empty h1,
+.chat-title,
+.gate-title,
+.inspector-title h2,
+.empty h2,
+.card-head strong,
+.migrations-table .row-title,
+.brand-text strong,
+.metric .label {
+  font-family: var(--title);
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  font-feature-settings: "kern", "liga";
+}
+.page-head h1 {
+  font-size: 36px;
+  line-height: 1.1;
+}
+.run-head h1 {
+  font-size: 30px;
+  line-height: 1.15;
+}
+.run-head h1 .mono,
+.run-head h1 code {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  font-weight: 500;
+}
+.migrations-table .row-title {
+  font-size: 18px;
+}
+.card-head strong {
+  font-size: 18px;
+}
+.brand-text strong {
+  font-size: 19px;
+}
+.metric .label {
+  font-size: 20px;
+}
+.metric-value,
+.nav-count,
+.tab .count,
+.col-count {
+  font-family: var(--display);
+}
+
+/* narrow screens: the pipeline row stacks, nothing runs off the edge */
+@media (max-width: 820px) {
+  .migrations-table .tr {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 16px;
+  }
+  .migrations-table .cell-status {
+    grid-column: 1 / -1;
+  }
+  .migrations-table .cell-runs,
+  .migrations-table .cell-stages,
+  .migrations-table .th {
+    display: none;
+  }
+  .migrations-table .row-title {
+    font-size: 17px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .toolbar {
+    flex-wrap: wrap;
+  }
+  .toolbar .btn-primary {
+    margin-left: 0;
   }
 }

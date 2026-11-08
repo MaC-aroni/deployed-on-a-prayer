@@ -124,7 +124,7 @@ export default function Migrations() {
           return (
             <button type="button" className="tr row-btn" key={m.key} onClick={() => navigate(m.href)}>
               <div className="cell-status">
-                <Gauge size={44} active={Boolean(head && ACTIVE.has(head.status))} stages={(m.stages ?? []).map((name) => ({ name, status: head ? (head.status === "succeeded" ? "succeeded" : head.failed_step ? "failed" : head.status) : "pending" }))} title={head ? `${MODE_LABEL[head.mode]} ${hm.label.toLowerCase()}` : "no runs yet"} />
+                <Gauge size={44} active={Boolean(head && ACTIVE.has(head.status))} runStatus={head?.status ?? null} stages={(m.stages ?? []).map((name) => ({ name, status: head?.status === "succeeded" ? "succeeded" : "pending" }))} title={head ? `${MODE_LABEL[head.mode]} ${hm.label.toLowerCase()}` : "no runs yet"} />
                 {m.valid === false ? (
                   <Pill tone="red">
                     <StatusIcon status="failed" size={14} /> Invalid spec
