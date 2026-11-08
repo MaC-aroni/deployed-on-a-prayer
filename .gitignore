@@ -8,3 +8,7 @@ __pycache__/
 .DS_Store
 dist/
 .mac/
+
+# Credential exports (never commit)
+*accessKeys*.csv
+*_credentials*.csv
