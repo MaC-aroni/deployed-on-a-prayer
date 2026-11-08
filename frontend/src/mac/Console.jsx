@@ -153,6 +153,11 @@ export default function Console() {
     } catch (e) { fail(e); }
   };
 
+  // Rehearse and Deploy change real AWS resources, so they ask first; Build only plans.
+  const confirmStart = (label, mode, aiMode) => {
+    if (window.confirm(`${label} ${detail.service}? This makes real changes in AWS.`)) act(() => api.start(name, mode, aiMode));
+  };
+
   const latest = detail?.latest || {};
   const busy = Boolean(detail?.active_run);
   const lastBuild = useMemo(() => runs.find((r) => r.mode === "build"), [runs]);
@@ -187,19 +192,26 @@ export default function Console() {
                   <h1>{detail.service}</h1>
                   <div className="muted">{detail.name} · {detail.target.provider.toUpperCase()} {detail.target.region} · owner {detail.owner_team}</div>
                 </div>
-                <div className="actions">
-                  <div className="segmented" title="AI help if a step fails">
-                    {AI_MODES.map(([value, label]) => (
-                      <button key={value} className={ai === value ? "on" : ""} onClick={() => setAi(value)}>{label}</button>
-                    ))}
+                <div className="controls">
+                  <div className="actions">
+                    <button className="btn" disabled={busy} onClick={() => act(() => api.start(name, "build"))}>Build</button>
+                    <button className="btn" disabled={busy || latest.build?.status !== "succeeded"}
+                            title={latest.build?.status !== "succeeded" ? "Needs a passing Build" : ""}
+                            onClick={() => confirmStart("Rehearse", "rehearse", ai)}>Rehearse</button>
+                    <button className="btn btn-primary" disabled={busy || latest.rehearse?.status !== "succeeded"}
+                            title={latest.rehearse?.status !== "succeeded" ? "Needs a passing Rehearse" : ""}
+                            onClick={() => confirmStart("Deploy", "deploy", ai === "autofix" ? "report" : ai)}>Deploy</button>
                   </div>
-                  <button className="btn" disabled={busy} onClick={() => act(() => api.start(name, "build"))}>Build</button>
-                  <button className="btn" disabled={busy || latest.build?.status !== "succeeded"}
-                          title={latest.build?.status !== "succeeded" ? "Needs a passing Build" : ""}
-                          onClick={() => act(() => api.start(name, "rehearse", ai))}>Rehearse</button>
-                  <button className="btn btn-primary" disabled={busy || latest.rehearse?.status !== "succeeded"}
-                          title={latest.rehearse?.status !== "succeeded" ? "Needs a passing Rehearse" : ""}
-                          onClick={() => act(() => api.start(name, "deploy", ai === "autofix" ? "report" : ai))}>Deploy</button>
+                  {/* A setting, not an action: it only says what the AI does if a Rehearse or Deploy step fails. */}
+                  <div className="ai-setting">
+                    <span className="muted small">If a step fails, AI will:</span>
+                    <div className="segmented" role="radiogroup" aria-label="AI help if a step fails">
+                      {AI_MODES.map(([value, label]) => (
+                        <button key={value} role="radio" aria-checked={ai === value} className={ai === value ? "on" : ""}
+                                onClick={() => setAi(value)}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
