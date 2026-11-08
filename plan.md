@@ -17,11 +17,11 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Stack | FastAPI backend (`backend/`), React + Vite frontend (`frontend/`), one Fly.io app |
 | MaC runner | `backend/mac/`, spec `mac/v0.3`, rules in [`docs/runner.md`](docs/runner.md) |
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
-| Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
+| Demo pipeline | `migrations/claims-adjudication/migration.yaml` in `MaC-aroni/mac-migrations` (mirrored by the server; [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml) is the bundled copy): 8 steps, 4 repos, 3 approvals |
 | Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` on GitHub in `MaC-aroni`, protected and reviewed |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
 | Knowledge base | 16 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
-| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review |
+| Migrations repo | `MaC-aroni/mac-migrations`: every `migrations/<name>/migration.yaml` merged there is what the console shows (mirrored every 60 s); the Planner's PRs go there |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
 | UI | `frontend/`: the console at `/` (Build → Migrate · Pipelines, live DAG, step logs, approvals, Build report, runs), mock pitch page at `/demo`; rules in [`UI.md`](UI.md) |
 | Planning API | `/api/mac/services`, `/plan`, `/ingest`, `/plans/...` in `backend/app/planning_api.py`, contract in [`docs/planning-api.md`](docs/planning-api.md) |
@@ -32,6 +32,36 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: The Migration page shows migrations, from mac-migrations (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Build → Migration** now lists the migrations, one card each, instead of knowledge-base services
+  and every repo in the org. The cards come from `GET /api/mac/migrations`, which the server fills
+  from the **mac-migrations repo**: it mirrors `migrations/*/migration.yaml` from `main` into
+  `MAC_DATA_DIR/migrations` every 60 s (`MAC_MIGRATIONS_REPO`, `MAC_MIGRATIONS_BRANCH`,
+  `MAC_MIGRATIONS_SYNC_SECONDS`; the bundled `examples/` fill in for names the repo lacks).
+  `GET /api/mac/migrations-source` says when it last synced.
+- Each card has three attachments: the **Confluence page that describes the migration** (or a
+  "Generate Confluence page" door), the **design review page** Build wrote, and the
+  **migration.yaml on GitHub**. Plus Build Migration Pipeline and Open pipeline.
+- New agent: `POST /api/mac/migrations/{name}/page` ("Describe"): reads the spec, the repositories'
+  READMEs and the knowledge-base sections the spec cites, writes the page with the LLM, appends the
+  authoritative appendix from the spec, publishes it to Confluence and remembers the URL. Works
+  without an LLM (facts only) and without Confluence (the console shows the page). The page is
+  tagged "written by MaC". Contract in [`docs/api.md`](docs/api.md) → Migrations and
+  [`docs/planning-api.md`](docs/planning-api.md) → Describe.
+- The list items carry `source`, `description`, `page`, `design_page`, `steps`, `approvals`,
+  `breakpoints`, `target`, `active_run` (see api.md).
+
+#### What you need to do
+- **Everyone:** a migration shows in the console once its `migration.yaml` is **merged into
+  `MaC-aroni/mac-migrations`** under `migrations/<name>/`. The planner's "Plan a new migration"
+  opens such a PR. Until the demo spec is merged there, the console shows the bundled copy from
+  `examples/` (same content, same digest, so existing Builds and tickets still apply).
+- **Elathius (UI):** `src/pages/Migrate.jsx` was rewritten around `GET /migrations`; `/services`
+  (knowledge-base services and org repos) still exists for the planner and Chat but no page lists
+  repos any more. Describe runs are followed on `/agents/{id}` like Learn (title "Describe <name>").
+- **ob1-can-obi:** nothing to configure; the mirror uses `GITHUB_TOKEN` already on Fly.
 ### 2026-11-08: Cost estimate with a source for every number (Zafeer-R, with Claude Code)
 
 #### What changed

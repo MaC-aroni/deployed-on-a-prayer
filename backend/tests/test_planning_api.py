@@ -489,3 +489,55 @@ def test_chat_transcripts_are_kept_for_the_console(api):
     assert client.put("/api/mac/chats/x", json={"title": "t", "turns": []}).status_code == 422
     assert client.delete("/api/mac/chats/abc123def456").status_code == 200
     assert client.get("/api/mac/chats/abc123def456").status_code == 404
+
+
+PAGE = ("## Summary\nClaimsAdjudicationService leaves the on-prem data centre for AWS in eight rehearsed steps.\n\n"
+        "## What moves and why\n- The service and its database.\n\n## How it runs\n- Build, Rehearse, Deploy.\n\n"
+        "## Approvals\n- Tech Risk first.\n\n## Risks and rollback\n- Every step is undone on failure.\n")
+
+
+def test_describe_writes_the_migration_page_and_publishes_it(api):
+    client, env, holder = api
+    holder["llm"] = ScriptedLLM(PAGE)
+    name = "claims-adjudication-onprem-to-aws"
+    assert client.get("/api/mac/migrations").json()[0]["page"] is None
+    res = client.post(f"/api/mac/migrations/{name}/page")
+    assert res.status_code == 202, res.text
+    run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert run["status"] == "succeeded", run["reason"]
+    assert run["report"]["page"] == "migration-claims-adjudication-onprem-to-aws"
+    assert run["report"]["confluence_url"].startswith("https://example.atlassian.net/wiki/")
+    system, user = holder["llm"].prompts[0]
+    assert "Summary, What moves and why" in system and "db_migrate" in user and "APPR-TR-001" in user
+    assert "Claims data is PHI" in user or "cites" in user  # the cited knowledge-base sections went in
+    [(title, html, page_id, parent_id)] = env.pages.published
+    assert title == "Migration: ClaimsAdjudicationService (claims-adjudication-onprem-to-aws)" and page_id is None
+    assert "<h2>Summary</h2>" in html and "Appendix: exactly what will run" in html and "smoke_test" in html
+    [item] = client.get("/api/mac/migrations").json()
+    page = item["page"]
+    assert page["url"] == run["report"]["confluence_url"] and page["generated"] is True and page["writing"] is None
+    assert item["description"].startswith("ClaimsAdjudicationService leaves the on-prem data centre")
+    shown = client.get(f"/api/mac/knowledge/{page['id']}").json()
+    assert shown["generated"] is True and "migration" in shown["labels"] and shown["url"] == page["url"]
+    # Again: the same Confluence page is updated, not a second one created.
+    holder["llm"] = ScriptedLLM(PAGE)
+    client.post(f"/api/mac/migrations/{name}/page")
+    assert env.pages.published[-1][2] == env.pages.published[0][2] or env.pages.published[-1][2] is not None
+    assert client.post("/api/mac/migrations/nope/page").status_code == 404
+
+
+def test_describe_without_an_llm_or_confluence_still_writes_the_page(api):
+    client, env, holder = api
+    holder["llm"] = None
+    env.runner.pages = None
+    name = "claims-adjudication-onprem-to-aws"
+    res = client.post(f"/api/mac/migrations/{name}/page")
+    assert res.status_code == 202, res.text
+    run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert run["status"] == "succeeded", run["reason"]
+    logs = [e["message"] for e in events(client, run["id"])]
+    assert any("no LLM configured" in m for m in logs) and any("Confluence isn't configured" in m for m in logs)
+    [item] = client.get("/api/mac/migrations").json()
+    assert item["page"]["url"] is None and item["page"]["local"] is True and item["page"]["model"] is None
+    body = client.get(f"/api/mac/knowledge/{item['page']['id']}").json()["body"]
+    assert body.startswith("## Summary") and "| 1 | preflight |" in body

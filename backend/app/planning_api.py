@@ -30,7 +30,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from mac import agents_cli, cli as mac_cli
+from mac import agents_cli, cli as mac_cli, describe
 from mac.graph import Graph, extract
 from mac.integrations import GitHubAPI, IntegrationError, TicketRequest, _request, open_pull_request, read_files
 from mac.knowledge import KnowledgeError, KnowledgePage, load_pages, publish
@@ -52,6 +52,7 @@ log = logging.getLogger("mac.planning")
 KNOWLEDGE_STEP = "knowledge"
 DETECT_STEP = "detect"
 PLAN_STEP = "plan"
+DESCRIBE_STEP = "describe"
 
 GITHUB_API = "https://api.github.com"
 GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
@@ -132,8 +133,8 @@ def _plans_dir(state: mac_api.State) -> Path:
 
 
 def _generated_dir(state: mac_api.State) -> Path:
-    """Knowledge pages MaC wrote itself (POST /learn), beside the hand-written knowledge base."""
-    return state.runner.data_dir / "knowledge"
+    """Knowledge pages MaC wrote itself (Learn, Describe), beside the hand-written knowledge base."""
+    return mac_api.generated_dir(state)
 
 
 def _fixes_dir(state: mac_api.State) -> Path:
@@ -284,29 +285,15 @@ def _all_pages(state: mac_api.State, config: Planning) -> list[KnowledgePage]:
     return base + [p for p in _generated_pages(state) if p.id not in known]
 
 
-_url_lookups: dict[str, float] = {}  # page id -> when Confluence was last asked for it
-
-
 def _urls(state: mac_api.State, pages: list[KnowledgePage] | None = None) -> dict[str, str]:
     """Our page id -> Confluence URL, from the publish record. When Confluence is configured and
     a page has no record (published from another machine, or by hand), ask Confluence for a page
     with that title, at most every 10 minutes, and remember what it says."""
     urls = {page: url for page, (_, url, _) in state.runner.store.knowledge_pages().items()}
-    conf = state.runner.pages
-    if pages and conf is not None and hasattr(conf, "call") and hasattr(conf, "space_id"):
-        import urllib.parse
-        for page in pages:
-            if page.id in urls or time.time() - _url_lookups.get(page.id, 0) < 600:
-                continue
-            _url_lookups[page.id] = time.time()
-            try:
-                query = urllib.parse.urlencode({"space-id": conf.space_id(), "title": page.title})
-                found = conf.call(f"/wiki/api/v2/pages?{query}")["results"]
-            except (IntegrationError, KeyError, TypeError):
-                continue
-            if found:
-                url = f"{conf.site}/wiki{found[0]['_links']['webui']}"
-                state.runner.store.save_knowledge_page(page.id, found[0]["id"], url, page.title)
+    for page in pages or []:
+        if page.id not in urls:
+            url = mac_api.lookup_confluence_page(state, page.id, page.title)
+            if url:
                 urls[page.id] = url
     return urls
 
@@ -733,6 +720,129 @@ def learn(body: LearnBody, state: mac_api.State = Depends(mac_api.get_state), co
     run = _new_run(state, "ingest", migration)
     state.runner.store.add_event(run.id, "run", f"Learn started: {slug}" + (f" (requested by @{user})" if user else ""))
     state.submit_agent(lambda: _execute_learn(state, config, run.id, slug, llm))
+    return mac_api._run_view(run)
+
+
+# ---- Describe: the Confluence page that introduces a migration -----------------------------------
+
+
+def _cited_sections(state: mac_api.State, config: Planning, spec: Spec) -> list:
+    """The knowledge-base sections the spec cites (steps', approvals' and metadata's sources)."""
+    sections = sections_from_pages(_all_pages(state, config), _urls(state))
+    cited = {src for step in spec.steps for src in step.sources} | {src for a in spec.approvals for src in a.sources}
+    docs = set(spec.metadata.source_docs)
+    picked = [s for s in sections if s.id in cited or s.doc_id in docs]
+    return picked[:16]
+
+
+def _execute_describe(state: mac_api.State, config: Planning, run_id: str, name: str, path: Path, spec: Spec,
+                      llm: LLM | None) -> None:
+    store = state.runner.store
+    run = store.get(run_id)
+    emit = lambda kind, message, step=None: store.add_event(run_id, kind, message, step)  # noqa: E731
+    trace = _Trace(state, run_id, DESCRIBE_STEP, _model_name(llm) if llm else None)
+    page_id, title = describe.page_id(spec), describe.page_title(spec)
+    source_url = mac_api._file_source(state, path).get("url")
+    try:
+        repos = sorted({step.run.repo.slug for step in spec.steps})
+        emit("step", f"describe: writing the page for {spec.metadata.service}", DESCRIBE_STEP)
+        trace("director", "observation", f"{spec.metadata.service}: {len(spec.steps)} steps, {len(spec.approvals)} "
+              f"approvals, code in {len(repos)} repositories; no page describes this migration yet",
+              role="Director", model=trace.model, status="running")
+        trace("director", "reasoning", "a Reader reads each repository's own README and the knowledge-base sections "
+              "the plan cites; the Writer turns those facts into the page; code appends the authoritative appendix "
+              "(exactly what will run, from migration.yaml) and publishes it to Confluence")
+        trace("director", "action", "dispatching Reader, then Writer")
+
+        trace("reader", "action", f"reading {', '.join(repos)}", parent="director", role="Reader", status="running")
+        read: dict[str, dict] = {}
+        for slug in repos:
+            try:
+                info = (config.repo_reader or _github_repo)(slug)
+                read[slug] = {"description": info.get("description") or "", "readme": info.get("readme") or ""}
+            except (IntegrationError, KeyError, TypeError, ValueError) as e:
+                read[slug] = {"description": "", "readme": ""}
+                emit("log", f"{slug}: README not read ({e})", DESCRIBE_STEP)
+        sections = _cited_sections(state, config, spec)
+        trace("reader", "outcome", f"{sum(1 for r in read.values() if r['readme'])} README(s), "
+              f"{len(sections)} cited section(s)", parent="director", status="succeeded")
+        emit("log", f"read {len(read)} repositories and {len(sections)} knowledge-base sections", DESCRIBE_STEP)
+
+        facts = describe.facts(spec, read, sections, source_url)
+        trace("writer", "action", "writing Summary, What moves and why, How it runs, Approvals, Risks and rollback",
+              parent="director", role="Writer", model=trace.model, status="running")
+        model = None
+        if llm is not None:
+            try:
+                markdown = llm.complete(describe.SYSTEM_PROMPT, "Write the page for this migration.\n\n" + facts,
+                                        max_tokens=2048).strip()
+                if "##" not in markdown:
+                    raise ValueError("the reply has no sections")
+                model = trace.model
+            except Exception as e:  # noqa: BLE001 - the page is written either way
+                emit("log", f"writer: the model's reply couldn't be used ({str(e)[:200]}); writing the facts instead", DESCRIBE_STEP)
+                markdown = describe.fallback_markdown(spec)
+        else:
+            emit("log", "no LLM configured here: the page is the facts from migration.yaml", DESCRIBE_STEP)
+            markdown = describe.fallback_markdown(spec)
+        summary = describe.summary_of(markdown)
+        trace("writer", "outcome", summary or "page written", parent="director", status="succeeded")
+
+        root = next((p.id for p in _base_pages(config) if not p.parent), None)
+        text = describe.compose_page(spec, markdown, source_url, run_id, root)
+        folder = _generated_dir(state)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{page_id}.md").write_text(text, encoding="utf-8")
+        page = _parse_generated(folder / f"{page_id}.md")
+        emit("log", f"wrote {page_id}.md", DESCRIBE_STEP)
+        meta = {"migration": name, "page": page_id, "title": title, "run_id": run_id, "written": time.time(),
+                "model": model, "summary": summary, "source_url": source_url}
+        url = None
+        if state.runner.pages is not None and page is not None:
+            known = {k: v[0] for k, v in store.knowledge_pages().items()}
+            try:
+                conf_id, url = state.runner.pages.publish(title, render_page(page), known.get(page_id),
+                                                          parent_id=known.get(root) if root else None)
+                store.save_knowledge_page(page_id, conf_id, url, title)
+                emit("log", f"Confluence: {url}", DESCRIBE_STEP)
+            except IntegrationError as e:
+                emit("log", f"Confluence page not written: {e}", DESCRIBE_STEP)
+        else:
+            emit("log", "Confluence isn't configured here: the console shows the page itself", DESCRIBE_STEP)
+        meta["confluence_url"] = url
+        _save_generated_meta(state, page_id, meta)
+
+        run.report = {"migration": name, "page": page_id, "title": title, "confluence_url": url, "summary": summary,
+                      "model": model, "repos": repos, "sections": [s.id for s in sections]}
+        outcome = f"page “{title}” written" + (" and published to Confluence" if url else "")
+        trace("director", "outcome", outcome, status="succeeded")
+        emit("step", f"describe: {outcome}", DESCRIBE_STEP)
+        _finish(state, run, RunStatus.SUCCEEDED, outcome)
+    except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        log.exception("describe %s failed", run_id)
+        emit("step", f"describe: failed: {e}", DESCRIBE_STEP)
+        trace("director", "outcome", f"failed: {e}", status="failed")
+        _finish(state, run, RunStatus.FAILED, f"describe failed: {e}")
+
+
+@router.post("/migrations/{name}/page", status_code=202)
+def describe_migration(name: str, state: mac_api.State = Depends(mac_api.get_state),
+                       config: Planning = Depends(get_config), user: str | None = Depends(signed_in)):
+    """Write (or rewrite) the Confluence page that describes a migration: an agent reads the
+    migration.yaml, the repositories it runs and the knowledge-base sections it cites, writes the
+    page, and publishes it. Works without an LLM (the facts alone) and without Confluence (the
+    console shows the page). Follow it at GET /runs/{id} like Learn."""
+    path, spec, _ = mac_api._migration(state, name)
+    llm = None
+    if config.llm_factory is not None:
+        try:
+            llm = config.llm_factory()
+        except SystemExit:
+            llm = None
+    _refuse_if_active(state, f"page/{name}", "describe")
+    run = _new_run(state, "ingest", f"page/{name}")
+    state.runner.store.add_event(run.id, "run", f"Describe started: {name}" + (f" (requested by @{user})" if user else ""))
+    state.submit_agent(lambda: _execute_describe(state, config, run.id, name, path, spec, llm))
     return mac_api._run_view(run)
 
 

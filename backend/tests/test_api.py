@@ -1,3 +1,4 @@
+import base64
 import shutil
 import time
 
@@ -456,3 +457,81 @@ def test_rerun_ai_endpoint(api):
     assert resp.status_code == 202 and resp.json()["diagnostics_mode"] == "report"
     diagnoses = [e for e in client.get(f"/api/mac/runs/{run['id']}/events").json() if e["kind"] == "diagnosis"]
     assert len(diagnoses) == 2  # the original, and the rerun
+
+
+# ---- Where the migrations come from -----------------------------------------------------------
+
+
+def test_the_list_says_where_each_migration_came_from_and_what_documents_it(api):
+    client, env, _ = api
+    [item] = client.get("/api/mac/migrations").json()
+    assert item["source"]["bundled"] is False and item["source"]["path"] == "claims/migration.yaml"
+    assert item["page"] is None and item["design_page"] is None and item["active_run"] is None
+    assert item["steps"] == 8 and item["approvals"] == 3 and item["breakpoints"] == ["db_migrate"]
+    assert item["description"].startswith("Moves ClaimsAdjudicationService to AWS us-east-1")
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    [item] = client.get("/api/mac/migrations").json()
+    assert item["design_page"]["current"] is True and item["latest"]["build"]["status"] == "succeeded"
+    assert client.get("/api/mac/migrations-source").json()["repo"] is None
+
+
+def test_bundled_examples_fill_in_when_the_mirror_has_nothing(env, tmp_path):
+    mirror = tmp_path / "mirror"
+    examples = tmp_path / "examples"
+    (examples / "claims").mkdir(parents=True)
+    shutil.copy(DEMO_SPEC, examples / "claims" / "migration.yaml")
+    state = mac_api.State(runner=env.runner, migrations_dir=mirror, submit=lambda fn: fn(), fallback_dirs=(examples,),
+                          sync={"repo": "MaC-aroni/mac-migrations", "branch": "main", "seconds": 60},
+                          project_repo="MaC-aroni/deployed-on-a-prayer")
+    mac_api.configure(state)
+    try:
+        client = TestClient(app)
+        [item] = client.get("/api/mac/migrations").json()
+        assert item["source"]["bundled"] is True  # examples/ lives outside the repo root in this test: no URL
+        source = client.get("/api/mac/migrations-source").json()
+        assert source["repo"] == "MaC-aroni/mac-migrations" and source["synced"] is None
+        # The mirror wins once it has the same migration.
+        (mirror / "claims-adjudication").mkdir(parents=True)
+        shutil.copy(DEMO_SPEC, mirror / "claims-adjudication" / "migration.yaml")
+        [item] = client.get("/api/mac/migrations").json()
+        assert item["source"] == {"repo": "MaC-aroni/mac-migrations", "path": "migrations/claims-adjudication/migration.yaml",
+                                  "url": "https://github.com/MaC-aroni/mac-migrations/blob/main/migrations/claims-adjudication/migration.yaml",
+                                  "bundled": False}
+    finally:
+        mac_api.configure(None)
+
+
+def test_sync_mirrors_the_repo_and_only_touches_what_it_wrote(http, tmp_path):
+    from mac.migrations_sync import read_manifest, sync_migrations
+
+    dest = tmp_path / "mirror"
+    (dest / "mine").mkdir(parents=True)
+    (dest / "mine" / "migration.yaml").write_text("hand-made\n", encoding="utf-8")
+    text = DEMO_SPEC.read_text(encoding="utf-8")
+    http.route("GET", "/repos/o/m/git/ref/heads/main", {"object": {"sha": "c1"}})
+    http.route("GET", "/repos/o/m/git/trees/c1?recursive=1", {"tree": [
+        {"type": "blob", "path": "migrations/README.md", "sha": "r"},
+        {"type": "blob", "path": "migrations/claims/migration.yaml", "sha": "b1"},
+        {"type": "blob", "path": "migrations/other/migration.yaml", "sha": "b2"},
+        {"type": "blob", "path": "migrations/deep/x/migration.yaml", "sha": "b3"}]})
+    http.route("GET", "/repos/o/m/git/blobs/b1", {"content": base64.b64encode(text.encode()).decode()})
+    http.route("GET", "/repos/o/m/git/blobs/b2", {"content": base64.b64encode(b"x: 1\n").decode()})
+    result = sync_migrations("o/m", "main", dest, "tok", api=http.url)
+    assert result["error"] is None and sorted(result["files"]) == ["claims", "other"]
+    assert (dest / "claims" / "migration.yaml").read_text(encoding="utf-8") == text
+    assert http.requests[0]["headers"]["Authorization"] == "Bearer tok"
+    fetched = len(http.requests)
+    # Same commit: one request, nothing re-fetched.
+    sync_migrations("o/m", "main", dest, "tok", api=http.url)
+    assert len(http.requests) == fetched + 1
+    # The repo drops a migration: our copy goes; the hand-made folder stays.
+    http.route("GET", "/repos/o/m/git/ref/heads/main", {"object": {"sha": "c2"}})
+    http.route("GET", "/repos/o/m/git/trees/c2?recursive=1", {"tree": [
+        {"type": "blob", "path": "migrations/claims/migration.yaml", "sha": "b1"}]})
+    result = sync_migrations("o/m", "main", dest, "tok", api=http.url)
+    assert sorted(result["files"]) == ["claims"] and not (dest / "other").exists() and (dest / "mine").is_dir()
+    # GitHub down: the last good copy and manifest stay, with the error noted.
+    http.route("GET", "/repos/o/m/git/ref/heads/main", {"message": "boom"}, status=502)
+    result = sync_migrations("o/m", "main", dest, "tok", api=http.url)
+    assert result["error"] and result["commit"] == "c2" and (dest / "claims" / "migration.yaml").is_file()
+    assert read_manifest(dest)["error"] == result["error"]

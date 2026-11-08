@@ -50,15 +50,50 @@ Then follow the run, either live with the stream (best) or by polling `GET /runs
 
 ### Migrations
 
-`GET /api/mac/migrations`: every `*/migration.yaml` under `MAC_MIGRATIONS_DIR`, which is
-`examples/` by default.
+`GET /api/mac/migrations`: every migration the console shows. They are the
+`migrations/<name>/migration.yaml` files of the **mac-migrations repo** (`MAC_MIGRATIONS_REPO`,
+default `MaC-aroni/mac-migrations`, branch `MAC_MIGRATIONS_BRANCH`), which the server mirrors
+into `MAC_DATA_DIR/migrations` every `MAC_MIGRATIONS_SYNC_SECONDS` (default 60; 0 turns the
+mirror off), plus the bundled `examples/` for any name the mirror doesn't have. Set
+`MAC_MIGRATIONS_DIR` to read one folder and nothing else.
 ```json
 [{"name": "claims-adjudication-onprem-to-aws", "valid": true, "problems": [],
+  "path": "claims-adjudication/migration.yaml",
+  "source": {"repo": "MaC-aroni/mac-migrations", "path": "migrations/claims-adjudication/migration.yaml",
+             "url": "https://github.com/MaC-aroni/mac-migrations/blob/main/migrations/claims-adjudication/migration.yaml",
+             "bundled": false},
   "service": "ClaimsAdjudicationService", "owner_team": "claims-platform",
-  "stages": ["check", "infrastructure", "data", "release", "verify"],
-  "latest": {"build": {"id": "…", "status": "succeeded", "…": "…"}, "rehearse": null, "deploy": null}}]
+  "stages": ["check", "infrastructure", "data", "release", "access", "verify"],
+  "steps": 8, "approvals": 3, "breakpoints": ["db_migrate"],
+  "target": {"provider": "aws", "account": "…", "region": "us-east-1"},
+  "description": "ClaimsAdjudicationService leaves the on-prem data centre for AWS …",
+  "page": {"id": "migration-claims-adjudication-onprem-to-aws", "title": "Migration: ClaimsAdjudicationService (…)",
+           "url": "https://….atlassian.net/wiki/spaces/CLAIMS/pages/…", "local": true, "generated": true,
+           "written": 1794150000.0, "model": "nvidia/nemotron-3-ultra-550b-a55b", "run_id": "…",
+           "summary": "…", "writing": null},
+  "design_page": {"url": "https://….atlassian.net/wiki/…", "current": true},
+  "latest": {"build": {"id": "…", "status": "succeeded", "…": "…"}, "rehearse": null, "deploy": null},
+  "active_run": null}]
 ```
+- `source` is the GitHub file the migration came from: `url` opens it; `bundled` is true for the
+  examples shipped with MaC (their `repo` is this project's).
+- `page` is the Confluence page that **describes** the migration, or `null` when there is none.
+  `url` is set when MaC published it (or found a page with that title in the space); `local` when
+  the server has the page's text (`GET /knowledge/{page.id}` shows it; a "Create in Confluence"
+  door is `POST /knowledge/{page.id}/publish`); `generated` when MaC wrote it (show the tag);
+  `writing` is the id of a Describe run in flight (follow it at `/agents/{id}`). To write the
+  page: `POST /api/mac/migrations/{name}/page` (sign-in; 202 with the run), see
+  [`planning-api.md`](planning-api.md) → Describe.
+- `description` is the page's summary when there is one, else a sentence built from the spec.
+- `design_page` is the design review page Build wrote for the Tech Risk ticket (`current` is
+  false when the spec changed since; the next Build rewrites it). `null` before the first Build.
+- `latest` has the newest Build, Rehearse and Deploy; `active_run` the one in progress, if any.
+
 A file that can't be read is still listed, with `"valid": false` and its `problems`.
+
+`GET /api/mac/migrations-source`: where the list comes from: `{repo, branch, url, synced,
+checked, commit, error, dir}`. `repo` is null when the mirror is off; `error` is the last
+GitHub problem (the previous copy stays in use).
 
 `GET /api/mac/migrations/{name}`: everything needed to draw the pipeline before any run exists.
 ```json

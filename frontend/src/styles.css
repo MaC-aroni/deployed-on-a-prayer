@@ -3396,3 +3396,112 @@ a.row-title:hover {
 .shell.collapsed .theme-toggle span {
   display: none;
 }
+
+/* ---------- migration cards: the three attachments ---------- */
+.migration-cards {
+  grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+}
+@media (max-width: 600px) {
+  .migration-cards {
+    grid-template-columns: 1fr;
+  }
+}
+.migration-card .card-title .muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.migration-card .card-title .muted .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.migration-card .repo-list {
+  align-items: center;
+  gap: 6px 8px;
+}
+.migration-card .repo-list .muted {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attachment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px 0 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  width: 100%;
+}
+.attachment:hover {
+  background: var(--hover-strong);
+}
+.attachment:disabled,
+.attachment.is-empty {
+  cursor: default;
+  opacity: 0.55;
+}
+.attachment.is-empty:hover {
+  background: var(--surface-2);
+}
+.attachment-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.attachment-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-meta .made-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-2);
+}
+.attachment-violet .attachment-main {
+  color: var(--accent-2);
+}
+.attachment-amber .attachment-meta {
+  color: var(--warn);
+}
+.migration-card .card-foot {
+  flex-direction: row;
+  gap: 10px;
+}
+.migration-card .card-foot .btn-primary {
+  flex: 1;
+  width: auto;
+}
+.migration-card .card-foot .btn-secondary {
+  height: 44px;
+  padding: 0 16px;
+}
+.migration-card.invalid {
+  box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--bad) 40%, transparent);
+}
