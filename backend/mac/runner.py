@@ -258,7 +258,8 @@ class Runner:
             self._set(run, step, StepState.RUNNING)
             try:
                 ctx = self._context(run, spec, step)
-                self.executor.execute(ctx, "run")
+                produced = self.executor.execute(ctx, "run") or {}
+                self._record_outputs(run, step, produced)
                 if step.verify:
                     self.executor.execute(ctx, "verify")
             except Exception as e:  # noqa: BLE001 - any failure, even a runner bug, must trigger undo
@@ -510,6 +511,19 @@ class Runner:
         for run in self.store.runs(spec.metadata.name):
             if run.status.active:
                 raise GateError(f"{run.mode} run {run.id} is still {run.status}. Finish or undo it first.")
+
+    def _record_outputs(self, run: RunRecord, step: Step, produced: dict[str, str]) -> None:
+        """Keeps the outputs the plan declared. One that wasn't produced fails the step: the
+        planner said this step would hand it back, and the probes depend on it."""
+        if not step.outputs:
+            return
+        missing = [o.name for o in step.outputs if not produced.get(o.name)]
+        if missing:
+            raise StepFailed(f"{step.id} didn't produce its declared output(s): {', '.join(missing)}")
+        run.outputs[step.id] = {o.name: produced[o.name] for o in step.outputs}
+        self.store.save(run)
+        for o in step.outputs:
+            self._event(run, "log", f"output {o.name} = {produced[o.name]}", step.id)
 
     def _context(self, run: RunRecord, spec: Spec, step: Step) -> StepContext:
         run_dir = self.data_dir / "runs" / run.id

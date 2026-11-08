@@ -30,6 +30,22 @@ def validate(spec: Spec) -> list[Issue]:
         for dup in sorted({i for i in ids if list(ids).count(i) > 1}):
             error(f"{label}s", f"duplicate {label} {dup!r}")
 
+    for step in spec.steps:
+        names = [o.name for o in step.outputs]
+        for dup in sorted({n for n in names if names.count(n) > 1}):
+            error(f"steps.{step.id}.outputs", f"duplicate output {dup!r}")
+        for out in step.outputs:
+            probe_names = [p.name for p in out.probes]
+            for dup in sorted({n for n in probe_names if probe_names.count(n) > 1}):
+                error(f"steps.{step.id}.outputs.{out.name}", f"duplicate probe {dup!r}")
+            for probe in out.probes:
+                if not probe.path.startswith("/"):
+                    error(f"steps.{step.id}.outputs.{out.name}.probes.{probe.name}", "path must start with /")
+                if probe.body is not None and probe.method != "POST":
+                    error(f"steps.{step.id}.outputs.{out.name}.probes.{probe.name}", "only POST probes send a body")
+            if out.probes and step.type == "check":
+                warning(f"steps.{step.id}.outputs.{out.name}", "a check step changes nothing, so there's nothing to probe")
+
     stage_index = {name: i for i, name in enumerate(spec.stages)}
     steps = {s.id: s for s in spec.steps}
     approval_ids = {a.id for a in spec.approvals}

@@ -94,6 +94,38 @@ returns `{changed, raised, resumed, statuses}`.
 `design_page.current` is false when the spec changed since the page was written; the next
 Build rewrites it.
 
+### Outputs and probes: proof it runs in AWS
+
+`GET /migrations/{name}` has `endpoints`: one entry per declared step output, e.g.
+```json
+{"step": "deploy_service", "name": "url", "description": "ClaimsAdjudicationService's AWS Lambda URL",
+ "probes": [{"name": "health", "method": "GET", "path": "/health", "body": null, "expect": 200},
+            {"name": "adjudicate", "method": "POST", "path": "/adjudicate", "body": {"claim_id": "CLM-1001"}, "expect": 200}],
+ "production": {"run_id": "…", "value": "https://….lambda-url.us-east-1.on.aws/", "run_status": "succeeded", "expected_live": true},
+ "rehearsal": {"run_id": "…", "value": "https://….lambda-url.us-east-1.on.aws/", "run_status": "succeeded", "expected_live": false}}
+```
+`expected_live` is false when the run undid itself (every finished Rehearse, an undone Deploy):
+the URL is history, and probing it shows AWS refusing it. Each run also has `outputs`
+(`{step: {name: value}}`).
+
+| Request | What it does |
+|---|---|
+| `POST /runs/{id}/outputs/{step}/{output}/probes/{probe}` | MaC sends that probe's request, **signed with SigV4**, to the URL this run recorded, and returns AWS's answer. Open to viewers (no sign-in): it only reads, and only URLs MaC deployed. Repeats within 3 s return the last answer |
+| `GET /runs/{id}/probes` | Every probe of this run, newest first: the before/after record |
+
+A probe answer:
+```json
+{"url": "https://….lambda-url.us-east-1.on.aws/adjudicate", "method": "POST", "probe": "adjudicate",
+ "status": 200, "ok": true, "elapsed_ms": 184, "request_id": "4f0c…", "served_by_aws": true, "region": "us-east-1",
+ "body": {"claim_id": "CLM-1001", "decision": "approved", "reason": "…"}, "error": null,
+ "env": "production", "expected_live": true, "checked": 1794111111.2,
+ "curl": "curl -sS --aws-sigv4 'aws:amz:us-east-1:lambda' --user \"$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY\" … "}
+```
+- `request_id` is the id AWS Lambda stamps on every response: proof the answer came from AWS.
+- **Before / after:** AWS answers **403** for a function URL that doesn't exist (yet, or any more),
+  then **200** with the real result once deployed. `error` is set when nothing answered at all.
+- `curl` is the same request for anyone with AWS keys in their shell (no keys are in it).
+
 ### Starting runs (the top-bar buttons)
 
 | Request | Body (optional) |

@@ -2,6 +2,7 @@
 directory, then runs the entrypoint or Terraform there. Knows nothing about ordering,
 approvals or rollback; that's the runner's job."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -68,24 +69,29 @@ class Executor:
         self.python = python
         self.timeout = timeout
 
-    def execute(self, ctx: StepContext, action: ActionName) -> None:
+    def execute(self, ctx: StepContext, action: ActionName) -> dict[str, str]:
+        """Runs one action. For "run", returns the step's outputs (name -> value), the ones the
+        spec declares; the runner fails the step if one is missing."""
         step = ctx.step
         if step.type == StepType.IAC and action in ("plan", "run", "rollback"):
-            self._terraform(ctx, {"plan": "plan", "run": "apply", "rollback": "destroy"}[action])
-            return
+            return self._terraform(ctx, {"plan": "plan", "run": "apply", "rollback": "destroy"}[action])
         if action == "plan":
             raise ValueError("only iac steps have a plan")
 
         repo, entrypoint = self._entrypoint(step, action)
         workdir = self._checkout(ctx, repo, action)
+        ctx.run_dir.mkdir(parents=True, exist_ok=True)
+        outputs_file = ctx.run_dir / f"{step.id}.{action}.outputs"
+        outputs_file.unlink(missing_ok=True)
         try:
             path = workdir / entrypoint
             if not path.is_file():
                 raise StepFailed(f"{entrypoint} doesn't exist in {repo.slug}@{ctx.shas[repo.key][:7]}")
             cmd = [self.python, str(path)] if path.suffix == ".py" else [str(path)]
-            self._run(cmd, workdir, ctx, action, label=entrypoint)
+            self._run(cmd, workdir, ctx, action, label=entrypoint, extra={"MAC_OUTPUTS": str(outputs_file)})
         finally:
             shutil.rmtree(workdir, ignore_errors=True)  # the log is in the store; the files aren't needed
+        return _read_outputs_file(outputs_file) if action == "run" else {}
 
     def prune(self, keep: set[str]) -> int:
         """Delete the work dirs of every run not in `keep` (runs still in progress). Returns how many."""
@@ -122,8 +128,24 @@ class Executor:
         workdir = self._checkout(ctx, ctx.step.run.repo, command)
         try:
             self._terraform_in(ctx, command, workdir / ctx.step.run.path)
+            if command == "apply" and ctx.step.outputs:
+                return self._terraform_outputs(ctx, workdir / ctx.step.run.path)
+            return {}
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+
+    def _terraform_outputs(self, ctx: StepContext, tf_dir: Path) -> dict[str, str]:
+        result = subprocess.run([*self.terraform, "output", "-json", "-no-color"], cwd=tf_dir,
+                                env=self._env(ctx, "run"), capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise StepFailed(f"terraform output failed: {result.stderr.strip()[-300:]}")
+        try:
+            raw = json.loads(result.stdout or "{}")
+        except ValueError as e:
+            raise StepFailed("terraform output didn't return JSON") from e
+        # Sensitive outputs never leave Terraform.
+        return {name: str(item.get("value")) for name, item in raw.items()
+                if isinstance(item, dict) and not item.get("sensitive")}
 
     def _terraform_in(self, ctx: StepContext, command: str, tf_dir: Path) -> None:
         if not tf_dir.is_dir():
@@ -173,10 +195,11 @@ class Executor:
               "AWS_REGION": region, "PYTHONUNBUFFERED": "1"}
         return {**os.environ, **tf, **mac, **ctx.extra_env}
 
-    def _run(self, cmd: list[str], cwd: Path, ctx: StepContext, action: str, label: str) -> None:
+    def _run(self, cmd: list[str], cwd: Path, ctx: StepContext, action: str, label: str,
+             extra: dict[str, str] | None = None) -> None:
         ctx.log(f"$ {label}")
         try:
-            proc = subprocess.Popen(cmd, cwd=cwd, env=self._env(ctx, action), stdout=subprocess.PIPE,
+            proc = subprocess.Popen(cmd, cwd=cwd, env={**self._env(ctx, action), **(extra or {})}, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         except FileNotFoundError as e:
             raise StepFailed(f"{label}: can't start {cmd[0]!r} ({e.strerror})") from e
@@ -192,3 +215,17 @@ class Executor:
             reader.join(timeout=10)
         if code != 0:
             raise StepFailed(f"{label} exited with code {code}")
+
+
+def _read_outputs_file(path: Path) -> dict[str, str]:
+    """A script's outputs: a JSON object, or NAME=value lines, written to $MAC_OUTPUTS."""
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8").strip()
+    if text.startswith("{"):
+        try:
+            return {str(k): str(v) for k, v in json.loads(text).items()}
+        except ValueError as e:
+            raise StepFailed(f"$MAC_OUTPUTS isn't valid JSON: {e}") from e
+    pairs = (line.split("=", 1) for line in text.splitlines() if "=" in line)
+    return {k.strip(): v.strip() for k, v in pairs}

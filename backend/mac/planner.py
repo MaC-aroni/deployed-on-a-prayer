@@ -40,6 +40,10 @@ steps:
     run: {repo: github.com/<owner>/<repo>, entrypoint: <file>}          # other types
     verify: {entrypoint: <file>}            # db_migration steps
     rollback: {entrypoint: <file>}          # script and db_migration steps; check steps: rollback: none
+    outputs:                                # what the step hands back, e.g. a deployed service's URL
+      - name: <snake_case, the Terraform output name>
+        description: <what it is>
+        probes: [{name: <snake_case>, method: GET | POST, path: </path>, body: {<json, POST only>}}]
     sources: [<section ids>]
 
 Rules:
@@ -47,6 +51,9 @@ Rules:
 - Every step and every approval has `sources`: the section ids (as shown after "id:") it follows.
 - Every step that changes production requires the approvals the policies demand. Chain
   approvals with `after` where the docs give an order.
+- A step that deploys something callable (a service, an API) declares its URL under `outputs`,
+  with probes for the endpoints its documentation names (e.g. its health check and one real
+  request), so anyone can see the deployed service answering from AWS.
 - Output only the YAML, in one ```yaml block."""
 
 
