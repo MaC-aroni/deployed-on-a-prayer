@@ -78,8 +78,9 @@ A file that can't be read is still listed, with `"valid": false` and its `proble
 Stages and steps come **in run order**. Draw stages as columns, left to right, and steps as
 cards inside them.
 
-`approvals[].ticket` is the Jira ticket for **this version** of the spec, or `null` if it
-hasn't been raised yet: after a chain approval (`after`) or the design page.
+`approvals[].ticket` is the Jira ticket for this approval, or `null` if it hasn't been raised
+yet (a chained approval waits for its predecessor; a `design_doc` one waits for the design page).
+Tickets are kept when the plan changes; Jira gets a comment instead of a new ticket.
 `approvals[].status` (`approved` · `pending` · `rejected` · `unknown` · `not_requested`),
 `detail` and `checked` (Unix seconds) are the **live** state: the server asks Jira on its own
 (every `MAC_APPROVAL_POLL_SECONDS`, default 30) and Jira can push changes to the webhook, so
@@ -166,7 +167,8 @@ A probe answer:
 
 **Run `status`:** `running` · `waiting` (on approval or play) · `rolling_back` · `succeeded`
 · `failed` (a step failed and everything was undone cleanly) · `rollback_failed` (the undo
-didn't finish; needs a person) · `undone`. `active` is true for the first three.
+didn't finish; needs a person) · `undone` · `cancelled` (someone pressed Cancel; everything
+was undone). `active` is true for the first three.
 
 **Step `state`** (colour the cards with these): `pending` · `blocked` (waiting for approval) ·
 `waiting` (manual: show ▶) · `running` · `succeeded` · `failed` · `rolled_back` ·
@@ -179,6 +181,7 @@ didn't finish; needs a person) · `undone`. `active` is true for the first three
 | `POST /api/mac/runs/{id}/steps/{step}/play` | that step's state is `waiting` (the ▶ button) |
 | `POST /api/mac/runs/{id}/resume` | the run is `waiting` on an approval (checks Jira again). Rarely needed now: the server does this itself when Jira changes |
 | `POST /api/mac/runs/{id}/undo` | the run is `waiting`, a Deploy that `succeeded`, or any run that ended `rollback_failed` (retries only what wasn't undone) |
+| `POST /api/mac/runs/{id}/cancel` | the run is `running` or `waiting`: stop it and undo everything it did. Mid-step, the current step finishes first (a script is killed; Terraform completes). 409 while a run is already undoing itself |
 | `GET /api/mac/runs/{id}/report.md` | the AI's Markdown report (Report and Auto-fix modes); 404 when there is none. The run view's `ai_report` says whether one exists |
 
 ### Logs and the live stream

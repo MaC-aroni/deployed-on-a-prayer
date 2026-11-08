@@ -200,3 +200,15 @@ def test_scripts_get_the_region_the_way_boto3_reads_it(setup, tmp_path):
         "import os\nprint(os.environ['AWS_DEFAULT_REGION'], os.environ['AWS_REGION'])\n", encoding="utf-8")
     executor.execute(ctx("db_migrate"), "run")
     assert "us-east-1 us-east-1" in lines
+
+
+def test_a_cancelled_script_is_killed(setup, tmp_path):
+    executor, workspace, ctx, lines, _ = setup
+    (workspace.repos[DB] / "migrate.py").write_text("import time\nprint('working')\ntime.sleep(30)\n", encoding="utf-8")
+    context = ctx("db_migrate")
+    context.cancelled = lambda: True
+    import time as _t
+    started = _t.monotonic()
+    with pytest.raises(StepFailed, match="cancelled"):
+        executor.execute(context, "run")
+    assert _t.monotonic() - started < 10

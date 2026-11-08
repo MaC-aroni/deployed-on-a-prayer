@@ -69,6 +69,8 @@ class Approvals(Protocol):
 
     def raise_ticket(self, request: TicketRequest) -> RaisedTicket: ...
 
+    def comment(self, ticket: str, text: str) -> None: ...
+
 
 class Pages(Protocol):
     def publish(self, title: str, storage_html: str, page_id: str | None,
@@ -300,6 +302,10 @@ class JiraApprovals(_Atlassian):
     def status(self, ticket: str) -> ApprovalStatus:
         issue = self.call(f"/rest/api/3/issue/{urllib.parse.quote(ticket)}?fields=status")
         return classify_status(issue["fields"]["status"]["name"], self.approved, self.rejected)
+
+    def comment(self, ticket: str, text: str) -> None:
+        self.call(f"/rest/api/3/issue/{urllib.parse.quote(ticket)}/comment", method="POST",
+                  body={"body": adf_document([text], [])})
 
     def raise_ticket(self, request: TicketRequest) -> RaisedTicket:
         fields = {

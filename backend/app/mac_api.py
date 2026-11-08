@@ -422,6 +422,22 @@ def resume(run_id: str, state: State = Depends(get_state),
     return _start(state, lambda: state.runner.request_resume(run_id), user)
 
 
+@router.post("/runs/{run_id}/cancel", status_code=202)
+def cancel(run_id: str, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
+    """Stop the run and undo everything it did. A waiting run is undone now; a run mid-step
+    finishes that step first (a running script is killed, Terraform is left to finish)."""
+    _get_run(state, run_id)
+    try:
+        run = state.runner.request_cancel(run_id)
+    except GateError as e:
+        raise HTTPException(409, str(e)) from e
+    if user:
+        state.runner.store.add_event(run.id, "log", f"cancelled by @{user}")
+    if run.next_action:  # it was waiting: the undo is queued and needs a worker
+        state.submit(lambda: _execute(state, run.id))
+    return _run_view(run)
+
+
 @router.post("/runs/{run_id}/undo", status_code=202)
 def undo(run_id: str, state: State = Depends(get_state),
          user: str | None = Depends(signed_in)):

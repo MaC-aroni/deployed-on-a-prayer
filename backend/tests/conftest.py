@@ -63,7 +63,11 @@ class FakeApprovals:
         self.by_approval: dict[str, str] = {}  # approval id -> approved | pending | rejected
         self.raised = []  # TicketRequests, in order
         self.key_to_approval: dict[str, str] = {}
+        self.comments: list[tuple[str, str]] = []
         self.down: str | None = None  # set to make every call fail
+
+    def comment(self, key, text):
+        self.comments.append((key, text))
 
     def raise_ticket(self, request):
         if self.down:
@@ -114,9 +118,13 @@ class FakeExecutor:
         self.fail: dict[tuple[str, str], str] = {}
         self.withhold: set[tuple[str, str]] = set()  # (step, output) not to produce
 
+        self.during: dict[tuple[str, str], object] = {}  # (step, action) -> callback run mid-step
+
     def execute(self, ctx, action):
         self.calls.append((ctx.step.id, action, ctx.env_name))
         ctx.log(f"{action} {ctx.step.id}")
+        if (ctx.step.id, action) in self.during:
+            self.during[(ctx.step.id, action)]()
         if (ctx.step.id, action) in self.fail:
             raise StepFailed(self.fail[(ctx.step.id, action)])
         if action != "run":
