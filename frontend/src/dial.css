@@ -1552,3 +1552,32 @@ h2,
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+/* narrow tables: the pipeline cell clips long ids instead of running under the actions */
+.migrations-table .cell-title,
+.all-runs .cell-title {
+  min-width: 0;
+  overflow: hidden;
+}
+.migrations-table .row-meta .mono {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 1100px) {
+  .migrations-table .tr {
+    grid-template-columns: 170px minmax(0, 1fr) auto;
+  }
+  .migrations-table .row-title {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+  }
+}
+@media (max-width: 820px) {
+  .migrations-table .row-title {
+    word-break: normal;
+    overflow-wrap: break-word;
+    font-size: 16px;
+  }
+}
