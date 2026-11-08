@@ -47,7 +47,9 @@ class Runner:
         # Rule checks and state changes happen under this lock, so two clicks can't both start
         # a run or both press play. The slow work in execute() runs outside it.
         self._lock = threading.Lock()
-        self._ticket_lock = threading.Lock()  # never raise the same approval ticket twice
+        # Never raise the same approval ticket twice. Re-entrant: deciding whether an approval's turn
+        # has come looks at its predecessors, which takes the lock again on the same thread.
+        self._ticket_lock = threading.RLock()
 
     # ---- One-call versions (CLI, tests) ----------------------------------------------------
 
@@ -448,8 +450,11 @@ class Runner:
             if latest is not None:  # tell the console, on the run people are looking at
                 for note in notes:
                     self._event(latest, "log", note)
-                self._event(latest, "log", "approvals changed in Jira: "
-                            + ", ".join(f"{a} {statuses[a]['status']}" for a in changed))
+                summary = ", ".join(f"{a} {statuses[a]['status']}" for a in changed)
+                self._event(latest, "log", "approvals changed in Jira: " + summary)
+                # A non-log event makes every console watching this run refetch the approvals at once.
+                parts = ([summary] if changed else []) + ([f"raised {', '.join(raised)}"] if raised else [])
+                self._event(latest, "approval", "approvals: " + "; ".join(parts))
             for run in self.store.runs(migration):
                 if run.status == RunStatus.WAITING and StepState.BLOCKED in run.steps.values():
                     resumed.append(self.request_resume(run.id).id)
@@ -463,32 +468,46 @@ class Runner:
         everything in `after` approved, and the design page written if it needs one."""
         ticket = self.store.ticket(migration, digest, approval.id)
         if ticket is None:
-            previous = self.store.latest_ticket(migration, approval.id)
-            if previous is not None:
-                # The plan changed but the approval is the same ask: keep the ticket, tell the approver.
-                self.store.save_ticket(migration, digest, previous)
-                comment = getattr(self.approvals, "comment", None)
-                if comment is not None:
-                    try:
-                        comment(previous.key, f"MaC: the migration plan was updated (version {digest[:12]}). "
-                                              "This ticket still covers this approval; the design page is updated in place.")
-                    except IntegrationError as e:
-                        log(f"couldn't comment on {previous.key}: {e}")
-                log(f"{previous.key} still covers {approval.id} for the updated plan")
-                ticket = previous
-        if ticket is None:
-            for dep in approval.after:
-                dep_status, _ = self._approval_state(migration, digest, spec, spec.approval(dep), log)
-                if dep_status == "rejected":
-                    return "rejected", f"{dep} was rejected, so this was never requested"
-                if dep_status != "approved":
-                    return "pending", f"not requested until {dep} is approved"
-            if approval.design_doc:
-                page = self.store.design(migration)
-                if page is None or page.digest != digest:
-                    return "pending", "not requested until the design page is written (run Build)"
-            ticket = self._raise_ticket(migration, digest, spec, approval, log)
+            # The poller, the Jira webhook and Build can all get here at once. Deciding "is it this
+            # approval's turn, and does it already have a ticket?" and raising the ticket is one step,
+            # so two callers can't both raise it or both comment on the old one.
+            with self._ticket_lock:
+                ticket = self.store.ticket(migration, digest, approval.id)  # another caller may have just done it
+                if ticket is None:
+                    waiting, ticket = self._ticket_or_wait(migration, digest, spec, approval, log)
+                    if waiting is not None:
+                        return waiting
         return self.approvals.status(ticket.key), ticket.key
+
+    def _ticket_or_wait(self, migration: str, digest: str, spec: Spec, approval: Approval,
+                        log: Callable[[str], None]) -> tuple[tuple[str, str] | None, Ticket | None]:
+        """Only called holding the ticket lock. (None, ticket) when the approval has a ticket for this
+        plan version (reused from an earlier version, or raised now); otherwise ((status, detail), None)
+        because it isn't requested yet: a predecessor in `after` isn't approved, or the page is missing."""
+        previous = self.store.latest_ticket(migration, approval.id)
+        if previous is not None:
+            # The plan changed but the approval is the same ask: keep the ticket, tell the approver.
+            self.store.save_ticket(migration, digest, previous)
+            comment = getattr(self.approvals, "comment", None)
+            if comment is not None:
+                try:
+                    comment(previous.key, f"MaC: the migration plan was updated (version {digest[:12]}). "
+                                          "This ticket still covers this approval; the design page is updated in place.")
+                except IntegrationError as e:
+                    log(f"couldn't comment on {previous.key}: {e}")
+            log(f"{previous.key} still covers {approval.id} for the updated plan")
+            return None, previous
+        for dep in approval.after:
+            dep_status, _ = self._approval_state(migration, digest, spec, spec.approval(dep), log)
+            if dep_status == "rejected":
+                return ("rejected", f"{dep} was rejected, so this was never requested"), None
+            if dep_status != "approved":
+                return ("pending", f"not requested until {dep} is approved"), None
+        if approval.design_doc:
+            page = self.store.design(migration)
+            if page is None or page.digest != digest:
+                return ("pending", "not requested until the design page is written (run Build)"), None
+        return None, self._raise_ticket(migration, digest, spec, approval, log)
 
     def _raise_ticket(self, migration: str, digest: str, spec: Spec, approval: Approval,
                       log: Callable[[str], None]) -> Ticket:

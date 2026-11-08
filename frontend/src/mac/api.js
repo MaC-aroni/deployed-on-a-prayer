@@ -59,6 +59,7 @@ export const api = {
   resume: (id) => call("POST", `/runs/${enc(id)}/resume`),
   undo: (id) => call("POST", `/runs/${enc(id)}/undo`),
   cancel: (id) => call("POST", `/runs/${enc(id)}/cancel`),
+  // Ask Jira right now about every approval (the server also does it by webhook and every few seconds).
   approvalsSync: (name) => call("POST", `/migrations/${enc(name)}/approvals/sync`),
   // Outputs and probes: proof the deployed service answers from AWS
   probe: (id, step, output, probe) => call("POST", `/runs/${enc(id)}/outputs/${enc(step)}/${enc(output)}/probes/${enc(probe)}`),

@@ -71,7 +71,7 @@ def _default_state() -> State:
         runner=runner,
         migrations_dir=Path(os.environ.get("MAC_MIGRATIONS_DIR", ROOT / "examples")),
         submit=pool.submit,
-        poll_seconds=int(os.environ.get("MAC_APPROVAL_POLL_SECONDS", "30")),
+        poll_seconds=int(os.environ.get("MAC_APPROVAL_POLL_SECONDS", "10")),
         webhook_secret=os.environ.get("MAC_JIRA_WEBHOOK_SECRET") or None,
     )
 
