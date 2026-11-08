@@ -84,9 +84,10 @@ export default function Demo() {
       return { id: s.id, name: s.name, sub: s.sub, status: st, agent: s.type === "agent", aside: aside(s, st) };
     }),
   }));
-  // One chain in the order the steps run: each waits for the one before it, and a failure
-  // stops everything after it (the runner's rule). STEPS is already in execution order.
-  const edges = useMemo(() => STEPS.slice(1).map((s, i) => ({ from: STEPS[i].id, to: s.id })), []);
+  // Connectors are the real dependencies: a step runs only once everything it needs has
+  // finished, so each line reads "this had to happen before that".
+  const edges = useMemo(() => STEPS.flatMap((s) => s.needs.map((n) => ({ from: n, to: s.id }))), []);
+  const failedId = STEPS.find((s) => statusAt(s, t) === "failed")?.id ?? null;
 
   return (
     <>
@@ -156,7 +157,7 @@ export default function Demo() {
           </div>
 
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} />
           </div>
 
           {step && <NodeDrawer step={step} t={t} onClose={() => setSelected(null)} />}

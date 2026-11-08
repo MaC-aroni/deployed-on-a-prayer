@@ -357,7 +357,7 @@ export default function Migration({ source, initialRun }) {
       {tab === "pipeline" && (
         <>
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} failedId={run?.failed_step ?? null} />
           </div>
 
           {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} approvals={mig.approvals} report={reportRun?.report} onPlay={play} onClose={() => setSelected(null)} busy={busy || locked} />}

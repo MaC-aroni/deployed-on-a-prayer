@@ -1943,3 +1943,150 @@ a.row-title:hover {
   gap: 5px;
   font-size: 13px;
 }
+
+/* ---------- layout: fill the width, heavier sidebar, big click targets ---------- */
+:root {
+  --sidebar-w: 248px;
+}
+.content {
+  max-width: 1680px;
+  margin: 0;
+  padding: 8px 40px 64px;
+}
+.topbar {
+  padding: 0 40px;
+}
+.sidebar {
+  background: var(--surface);
+  padding: 20px 14px 20px;
+  box-shadow: var(--inset);
+}
+.brand {
+  padding: 4px 10px 20px;
+}
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+.brand-text strong {
+  font-size: 15px;
+}
+.search {
+  background: var(--bg);
+}
+.nav-section {
+  color: var(--muted);
+  padding: 14px 12px 8px;
+}
+.nav-item {
+  height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.nav-item:hover {
+  background: var(--surface-2);
+}
+.nav-item.active {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.nav-item.active::before {
+  width: 3px;
+  top: 8px;
+  bottom: 8px;
+}
+.sidebar-foot {
+  font-size: 13px;
+  color: var(--fg);
+}
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.btn-secondary:hover {
+  background: #31344a;
+}
+
+/* service cards: the primary action spans the card */
+.service-card {
+  gap: 16px;
+}
+.service-card .card-foot {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.service-card .card-foot .btn-primary {
+  width: 100%;
+  height: 44px;
+  justify-content: center;
+  font-size: 14px;
+}
+.service-card .card-foot .muted {
+  text-align: center;
+}
+
+/* repo rows: the whole row is the control */
+.repos-table {
+  padding: 0;
+}
+.repos-table .tr {
+  grid-template-columns: minmax(0, 1.6fr) 150px minmax(0, 1fr) 150px;
+  padding: 18px 28px;
+  min-height: 72px;
+}
+.repos-table .tr + .tr {
+  border-top: 1px solid var(--line);
+}
+.repo-row:hover {
+  background: var(--surface-2);
+}
+.repo-row.documented:hover .row-action {
+  background: var(--accent);
+  color: #fff;
+}
+.row-action {
+  height: 36px;
+  width: 100%;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--fg);
+  pointer-events: none;
+}
+.repo-row a.row-action {
+  pointer-events: auto;
+}
+.repos-table .row-title {
+  font-size: 14px;
+}
+
+/* where a run broke */
+.col-broke .col-head {
+  color: var(--bad);
+}
+.col-broke .col-count {
+  color: var(--bad);
+  font-weight: 500;
+}
+.col-broke .col-card {
+  border-radius: 14px;
+  background: var(--bad-soft);
+  padding: 10px 10px 10px 22px;
+  margin: -10px -10px -10px 0;
+}
+.node.broke {
+  box-shadow: inset 0 0 0 1.5px var(--bad);
+}
+.node.broke.selected {
+  box-shadow: inset 0 0 0 1.5px var(--bad), 0 0 0 3px var(--bad-soft);
+}
+.node.after {
+  opacity: 0.5;
+}
+.edge.cut {
+  stroke: var(--bad);
+  stroke-dasharray: 4 4;
+  opacity: 0.8;
+}

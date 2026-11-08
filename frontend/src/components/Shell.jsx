@@ -99,7 +99,7 @@ export default function Shell({ crumbs = [], actions, children }) {
         <aside className="sidebar">
           <Link to="/" className="brand" title="MaC · Migration as Code">
             <span className="brand-mark">
-              <Sparkles size={14} strokeWidth={2.5} />
+              <Sparkles size={16} strokeWidth={2.5} />
             </span>
             <span className="brand-text">
               <strong>MaC</strong>
@@ -121,7 +121,7 @@ export default function Shell({ crumbs = [], actions, children }) {
               <nav className="nav">
                 {group.items.map(({ to, label, Icon, match }) => (
                   <Link key={to} to={to} className={cx("nav-item", { active: match(path) })} title={label}>
-                    <Icon size={16} />
+                    <Icon size={18} />
                     <span>{label}</span>
                   </Link>
                 ))}

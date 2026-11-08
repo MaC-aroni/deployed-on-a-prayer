@@ -35,7 +35,7 @@ function edgePath(a, b, sameColumn) {
   return `M${x},${y1} C${bulge},${y1} ${bulge},${y2} ${x},${y2}`;
 }
 
-export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, emptyHint }) {
+export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, emptyHint, failedId = null }) {
   const outerRef = useRef(null);
   const canvasRef = useRef(null);
   const nodeEls = useRef(new Map());
@@ -63,6 +63,9 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
     if (!hover) return null;
     return new Set([hover, ...collect(hover, parents), ...collect(hover, children)]);
   }, [hover, parents, children]);
+
+  // Where the run broke: the failed step and everything that depended on it.
+  const broken = useMemo(() => (failedId ? new Set([failedId, ...collect(failedId, children)]) : new Set()), [failedId, children]);
 
   const measure = useCallback(() => {
     const canvas = canvasRef.current;
@@ -100,17 +103,18 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
               if (!a || !b) return null;
               const lit = lineage ? lineage.has(from) && lineage.has(to) : false;
               const dim = lineage ? !lit : false;
-              return <path key={`${from}->${to}`} d={edgePath(a, b, columnOf[from] === columnOf[to])} className={cx("edge", { lit, dim })} />;
+              const cut = broken.has(from) && broken.has(to);
+              return <path key={`${from}->${to}`} d={edgePath(a, b, columnOf[from] === columnOf[to])} className={cx("edge", { lit, dim, cut })} />;
             })}
           </svg>
         )}
 
         {columns.map((col) => (
-          <section className="col" key={col.id}>
+          <section className={cx("col", { "col-broke": failedId && col.steps.some((s) => s.id === failedId) })} key={col.id}>
             <header className="col-head">
               <StatusIcon status={col.status ?? "pending"} size={16} />
               <span className="col-name">{col.name}</span>
-              <span className="col-count">{col.steps.length}</span>
+              <span className="col-count">{failedId && col.steps.some((s) => s.id === failedId) ? "failed here" : col.steps.length}</span>
             </header>
             <div className="col-card">
               {col.steps.map((step) => {
@@ -120,7 +124,7 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
                     key={step.id}
                     type="button"
                     ref={(el) => nodeEls.current.set(step.id, el)}
-                    className={cx("node", `is-${step.status}`, { selected: step.id === selectedId, dim, agent: step.agent })}
+                    className={cx("node", `is-${step.status}`, { selected: step.id === selectedId, dim, agent: step.agent, broke: step.id === failedId, after: broken.has(step.id) && step.id !== failedId && (step.status === "pending" || step.status === "skipped") })}
                     onClick={() => onSelect?.(step.id)}
                     onMouseEnter={() => setHover(step.id)}
                     onMouseLeave={() => setHover(null)}

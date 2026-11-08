@@ -56,6 +56,9 @@ differently**. Keep it short; link to the docs instead of repeating them.
   (not what `UI.md` says) so the UI team's additions never touch the runner API's module;
   it imports `mac_api`, `auth` and `mac.agents_cli` and changes none of them.
 - `backend/.env.example` says, for every variable, what it is and where to get it.
+- [`docs/ui-data-needs.md`](docs/ui-data-needs.md): what the console wants from the API that it
+  doesn't get yet (real `needs`, failure details, timings, agent reasoning events, approval
+  events). Requests, not changes; for the backend team to pick up.
 - Look: dark, calm dashboard with one purple accent; tokens in `frontend/src/styles.css` only.
   One primary action per page (the next step), everything else in the ··· menu.
 - Frontend dependency: `lucide-react` (icons).

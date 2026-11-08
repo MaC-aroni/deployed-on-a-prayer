@@ -126,7 +126,7 @@ export default function Migrate() {
             <span className="toggle-knob" />
           </button>
         </label>
-        <button className={cx("btn", { hint: locked })} onClick={learn} disabled={busy === "ingest"} title="Read the knowledge base into the graph without planning">
+        <button className={cx("btn btn-secondary", { hint: locked })} onClick={learn} disabled={busy === "ingest"} title="Read the knowledge base into the graph without planning">
           <BookOpen size={14} /> {data.ingested ? "Re-learn" : "Learn only"}
         </button>
       </div>
@@ -199,34 +199,27 @@ export default function Migrate() {
         <div className="table repos-table">
           {data.repos.map((r) => {
             const svc = r.service ? data.services.find((s) => s.name === r.service) : null;
+            const act = svc ? () => (svc.plans[0] ? navigate(`/plans/${svc.plans[0]}`) : plan(svc)) : () => window.open(r.url, "_blank", "noopener");
             return (
-              <div className="tr" key={r.full_name}>
+              <button type="button" className={cx("tr row-btn repo-row", { documented: Boolean(svc) })} key={r.full_name} onClick={act} disabled={svc && busy === svc.name}>
                 <div className="cell-title">
-                  <a className="row-title" href={r.url} target="_blank" rel="noreferrer">
-                    {r.name} <ExternalLink size={11} />
-                  </a>
+                  <span className="row-title">{r.name}</span>
                   <span className="muted small">{r.description || "no description"}</span>
                 </div>
                 <div className="muted small">{r.pushed_at ? `pushed ${fmtAgo(r.pushed_at)}` : ""}</div>
                 <div>
-                  {svc ? (
-                    <Pill tone={svc.learned ? "green" : "grey"}>part of {svc.name}</Pill>
-                  ) : (
-                    <span className="faint small">not in the knowledge base</span>
-                  )}
+                  {svc ? <Pill tone={svc.learned ? "green" : "grey"}>part of {svc.name}</Pill> : <span className="faint small">not in the knowledge base</span>}
                 </div>
                 <div className="cell-actions">
                   {svc ? (
-                    <button className={cx("btn btn-ghost", { hint: locked })} onClick={() => (svc.plans[0] ? navigate(`/plans/${svc.plans[0]}`) : plan(svc))} disabled={busy === svc.name}>
-                      {svc.plans[0] ? "Open pipeline" : "Migrate"}
-                    </button>
+                    <span className={cx("btn btn-ghost row-action", { hint: locked })}>{svc.plans[0] ? "Open pipeline" : "Migrate"}</span>
                   ) : (
-                    <span className="faint small" title="Document it in the knowledge base first">
-                      —
-                    </span>
+                    <a className="btn row-action" href={r.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                      GitHub <ExternalLink size={12} />
+                    </a>
                   )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
