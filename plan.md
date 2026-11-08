@@ -31,6 +31,25 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Deploys no longer take the site down (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **The cause of the 3-minute outage on deploy:** Fly stopped the server while a "learn" job
+  waited on Grok; uvicorn stopped accepting requests at once but Python waited for the job's
+  thread, so nothing answered until Grok timed out.
+- Agent jobs (ingest, learn, plan, investigate) now run on daemon threads, so they never keep a
+  stopping server alive; a restart marks them failed ("start it again"). Previously the restart
+  cleanup would also have tried to *undo* them as if they were pipelines.
+- The Deploy workflow first waits (up to 30 min) until `GET /api/mac/activity` reports nothing
+  in flight. `kill_timeout` is back to 60 s.
+- LLM calls: default timeout 300 s (`MAC_LLM_TIMEOUT`), and a timeout or 5xx is retried once.
+
+#### What you need to do
+- Pressing Deploy while a Rehearse runs now waits for it; that's expected.
+- **Elathius (UI):** `planning_api` jobs should be started with `state.submit_agent`, not
+  `state.submit` (the four existing ones are switched). The console polls `/api/mac/plans` and
+  `/api/mac/migrations` several times a second; once every few seconds is plenty.
+
 ### 2026-11-08: The knowledge base ships in the Docker image (ob1-can-obi, with Claude Code)
 
 #### What changed

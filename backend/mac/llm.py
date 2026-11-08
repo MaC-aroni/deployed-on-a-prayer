@@ -5,6 +5,7 @@ code around them reads Confluence, validates what the model returns, and opens p
 """
 
 import json
+import os
 import re
 from typing import Protocol
 
@@ -20,7 +21,10 @@ class LLM(Protocol):
 
 class NIMChat:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, base_url: str = DEFAULT_BASE_URL,
-                 timeout: int = 180):
+                 timeout: int | None = None):
+        # Reasoning models can think for minutes on a long prompt (Grok took >180 s to extract a
+        # knowledge page). MAC_LLM_TIMEOUT overrides.
+        timeout = timeout or int(os.environ.get("MAC_LLM_TIMEOUT", "300"))
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         self.model = model
@@ -29,7 +33,8 @@ class NIMChat:
     def complete(self, system: str, user: str, *, max_tokens: int = 4096) -> str:
         body = {"model": self.model, "temperature": 0.2, "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        reply = _request(self.url, self.headers, method="POST", body=body, timeout=self.timeout)
+        # A chat completion changes nothing, so a timeout or 5xx is simply asked again.
+        reply = _request(self.url, self.headers, method="POST", body=body, timeout=self.timeout, retries=2)
         try:
             text = reply["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:

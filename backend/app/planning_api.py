@@ -369,7 +369,7 @@ def ingest(state: mac_api.State = Depends(mac_api.get_state), config: Planning =
     run = _new_run(state, "ingest", "knowledge")
     state.runner.store.add_event(run.id, "run", "Ingest started: building the knowledge graph"
                                  + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_ingest(state, config, run.id, llm))
+    state.submit_agent(lambda: _execute_ingest(state, config, run.id, llm))
     return mac_api._run_view(run)
 
 
@@ -600,7 +600,7 @@ def learn(body: LearnBody, state: mac_api.State = Depends(mac_api.get_state), co
     _refuse_if_active(state, migration, "learn")
     run = _new_run(state, "ingest", migration)
     state.runner.store.add_event(run.id, "run", f"Learn started: {slug}" + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_learn(state, config, run.id, slug, llm))
+    state.submit_agent(lambda: _execute_learn(state, config, run.id, slug, llm))
     return mac_api._run_view(run)
 
 
@@ -882,7 +882,7 @@ def start_plan(body: PlanBody, state: mac_api.State = Depends(mac_api.get_state)
     _refuse_if_active(state, migration, "plan")
     run = _new_run(state, "plan", migration)
     state.runner.store.add_event(run.id, "run", f"Planning started: {goal}" + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_plan(state, config, run.id, goal, body, llm))
+    state.submit_agent(lambda: _execute_plan(state, config, run.id, goal, body, llm))
     return mac_api._run_view(run)
 
 
@@ -1130,7 +1130,7 @@ def investigate(run_id: str, body: InvestigateBody | None = None, state: mac_api
     state.runner.store.save(run)
     state.runner.store.add_event(run.id, "run", f"Investigation started: {failed.mode} {failed.id} failed at {failed.failed_step}"
                                  + (f" (requested by @{user})" if user else ""))
-    state.submit(lambda: _execute_investigate(state, config, run.id, failed, llm))
+    state.submit_agent(lambda: _execute_investigate(state, config, run.id, failed, llm))
     return mac_api._run_view(run)
 
 

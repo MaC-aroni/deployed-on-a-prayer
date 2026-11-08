@@ -19,7 +19,7 @@ def api(env, tmp_path):
     (migrations / "claims").mkdir(parents=True)
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
     # Background work runs inline, so each response already reflects the finished work.
-    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(),
+    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(), submit_agent=lambda fn: fn(),
                           poll_seconds=0, webhook_secret="hook-secret")
     mac_api.configure(state)
     auth.configure(auth.AuthConfig(required=False, repo="MaC-aroni/deployed-on-a-prayer", github=None, key=b"k" * 32))
@@ -399,3 +399,21 @@ def test_cancel_endpoint(api):
     assert after["status"] == "cancelled" and after["steps"]["provision_iam"] == "rolled_back"
     resp = client.post(f"/api/mac/runs/{run['id']}/cancel")
     assert resp.status_code == 409 and "nothing to cancel" in resp.json()["detail"]
+
+
+def test_activity_reports_what_is_in_flight(api):
+    client, env, _ = api
+    assert client.get("/api/mac/activity").json() == {"busy": False, "active": []}
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    run = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()  # waits at the manual step
+    act = client.get("/api/mac/activity").json()
+    assert act["busy"] is True and [r["id"] for r in act["active"]] == [run["id"]]
+
+
+def test_recover_fails_agent_jobs_without_trying_to_undo_them(env, spec_path):
+    from mac.store import RunRecord
+    job = RunRecord(migration="knowledge", mode="ingest", spec_path="", spec_digest="", spec_text="")
+    env.store.save(job)
+    assert env.runner.recover() == []
+    after = env.store.get(job.id)
+    assert after.status == RunStatus.FAILED and "restarted" in after.reason
