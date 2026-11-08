@@ -32,6 +32,17 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Knowledge base is read six pages at a time (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `extract` (ingest, and the knowledge step of the first plan) sends pages to the model in
+  parallel, `MAC_INGEST_WORKERS` at once (default 6), and assembles the graph in page order so the
+  result is the same as before. A reasoning model takes a minute or more per page; 18 pages went
+  from half an hour to a few minutes. Cancel stops the pages not started yet.
+
+#### What you need to do
+- Nothing.
+
 ### 2026-11-08: Model switch (Nemotron | Grok) and Cancel on every run (ob1-can-obi, with Claude Code)
 
 #### What changed

@@ -3,6 +3,9 @@ came from. Code keeps only facts whose citations point at real sections of that 
 merges duplicates across pages. Stored as JSON (MAC.md: a JSON graph, not Neo4j)."""
 
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -123,22 +126,58 @@ def _cited(refs, catalog: Catalog) -> list[str] | None:
     return ids or None
 
 
-def extract(sections: list[Section], llm: LLM, log=print) -> tuple[Graph, list[str]]:
-    """One LLM call per page. Returns the graph and what was dropped, and why."""
+def extract(sections: list[Section], llm: LLM, log=print, workers: int | None = None,
+            on_start=None) -> tuple[Graph, list[str]]:
+    """One LLM call per page, several pages at a time (MAC_INGEST_WORKERS, default 6: a reasoning
+    model takes a minute or more per page). Returns the graph and what was dropped, and why. The
+    graph is assembled in page order whatever order the replies arrive in, so it's deterministic.
+    `on_start(doc_id)` is called in the worker right before a page is sent to the model."""
     graph, dropped = Graph(), []
     pending_edges: list[tuple[dict, list[str]]] = []
-    for doc_id in dict.fromkeys(s.doc_id for s in sections):
-        catalog = Catalog([s for s in sections if s.doc_id == doc_id])
+    doc_ids = list(dict.fromkeys(s.doc_id for s in sections))
+    catalogs = {doc_id: Catalog([s for s in sections if s.doc_id == doc_id]) for doc_id in doc_ids}
+    workers = workers or int(os.environ.get("MAC_INGEST_WORKERS", "6"))
+
+    stop = threading.Event()  # set when a page raised (a Cancel, a crash): queued pages don't start
+
+    def read(doc_id: str):
+        if stop.is_set():
+            return None
+        if on_start is not None:
+            on_start(doc_id)  # the console's Reader card turns "running" for this page
         try:
-            data = parse_json(llm.complete(EXTRACT_PROMPT, catalog.prompt_block(), max_tokens=4096))
-        except ValueError as e:
-            dropped.append(f"{doc_id}: unreadable reply ({e})")
-            continue
-        except IntegrationError as e:
-            # One page the model couldn't read mustn't lose the other pages' facts; the page is
-            # reported as dropped and the next ingest picks it up.
-            dropped.append(f"{doc_id}: skipped, the model didn't answer ({str(e)[:160]})")
-            log(f"skipped {doc_id}: {e}")
+            return parse_json(llm.complete(EXTRACT_PROMPT, catalogs[doc_id].prompt_block(), max_tokens=4096))
+        except BaseException as e:
+            if not isinstance(e, (ValueError, IntegrationError)):
+                stop.set()
+                raise
+            return _failed(doc_id, e)
+
+    def _failed(doc_id: str, e: BaseException) -> str:
+        if isinstance(e, ValueError):
+            return f"{doc_id}: unreadable reply ({e})"
+        # One page the model couldn't read mustn't lose the other pages' facts; the page is
+        # reported as dropped and the next ingest picks it up.
+        log(f"skipped {doc_id}: {e}")
+        return f"{doc_id}: skipped, the model didn't answer ({str(e)[:160]})"
+
+    pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(doc_ids) or 1)), thread_name_prefix="mac-ingest")
+    futures = {doc_id: pool.submit(read, doc_id) for doc_id in doc_ids}
+    results = {}
+    try:
+        for doc_id in doc_ids:  # page order, so the graph is the same whatever finished first
+            results[doc_id] = futures[doc_id].result()
+            if isinstance(results[doc_id], dict):
+                log(f"extracted {doc_id}")
+    except BaseException:  # a Cancel (or a crash): pages not started yet are dropped, in-flight ones finish alone
+        stop.set()
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    for doc_id in doc_ids:
+        data, catalog = results[doc_id], catalogs[doc_id]
+        if not isinstance(data, dict):
+            dropped.append(str(data) if isinstance(data, str) else f"{doc_id}: unreadable reply (not an object)")
             continue
         for raw in data.get("nodes", []):
             ids = _cited(raw.get("sources"), catalog)
@@ -152,7 +191,6 @@ def extract(sections: list[Section], llm: LLM, log=print) -> tuple[Graph, list[s
                 dropped.append(f"{doc_id}: edge {raw.get('from')!r}->{raw.get('to')!r}: bad type or citation")
                 continue
             pending_edges.append((raw, ids))
-        log(f"extracted {doc_id}")
     seen = set()
     for raw, ids in pending_edges:  # after every page, so edges can link nodes from other pages
         a, b = graph.find(str(raw.get("from", ""))), graph.find(str(raw.get("to", "")))

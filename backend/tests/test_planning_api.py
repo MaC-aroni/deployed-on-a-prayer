@@ -543,8 +543,9 @@ def test_describe_without_an_llm_or_confluence_still_writes_the_page(api):
     assert body.startswith("## Summary") and "| 1 | preflight |" in body
 
 
-def test_cancel_stops_an_agent_run_before_its_next_model_call(api):
+def test_cancel_stops_an_agent_run_before_its_next_model_call(api, monkeypatch):
     client, env, holder = api
+    monkeypatch.setenv("MAC_INGEST_WORKERS", "1")  # one page at a time, so the cancel lands between pages
     calls = []
 
     def reply(user):
@@ -560,7 +561,7 @@ def test_cancel_stops_an_agent_run_before_its_next_model_call(api):
     assert res.status_code == 202, res.text
     run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
     assert run["status"] == "cancelled" and run["active"] is False and run["reason"] == "cancelled"
-    assert len(calls) == 1  # the second page was never sent to the model
+    assert len(calls) == 1, calls  # the second page was never sent to the model
     messages = [e["message"] for e in events(client, run["id"])]
     assert any("Cancel requested" in m for m in messages) and any("knowledge: cancelled" in m for m in messages)
     assert client.post(f"/api/mac/runs/{run['id']}/cancel").status_code == 409  # nothing left to cancel

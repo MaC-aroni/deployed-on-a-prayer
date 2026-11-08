@@ -427,21 +427,6 @@ def publish_knowledge_page(page_id: str, state: mac_api.State = Depends(mac_api.
 # ---- Ingest: the whole knowledge base into the graph ------------------------------------------
 
 
-class _PerPage:
-    """Wraps the LLM for `extract`, which asks the model once per page in a known order, so each
-    Reader's card turns running right before its page is read."""
-
-    def __init__(self, llm: LLM, pages: list[str], trace: _Trace):
-        self.llm, self.pages, self.trace, self.n = llm, pages, trace, 0
-
-    def complete(self, system: str, user: str, *, max_tokens: int = 4096) -> str:
-        page = self.pages[self.n] if self.n < len(self.pages) else f"page-{self.n + 1}"
-        self.n += 1
-        self.trace(f"reader:{page}", "action", f"compressing {page} into facts and relations, each cited",
-                   parent="director", status="running")
-        return self.llm.complete(system, user, max_tokens=max_tokens)
-
-
 def _references(pages: list[KnowledgePage], graph: Graph) -> list[str]:
     """What the pages name that the graph didn't catch: repositories and services mentioned in
     the text but missing as nodes. Deterministic; the Reviewer's cross-check."""
@@ -466,8 +451,17 @@ def _extract_with_trace(state, run_id, llm, pages: list[KnowledgePage], sections
         if message.startswith("extracted "):
             trace(f"reader:{message[len('extracted '):]}", "outcome", "facts extracted, every one cited to a section",
                   parent="director", status="succeeded")
+        elif message.startswith("skipped "):
+            doc_id = message[len("skipped "):].split(":", 1)[0]
+            trace(f"reader:{doc_id}", "outcome", "the model didn't answer for this page; skipped", parent="director",
+                  status="failed")
 
-    graph, dropped = extract(sections, _PerPage(llm, order, trace), log=on_log)
+    def on_start(doc_id: str) -> None:
+        trace(f"reader:{doc_id}", "action", f"compressing {doc_id} into facts and relations, each cited",
+              parent="director", status="running")
+
+    # Pages are read several at a time (MAC_INGEST_WORKERS); the cards move as each one starts and ends.
+    graph, dropped = extract(sections, llm, log=on_log, on_start=on_start)
     for doc_id in order:
         if any(d.startswith(f"{doc_id}:") for d in dropped):
             trace(f"reader:{doc_id}", "outcome", "some facts dropped: bad type or missing citation", parent="director",
