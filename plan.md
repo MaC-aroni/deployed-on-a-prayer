@@ -114,6 +114,14 @@ differently**. Keep it short; link to the docs instead of repeating them.
   API (`PUT/GET/DELETE /api/mac/chats[/id]`) so they survive reloads and list in the rail.
 - Wording: the service primary is **Build Migration Pipeline**; the "Also open a PR" toggle and
   the toolbar "Learn knowledge base" moved into each card's ··· menu.
+- Licence check: no licence file now asks the person to **Confirm use** (no ticket, no block);
+  copyleft still raises a review ticket, and "Proceed anyway" is recorded
+  (`POST /api/mac/repos/{owner}/{name}/accept`).
+- Confluence doors: when a page has no publish record but Confluence is configured, the planning
+  API finds the page by title and remembers its URL; without Confluence the door searches the
+  site when `ATLASSIAN_SITE` is known, else opens the console's copy.
+- Sidebar Pipelines badge glows only with the number of pipelines this viewer hasn't listed yet;
+  otherwise it's the plain total.
 
 #### How to adapt
 - Chat transcripts live in `<MAC_DATA_DIR>/chats/`; review decisions in the page's sidecar

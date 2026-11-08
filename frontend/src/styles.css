@@ -3118,3 +3118,37 @@ a.row-title:hover {
 .chat-avatar.bad {
   background: var(--bad);
 }
+
+
+/* ---------- pipelines badge: plain count, glowing when new ---------- */
+.nav-count {
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: none;
+  transition: background var(--t), color var(--t), box-shadow var(--t);
+}
+.nav-item.primary .nav-count {
+  background: var(--bg);
+}
+.nav-count.new {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25), 0 0 14px rgba(124, 92, 255, 0.55);
+  animation: glow 1.8s ease-in-out infinite;
+}
+@keyframes glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.2), 0 0 10px rgba(124, 92, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.35), 0 0 18px rgba(124, 92, 255, 0.7);
+  }
+}
+.door-confirm {
+  color: var(--accent-2);
+}
+.nav-item.primary .nav-count.new {
+  background: var(--accent);
+  color: #fff;
+}

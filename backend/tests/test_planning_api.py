@@ -321,7 +321,7 @@ def test_health_says_what_is_configured_without_values(api):
     client, env, holder = api
     h = client.get("/api/mac/health").json()
     assert h["llm"] is True and h["model"] and h["jira"] is True and h["confluence"] is True
-    assert set(h) == {"llm", "model", "github", "jira", "confluence", "aws", "approvals_live"}
+    assert set(h) == {"llm", "model", "github", "jira", "confluence", "confluence_site", "aws", "approvals_live"}
     planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE))
     h = client.get("/api/mac/health").json()
     assert h["llm"] is False and h["model"] is None
@@ -386,13 +386,18 @@ def test_add_repo_by_url_checks_the_licence_and_raises_a_review_ticket_when_need
     repos = {r["full_name"]: r for r in client.get("/api/mac/services").json()["repos"]}
     assert repos["gnu/thing"]["licence"]["ticket"] == "MAC-1" and repos["pallets/flask"]["licence"]["risk"] == "ok"
 
-    # No LLM: the SPDX rule decides; no licence at all is blocked.
+    # No LLM: the SPDX rule decides. No licence at all asks the person to confirm; no ticket.
     planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE,
                                                  repo_lister=lambda: FAKE_REPOS, repo_meta_reader=_repo_meta(None)))
     run = client.get(f"/api/mac/runs/{client.post('/api/mac/repos', json={'url': 'https://github.com/x/bare'}).json()['id']}").json()
     assert run["status"] == "succeeded" and run["report"]["licence"] == {
-        "spdx": None, "category": "none", "risk": "blocked", "reason": "no licence file: all rights reserved by default",
-        "by": "rule", "ticket": "MAC-2", "ticket_url": "https://example.atlassian.net/browse/MAC-2"}
+        "spdx": None, "category": "none", "risk": "confirm", "by": "rule",
+        "reason": "no licence file: all rights reserved by default; confirm the team may use it"}
+    assert len(env.approvals.raised) == 1  # still only the GPL review ticket
+    accepted = client.post("/api/mac/repos/x/bare/accept", json={"note": "internal fork, fine"}).json()
+    assert accepted["licence"]["accepted"] is True and accepted["licence"]["accepted_by"] == "console"
+    assert next(r for r in client.get("/api/mac/services").json()["repos"] if r["full_name"] == "x/bare")["licence"]["accepted"] is True
+    assert client.post("/api/mac/repos/x/nope/accept").status_code == 404
     # Private repos are refused; removal works once.
     planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE,
                                                  repo_lister=lambda: FAKE_REPOS, repo_meta_reader=_repo_meta("MIT", private=True)))

@@ -27,6 +27,28 @@ const NAV = [
 ];
 
 const COLLAPSE_KEY = "mac.sidebar.collapsed";
+const SEEN_KEY = "mac.pipelines.seen";
+export const SEEN_EVENT = "mac:pipelines-seen";
+
+export function readSeenPipelines() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+// The Pipelines page calls this with every key it showed; the sidebar badge stops glowing.
+export function markPipelinesSeen(keys) {
+  try {
+    const seen = readSeenPipelines();
+    for (const k of keys) seen.add(k);
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  } catch {
+    /* per-viewer convenience only */
+  }
+  window.dispatchEvent(new Event(SEEN_EVENT));
+}
 
 function readCollapsed() {
   try {
@@ -111,17 +133,25 @@ export default function Shell({ crumbs = [], actions, children }) {
     };
   }, []);
 
-  // Pipelines exist only once a migration has been started; the count says how many there are.
-  const [counts, setCounts] = useState({ pipelines: null });
+  // Pipelines exist only once a migration has been started. The badge glows with the number of
+  // pipelines this viewer hasn't opened the list for yet; otherwise it's the plain total.
+  const [counts, setCounts] = useState({ pipelines: null, fresh: 0 });
   useEffect(() => {
     let alive = true;
     const load = () =>
-      Promise.all([api.migrations().catch(() => []), api.plans().catch(() => [])]).then(([m, p]) => alive && setCounts({ pipelines: m.length + p.length }));
+      Promise.all([api.migrations().catch(() => []), api.plans().catch(() => [])]).then(([m, p]) => {
+        if (!alive) return;
+        const keys = [...m.map((x) => `m:${x.name}`), ...p.map((x) => `p:${x.run_id}`)];
+        const seen = readSeenPipelines();
+        setCounts({ pipelines: keys.length, fresh: keys.filter((k) => !seen.has(k)).length });
+      });
     load();
     const id = setInterval(load, 30000);
+    window.addEventListener(SEEN_EVENT, load);
     return () => {
       alive = false;
       clearInterval(id);
+      window.removeEventListener(SEEN_EVENT, load);
     };
   }, [path]);
 
@@ -158,7 +188,11 @@ export default function Shell({ crumbs = [], actions, children }) {
                       {label}
                       {hint && <span className="nav-hint">{hint}</span>}
                     </span>
-                    {count && counts[count] != null && <span className={cx("nav-count", { zero: counts[count] === 0 })}>{counts[count]}</span>}
+                    {count && counts[count] != null && (
+                      <span className={cx("nav-count", { zero: counts[count] === 0, new: counts.fresh > 0 })} title={counts.fresh > 0 ? `${counts.fresh} new pipeline${counts.fresh === 1 ? "" : "s"} since you last looked` : `${counts[count]} pipelines`}>
+                        {counts.fresh > 0 ? counts.fresh : counts[count]}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </nav>

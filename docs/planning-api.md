@@ -66,9 +66,11 @@ the graph is `<MAC_DATA_DIR>/graph.json`, shared with `mise run mac ingest`.
   service is enriched from it and `learned` turns true; `approvers` and `sources` come from the
   graph. `plans` are the ids of generated plans for that service; `migration` is the reviewed
   `migration.yaml` in `examples/` for it, if one exists (the pipeline already exists then).
-- `page_url` is the Confluence page, known once the knowledge base was published
-  (`mise run mac publish-knowledge`); null locally, and the console shows
-  `GET /knowledge/{page}` instead. `generated` marks a page MaC wrote itself (`POST /learn`);
+- `page_url` is the Confluence page: from the publish record (`mise run mac publish-knowledge`),
+  or, when Confluence is configured and there is no record, found by title in the space (asked at
+  most every 10 minutes per page, then remembered). Null when Confluence isn't configured; the
+  console then links a Confluence search when `health.confluence_site` is set, else its own
+  `GET /knowledge/{page}` view. `generated` marks a page MaC wrote itself (`POST /learn`);
   `review` is then `{repo, ticket, ticket_url, run_id, …}`.
 - `repos` is every repository in the org (`MAC_GITHUB_REPO`'s owner, via GitHub, cached for a
   minute; `GITHUB_TOKEN` lifts the anonymous rate limit). `service`, `page` and `page_url`
@@ -186,7 +188,7 @@ pipeline page can show "fix proposed" under a failed run.
 
 ## Health, run index, active services
 
-- `GET /api/mac/health` → `{llm, model, github, jira, confluence, aws, approvals_live}`: what this
+- `GET /api/mac/health` → `{llm, model, github, jira, confluence, confluence_site, aws, approvals_live}`: what this
   deployment has configured, names only. The console greys Launch agent, Learn and Investigate
   when `llm` is false and says why.
 - `GET /api/mac/run-index?migration=&limit=`: `GET /runs` plus `migration`, `based_on`,
@@ -205,11 +207,14 @@ pipeline page can show "fix proposed" under a failed run.
 `ingest`, migration `repo/<name>`), `422` for anything that isn't a GitHub repository URL. The
 Reader fetches the repository and its LICENSE from GitHub (a private or missing repo fails the
 run); the Licence checker asks the model to classify it for internal use and modification
-(`{spdx, category, risk: ok | review | blocked, reason}`), or, without an LLM, applies an SPDX
-rule (permissive → ok, copyleft → review, no licence → blocked); the Compiler records the
-repository in `<MAC_DATA_DIR>/repos.json` and **raises a Jira review ticket** when the risk
-isn't `ok`. `GET /services` lists it in `repos[]` with `custom: true` and `licence` (with
-`ticket`/`ticket_url` when raised); `DELETE /api/mac/repos/{owner}/{name}` removes it.
+(`{spdx, category, risk: ok | review | confirm | blocked, reason}`), or, without an LLM, applies
+an SPDX rule (permissive → ok, copyleft → review, no licence → confirm); the Compiler records the
+repository in `<MAC_DATA_DIR>/repos.json` and **raises a Jira review ticket** for `review` and
+`blocked`. `confirm` (no licence file) is the adder's own call: `POST /api/mac/repos/{owner}/{name}/accept`
+`{note?}` records `licence.accepted`, `accepted_by`, `accepted_at` (it also works on `review` and
+`blocked`: "proceed anyway", the ticket stays for the record). `GET /services` lists the repo in
+`repos[]` with `custom: true`, `licence` and `page_title`; `DELETE /api/mac/repos/{owner}/{name}`
+removes it.
 
 ## Create a Confluence page
 

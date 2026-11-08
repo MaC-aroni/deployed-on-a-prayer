@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Cloud, Search, Sparkles, Users, Wand2 } from "lucide-react";
-import { EmptyState } from "../components/Shell.jsx";
+import { EmptyState, markPipelinesSeen } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { api, fmtAgo } from "../mac/api.js";
 import { SkeletonPage } from "../components/Skeleton.jsx";
@@ -65,6 +65,11 @@ export default function Migrations() {
       </EmptyState>
     );
   }
+  // Seen: the badge in the sidebar glows only for pipelines this viewer hasn't listed yet.
+  useEffect(() => {
+    if (rows) markPipelinesSeen(rows.map((r) => r.key));
+  }, [rows]);
+
   if (!rows) return <SkeletonPage rows={4} cols={5} />;
 
   const shown = rows.filter((m) => !q || `${m.name} ${m.service ?? ""} ${m.owner_team ?? ""} ${m.source}`.toLowerCase().includes(q.toLowerCase()));

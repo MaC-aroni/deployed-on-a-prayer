@@ -85,6 +85,7 @@ export const api = {
   // Repositories added by URL (an agent checks the licence) and the Confluence door's "create page"
   addRepo: (url) => call("POST", "/repos", { url }),
   removeRepo: (slug) => call("DELETE", `/repos/${slug}`),
+  acceptRepo: (slug, note) => call("POST", `/repos/${slug}/accept`, { note: note ?? null }),
   publishKnowledge: (page) => call("POST", `/knowledge/${enc(page)}/publish`),
   reviewKnowledge: (page, status, note) => call("POST", `/knowledge/${enc(page)}/review`, { status, note }),
   // Chat transcripts (the answers come from chatStream below; the server keeps no history itself)

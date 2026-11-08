@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, ClipboardCheck, ExternalLink, GitBranch, Github, Plus, Rocket, Scale, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { BookOpen, Check, ClipboardCheck, ExternalLink, GitBranch, Github, Plus, Rocket, Scale, Sparkles, Trash2, Wand2 } from "lucide-react";
 import Menu from "../components/Menu.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
 import { SkeletonPage } from "../components/Skeleton.jsx";
@@ -39,8 +39,17 @@ function Step({ label, status, text }) {
 }
 
 // The two doors: the Confluence page (or the console's copy of it) and the GitHub repository.
-function Doors({ pageUrl, pageId, repoUrl, learn, create, review, busy = false, size = "sm", stop = true }) {
+// Where the Confluence door goes: the recorded page URL; else a Confluence search for the page's
+// title when the site is known; else the console's copy of the page.
+function confluenceHref(pageUrl, pageTitle, site) {
+  if (pageUrl) return pageUrl;
+  if (site && pageTitle) return `${site}/wiki/search?text=${encodeURIComponent(pageTitle)}`;
+  return null;
+}
+
+function Doors({ pageUrl, pageId, pageTitle, site, repoUrl, learn, create, review, busy = false, size = "sm", stop = true }) {
   const onClick = stop ? (e) => e.stopPropagation() : undefined;
+  const href = confluenceHref(pageUrl, pageTitle, site);
   return (
     <span className={cx("doors", size)}>
       {review && pageId && (
@@ -48,8 +57,8 @@ function Doors({ pageUrl, pageId, repoUrl, learn, create, review, busy = false, 
           <ClipboardCheck size={14} /> Review page
         </Link>
       )}
-      {pageUrl ? (
-        <a className="btn door" href={pageUrl} target="_blank" rel="noreferrer" onClick={onClick} title="Open the Confluence page">
+      {href ? (
+        <a className="btn door" href={href} target="_blank" rel="noreferrer" onClick={onClick} title={pageUrl ? "Open the Confluence page" : "Search Confluence for this page"}>
           <BookOpen size={14} /> Confluence <ExternalLink size={11} />
         </a>
       ) : pageId && create ? (
@@ -85,6 +94,7 @@ function Doors({ pageUrl, pageId, repoUrl, learn, create, review, busy = false, 
 export default function Migrate() {
   const { locked, health } = useAuth();
   const noLlm = health ? !health.llm : false;
+  const site = health?.confluence_site ?? null;
   const llmHint = noLlm ? "No LLM is configured here: set MAC_LLM_API_KEY (or NVIDIA_API_KEY) in backend/.env and restart" : undefined;
   const [data, setData] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -130,6 +140,15 @@ export default function Migrate() {
     if (!repoUrl.trim()) return;
     launch("add-repo", () => api.addRepo(repoUrl.trim()), (r) => `/agents/${r.id}`);
   };
+  async function acceptRepo(r) {
+    try {
+      await api.acceptRepo(r.full_name);
+      setToast({ tone: "green", text: `${r.name}: use confirmed` });
+      load();
+    } catch (err) {
+      fail(err);
+    }
+  }
   async function removeRepo(r) {
     try {
       await api.removeRepo(r.full_name);
@@ -239,7 +258,7 @@ export default function Migrate() {
                 <Step label="Plan" status={planStatus} text={svc.migration ? "yaml found" : latestPlan ? `${latestPlan.iterations ?? "?"} attempt${latestPlan.iterations === 1 ? "" : "s"}` : "detect or write"} />
                 <Step label="Build" status={buildMeta ? buildMeta.tone : "grey"} text={buildMeta ? buildMeta.label.toLowerCase() : "runner"} />
               </div>
-              <Doors pageUrl={svc.page_url} pageId={svc.page} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} create={health?.confluence && svc.page ? () => createPage(svc.page) : null} review={review === "pending" || review === "rejected"} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
+              <Doors pageUrl={svc.page_url} pageId={svc.page} pageTitle={svc.page_title} site={site} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} create={health?.confluence && svc.page ? () => createPage(svc.page) : null} review={review === "pending" || review === "rejected"} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
               <footer className="card-foot">
                 <button className={cx("btn btn-primary", { hint: locked })} onClick={primary.onClick} disabled={busy === svc.name || busy === "ingest" || (primary.needsLlm && noLlm)} title={primary.needsLlm && llmHint ? llmHint : primary.title}>
                   {primary.icon} {busy === svc.name ? "Launching…" : primary.label}
@@ -272,7 +291,7 @@ export default function Migrate() {
           <button type="submit" className={cx("btn btn-primary", { hint: locked })} disabled={busy === "add-repo" || !repoUrl.trim()}>
             <Scale size={14} /> {busy === "add-repo" ? "Launching…" : "Add and check licence"}
           </button>
-          <span className="muted small">Public repositories only. {health?.llm ? "Nemotron" : "An SPDX rule"} classifies the licence; anything not clearly fine raises a review ticket.</span>
+          <span className="muted small">Public repositories only. {health?.llm ? "Nemotron" : "An SPDX rule"} classifies the licence: no licence asks you to confirm, copyleft raises a review ticket.</span>
         </form>
       )}
       {data.repos_error && <p className="muted small">{data.repos_error}</p>}
@@ -298,15 +317,27 @@ export default function Migrate() {
                     <span className="faint small">not in the knowledge base</span>
                   )}
                   {r.licence && (
-                    <a className={cx("pill", `tone-${r.licence.risk === "ok" ? "green" : r.licence.risk === "blocked" ? "red" : "amber"}`, "pill-link")} href={r.licence.ticket_url ?? r.url} target="_blank" rel="noreferrer" title={r.licence.reason ?? ""}>
-                      <Scale size={11} /> {r.licence.spdx ?? "no licence"} · {r.licence.risk}
-                      {r.licence.ticket ? ` · ${r.licence.ticket}` : ""}
+                    <a
+                      className={cx("pill", `tone-${r.licence.accepted || r.licence.risk === "ok" ? "green" : r.licence.risk === "blocked" ? "red" : "amber"}`, "pill-link")}
+                      href={r.licence.ticket_url ?? r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={r.licence.accepted ? `use confirmed by ${r.licence.accepted_by}${r.licence.note ? ` · ${r.licence.note}` : ""}` : (r.licence.reason ?? "")}
+                    >
+                      <Scale size={11} /> {r.licence.spdx ?? "no licence"} ·{" "}
+                      {r.licence.accepted ? `use confirmed by ${r.licence.accepted_by === "console" ? "you" : `@${r.licence.accepted_by}`}` : r.licence.risk === "confirm" ? "confirm use" : r.licence.risk === "review" ? "review" : r.licence.risk === "blocked" ? "terms forbid use" : "ok"}
+                      {r.licence.ticket && !r.licence.accepted ? ` · ${r.licence.ticket}` : ""}
                     </a>
                   )}
                   {r.custom && <Pill tone="grey">added by hand</Pill>}
                 </div>
                 <div className="cell-actions">
-                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} create={health?.confluence && r.page ? () => createPage(r.page) : null} review={svc?.review?.status === "pending" || svc?.review?.status === "rejected"} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
+                  <Doors pageUrl={r.page_url} pageId={r.page} pageTitle={r.page_title} site={site} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} create={health?.confluence && r.page ? () => createPage(r.page) : null} review={svc?.review?.status === "pending" || svc?.review?.status === "rejected"} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
+                  {r.licence && !r.licence.accepted && r.licence.risk !== "ok" && (
+                    <button className={cx("btn door door-confirm", { hint: locked })} onClick={() => acceptRepo(r)} title={r.licence.risk === "confirm" ? "No licence file was found. Confirm the team may use this repository." : "Proceed despite the licence finding; the ticket stays for the record."}>
+                      <Check size={14} /> {r.licence.risk === "confirm" ? "Confirm use" : "Proceed anyway"}
+                    </button>
+                  )}
                   {r.custom && (
                     <button className="icon-btn" title="Remove from the list" onClick={() => removeRepo(r)}>
                       <Trash2 size={14} />

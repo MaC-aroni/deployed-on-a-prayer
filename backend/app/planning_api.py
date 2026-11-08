@@ -284,8 +284,31 @@ def _all_pages(state: mac_api.State, config: Planning) -> list[KnowledgePage]:
     return base + [p for p in _generated_pages(state) if p.id not in known]
 
 
-def _urls(state: mac_api.State) -> dict[str, str]:
-    return {page: url for page, (_, url, _) in state.runner.store.knowledge_pages().items()}
+_url_lookups: dict[str, float] = {}  # page id -> when Confluence was last asked for it
+
+
+def _urls(state: mac_api.State, pages: list[KnowledgePage] | None = None) -> dict[str, str]:
+    """Our page id -> Confluence URL, from the publish record. When Confluence is configured and
+    a page has no record (published from another machine, or by hand), ask Confluence for a page
+    with that title, at most every 10 minutes, and remember what it says."""
+    urls = {page: url for page, (_, url, _) in state.runner.store.knowledge_pages().items()}
+    conf = state.runner.pages
+    if pages and conf is not None and hasattr(conf, "call") and hasattr(conf, "space_id"):
+        import urllib.parse
+        for page in pages:
+            if page.id in urls or time.time() - _url_lookups.get(page.id, 0) < 600:
+                continue
+            _url_lookups[page.id] = time.time()
+            try:
+                query = urllib.parse.urlencode({"space-id": conf.space_id(), "title": page.title})
+                found = conf.call(f"/wiki/api/v2/pages?{query}")["results"]
+            except (IntegrationError, KeyError, TypeError):
+                continue
+            if found:
+                url = f"{conf.site}/wiki{found[0]['_links']['webui']}"
+                state.runner.store.save_knowledge_page(page.id, found[0]["id"], url, page.title)
+                urls[page.id] = url
+    return urls
 
 
 def _sections(state: mac_api.State, config: Planning):
@@ -319,7 +342,7 @@ def _page_view(state: mac_api.State, page: KnowledgePage) -> dict:
     if generated:  # the Jira readback may have just rewritten the labels on disk
         page = _parse_generated(_generated_dir(state) / f"{page.id}.md") or page
     return {"id": page.id, "title": page.title, "body": page.body, "parent": page.parent, "owner": page.owner,
-            "labels": list(page.labels), "source": page.source, "url": _urls(state).get(page.id),
+            "labels": list(page.labels), "source": page.source, "url": _urls(state, [page]).get(page.id),
             "generated": generated, "review": review}
 
 
@@ -725,6 +748,7 @@ def health(state: mac_api.State = Depends(mac_api.get_state), config: Planning =
             "github": bool(os.environ.get("GITHUB_TOKEN")),
             "jira": not isinstance(state.runner.approvals, mac_cli._NoJira),
             "confluence": state.runner.pages is not None,
+            "confluence_site": (os.environ.get("ATLASSIAN_SITE") or os.environ.get("JIRA_SITE") or "").rstrip("/") or None,
             "aws": bool(os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE")),
             "approvals_live": state.poll_seconds > 0 or state.webhook_secret is not None}
 
@@ -780,11 +804,13 @@ modify this repository's code inside their own migration pipelines (internal use
 deployed to their cloud, not redistributed as a product). From the licence text and SPDX id,
 classify it. Reply with JSON only:
 {"spdx": "<id or null>", "category": "permissive" | "weak-copyleft" | "copyleft" | "proprietary" | "none" | "unknown",
- "risk": "ok" | "review" | "blocked",
+ "risk": "ok" | "review" | "confirm" | "blocked",
  "reason": "<one or two sentences for the reviewer: obligations, and why this risk level>"}
 Rules: MIT, BSD, Apache-2.0, ISC and similar are ok. LGPL/MPL are review (obligations on changes).
-GPL/AGPL/SSPL are review (copyleft reaches the deployed code). No licence at all is blocked
-(all rights reserved by default). Proprietary or custom terms are review unless clearly permissive."""
+GPL/AGPL/SSPL are review (copyleft reaches the deployed code). No licence at all is confirm: the
+person adding it must confirm the team may use it (all rights reserved by default), nobody else
+needs to be asked. Only terms that forbid this use outright are blocked. Proprietary or custom
+terms are review unless clearly permissive."""
 
 RISK_BY_RULE = {  # used when no LLM is configured, by SPDX id
     "mit": "ok", "bsd-2-clause": "ok", "bsd-3-clause": "ok", "apache-2.0": "ok", "isc": "ok", "unlicense": "ok",
@@ -806,9 +832,14 @@ def _custom_repos(state: mac_api.State) -> list[dict]:
     if not path.is_file():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        repos = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
+    for repo in repos:  # entries from before "no licence" became a confirmation, not a block
+        lic = repo.get("licence") or {}
+        if lic.get("by") == "rule" and not lic.get("spdx") and lic.get("risk") == "blocked":
+            lic.update(risk="confirm", reason="no licence file: all rights reserved by default; confirm the team may use it")
+    return repos
 
 
 def _save_custom_repos(state: mac_api.State, repos: list[dict]) -> None:
@@ -876,27 +907,29 @@ def _execute_add_repo(state: mac_api.State, config: Planning, run_id: str, slug:
                       + ((licence or {}).get("text") or "(no licence file)"))
             try:
                 reply = parse_json(llm.complete(LICENCE_PROMPT, prompt, max_tokens=800))
-                if isinstance(reply, dict) and reply.get("risk") in ("ok", "review", "blocked"):
+                if isinstance(reply, dict) and reply.get("risk") in ("ok", "review", "confirm", "blocked"):
                     verdict = {"spdx": reply.get("spdx") or spdx, "category": reply.get("category") or "unknown",
                                "risk": reply["risk"], "reason": str(reply.get("reason") or "").strip(), "by": "nemotron"}
             except (ValueError, IntegrationError) as e:
                 emit("log", f"licence checker: model reply unusable ({e}); falling back to the SPDX rule", "licence")
         if verdict is None:
             key = (spdx or "").lower()
-            risk = "blocked" if licence is None else RISK_BY_RULE.get(key, "review")
+            risk = "confirm" if licence is None else RISK_BY_RULE.get(key, "review")
             verdict = {"spdx": spdx, "category": "none" if licence is None else ("permissive" if risk == "ok" else "unknown"),
-                       "risk": risk, "reason": ("no licence file: all rights reserved by default" if licence is None else
-                                                f"classified by SPDX rule ({spdx or 'unrecognised'})"), "by": "rule"}
+                       "risk": risk, "reason": ("no licence file: all rights reserved by default; confirm the team may use it"
+                                                if licence is None else f"classified by SPDX rule ({spdx or 'unrecognised'})"), "by": "rule"}
         trace("checker", "outcome", f"{verdict['spdx'] or 'no licence'} · {verdict['category']} · {verdict['risk']}: {verdict['reason']}",
-              parent="director", status="succeeded" if verdict["risk"] == "ok" else "failed" if verdict["risk"] == "blocked" else "succeeded")
+              parent="director", status="failed" if verdict["risk"] == "blocked" else "succeeded")
 
-        trace("compiler", "action", "recording the repository" + ("" if verdict["risk"] == "ok" else " and raising a review ticket"),
+        needs_ticket = verdict["risk"] in ("review", "blocked")  # confirm is the adder's own call, not a reviewer's
+        trace("compiler", "action", "recording the repository" + (" and raising a review ticket" if needs_ticket else
+              "; the person who added it confirms its use" if verdict["risk"] == "confirm" else ""),
               parent="director", role="Compiler", status="running")
         entry = {"name": slug.split("/")[1], "full_name": slug, "url": repo.get("html_url") or f"https://github.com/{slug}",
                  "description": repo.get("description") or "", "pushed_at": _epoch(repo.get("pushed_at")),
                  "archived": bool(repo.get("archived")), "custom": True, "added_by": user, "added_at": time.time(),
                  "licence": verdict, "run_id": run_id}
-        if verdict["risk"] != "ok":
+        if needs_ticket:
             try:
                 raised = state.runner.approvals.raise_ticket(TicketRequest(
                     approval_id=f"LIC-{_slug(slug)}", summary=f"Licence review: {slug} ({verdict['spdx'] or 'no licence'})",
@@ -1023,6 +1056,27 @@ def delete_chat(chat_id: str, state: mac_api.State = Depends(mac_api.get_state),
     return {"deleted": chat_id}
 
 
+class AcceptBody(BaseModel):
+    note: str | None = None
+
+
+@router.post("/repos/{owner}/{name}/accept")
+def accept_repo_licence(owner: str, name: str, body: AcceptBody | None = None,
+                        state: mac_api.State = Depends(mac_api.get_state), user: str | None = Depends(signed_in)):
+    """The person's answer to a licence prompt (no licence, review, blocked): yes, use it."""
+    slug = f"{owner}/{name}".lower()
+    repos = _custom_repos(state)
+    entry = next((r for r in repos if r["full_name"].lower() == slug), None)
+    if entry is None:
+        raise HTTPException(404, f"{owner}/{name} wasn't added by hand")
+    licence = dict(entry.get("licence") or {})
+    licence.update(accepted=True, accepted_by=user or "console", accepted_at=time.time(),
+                   note=(body.note if body else None))
+    entry["licence"] = licence
+    _save_custom_repos(state, repos)
+    return entry
+
+
 # ---- Services --------------------------------------------------------------------------------
 
 
@@ -1054,7 +1108,7 @@ def _knowledge_services(state: mac_api.State, config: Planning) -> tuple[list[di
     """Services the knowledge base documents (pages labelled `service`), with the repos each
     page mentions. No model call: this is what the Migrate page shows before anything is learned."""
     pages = _all_pages(state, config)
-    urls = _urls(state)
+    urls = _urls(state, pages)
     repo_re = re.compile(rf"{re.escape(_org())}/[A-Za-z0-9_-]+", re.I)
     out = []
     for page in pages:
@@ -1137,6 +1191,7 @@ def services(state: mac_api.State = Depends(mac_api.get_state), config: Planning
         svc = owner_of.get(repo["full_name"].lower())
         repo["service"] = svc["name"] if svc else None
         repo["page"] = svc["page"] if svc else None
+        repo["page_title"] = svc.get("page_title") if svc else None
         repo["page_url"] = svc["page_url"] if svc else None
 
     return {"ingested": graph is not None,
