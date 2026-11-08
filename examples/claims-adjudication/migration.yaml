@@ -9,7 +9,7 @@ metadata:
 
 target:
   provider: aws
-  account: "000000000000" # TODO: the AWS account ID once it exists
+  account: "418056595238"
   region: us-east-1
 
 # Columns in the pipeline view, left to right. Each stage starts when the one before finishes.
