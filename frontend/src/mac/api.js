@@ -42,9 +42,12 @@ export async function signOut() {
 }
 
 // Live events for a run (server-sent events). Returns a function that stops listening.
-export function follow(runId, after, onEvent, onEnd) {
+// onStatus gets "on" when connected and "retry" while the browser reconnects.
+export function follow(runId, after, onEvent, onEnd, onStatus = () => {}) {
   const query = new URLSearchParams({ after: String(after) });
   const source = new EventSource(`/api/mac/runs/${runId}/stream?${query}`);
+  source.onopen = () => onStatus("on");
+  source.onerror = () => onStatus(source.readyState === EventSource.CLOSED ? "off" : "retry");
   for (const kind of ["log", "step", "run", "diagnosis"]) {
     source.addEventListener(kind, (e) => onEvent(JSON.parse(e.data)));
   }

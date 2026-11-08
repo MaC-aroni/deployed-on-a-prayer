@@ -29,6 +29,25 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Console v2, GitLab-style (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The console was rebuilt to look and work like GitLab's pipeline pages: a job graph with stage
+  columns and status icons, tabs (**Pipeline · Jobs · Build report · Approvals · Runs**), a dark
+  job trace with line numbers and Terraform diff colouring, a job sidebar with deep links to the
+  locked commit, an approvals timeline that draws the `after` chain, and a runs table with stage
+  mini-graphs. Rehearse, Deploy and Undo open a confirmation dialog that states what will happen.
+- `frontend/src/mac/` is now split into `components/` plus `util.js`; see `UI.md` for the map.
+- The URL carries `?m=&run=&step=&tab=`, so a view can be shared or reloaded.
+- A rollback in progress shows a progress bar ("undoing 6 finished steps, newest first · 3 / 6").
+- Durations per step and per run come from the event timestamps; "requested by" is parsed from
+  the run log until the API has a field for it.
+
+#### What you need to do
+- **Elathius:** pull `main` and build on this structure. New screens go in `components/`; new
+  helpers in `util.js`; new API calls only in `api.js`. The long plan (screens, build order, API
+  gaps) is in the "MaC UI Plan" document.
+
 ### 2026-11-08: Default Nemotron model changed to the 550B (Zafeer-R, with Claude Code)
 
 #### What changed
