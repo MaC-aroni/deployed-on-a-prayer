@@ -62,8 +62,9 @@ def make_runner(data_dir: Path) -> Runner:
         if os.environ.get("CONFLUENCE_SPACE_KEY"):
             pages = ConfluencePages(site, email, api_token, os.environ["CONFLUENCE_SPACE_KEY"])
     writer = None
-    if os.environ.get("NVIDIA_API_KEY"):
-        writer = NIMDesignWriter(os.environ["NVIDIA_API_KEY"], os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
+    llm_key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+    if llm_key:
+        writer = NIMDesignWriter(llm_key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
                                  os.environ.get("MAC_LLM_BASE_URL", "https://integrate.api.nvidia.com/v1"))
     bucket = os.environ.get("MAC_TF_STATE_BUCKET")
     tf_state = TerraformState(bucket, os.environ.get("MAC_TF_STATE_REGION", "us-east-1")) if bucket else None

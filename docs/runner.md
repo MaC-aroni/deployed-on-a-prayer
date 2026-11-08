@@ -27,6 +27,8 @@ If any step fails, or its `verify` fails, the runner:
 
 The run ends `failed` if everything was undone, or `rollback_failed` if an undo itself failed.
 The runner keeps undoing the other steps either way. `rollback_failed` means a person has to look.
+If the runner itself crashes or restarts mid-run, a Rehearse or Deploy ends `rollback_failed`
+(what it left behind is unknown), but a Build just ends `failed`: it only reads and plans.
 **Undo** does the same for a finished Deploy, or for a run that's waiting.
 
 ## Stages, manual steps and approvals

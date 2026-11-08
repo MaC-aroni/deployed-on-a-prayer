@@ -29,6 +29,35 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: The MaC console UI, and Grok for testing (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **`/` is now the MaC console** (`frontend/src/mac/`), a GitLab-style pipeline view on
+  `/api/mac`:
+  - migrations listed on the left
+  - Build / Rehearse / Deploy, with the Explain · Report · Auto-fix selector
+  - stages as columns and steps as cards, with live status icons, ▶ for manual steps, 🔒
+    approval counts, and an "AI" badge for `codegen: llm`
+  - a live log per step, streamed from the server
+  - approvals with their Jira links, the design page link, and run history
+  - Check approvals and Undo buttons
+- The old pages moved to `/hello` and `/excuses`.
+- **Any OpenAI-compatible LLM:** set `MAC_LLM_API_KEY`, `MAC_LLM_BASE_URL` and
+  `MAC_LLM_MODEL` (we test with xAI `grok-4.7`). `NVIDIA_API_KEY` still works.
+- The API now keeps run history in `.mac/` at the repo root, the same history as `mise run mac`.
+- **Fixed:** LLM calls were capped at 30 seconds, and a timeout crashed the Build. Now the
+  timeout is honoured, and no LLM or Confluence failure can fail a Build.
+- **Tested for real** through a headless browser against GitHub, AWS, Jira, Confluence and Grok:
+  - a Build started from the UI passed
+  - Grok wrote the design page into Confluence
+  - MaC raised Tech Risk MAC-5 after the page existed
+
+#### How to adapt
+- **Elathius:** this is the base to build on. All API calls are in `frontend/src/mac/api.js`;
+  the screens are in `Console.jsx` and `console.css`. Colours are CSS variables, with a dark
+  mode.
+- Run it with `mise run dev-local`. On Fly, paste the MaC API token in the box top right.
+
 ### 2026-11-07: The four agents (ob1-can-obi, with Claude Code)
 
 #### What changed

@@ -23,9 +23,11 @@ MIGRATIONS_REPO = os.environ.get("MAC_MIGRATIONS_REPO", "MaC-aroni/mac-migration
 
 
 def _llm():
-    if not os.environ.get("NVIDIA_API_KEY"):
-        raise SystemExit("NVIDIA_API_KEY isn't set (see docs/cloud-setup.md)")
-    return NIMChat(os.environ["NVIDIA_API_KEY"], os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
+    # Any OpenAI-compatible chat API: NVIDIA NIM by default, or e.g. xAI with MAC_LLM_BASE_URL.
+    key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+    if not key:
+        raise SystemExit("MAC_LLM_API_KEY (or NVIDIA_API_KEY) isn't set (see docs/cloud-setup.md)")
+    return NIMChat(key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
                    os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
 
 

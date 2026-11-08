@@ -76,13 +76,13 @@ class Pages(Protocol):
         this title) exists. Returns (page_id, url)."""
 
 
-def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None):
+def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None, timeout: int = 30):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
@@ -90,6 +90,8 @@ def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=Non
         raise IntegrationError(f"{method} {url} -> HTTP {e.code}: {detail}", status=e.code) from e
     except urllib.error.URLError as e:
         raise IntegrationError(f"{method} {url} -> {e.reason}") from e
+    except (TimeoutError, ConnectionError) as e:  # slow or dropped responses are service failures too
+        raise IntegrationError(f"{method} {url} -> {type(e).__name__}: {e}") from e
 
 
 class GitHubAPI:
