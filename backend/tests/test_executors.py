@@ -18,7 +18,7 @@ import json, os, pathlib, sys
 log = pathlib.Path(os.environ["FAKE_TF_LOG"])
 override = pathlib.Path("mac_backend_override.tf")
 with log.open("a", encoding="utf-8") as f:
-    f.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "env": os.environ.get("TF_VAR_mac_env"),
+    f.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "env": os.environ.get("TF_VAR_mac_env"), "cache": os.environ.get("TF_PLUGIN_CACHE_DIR"),
                         "override": override.read_text(encoding="utf-8") if override.exists() else None}) + "\\n")
 print("terraform says hi")
 sys.exit(int(os.environ.get("FAKE_TF_EXIT", "0")) if sys.argv[1] != "init" else 0)
@@ -91,12 +91,28 @@ def test_missing_entrypoint_is_a_clear_failure(setup):
         executor.execute(ctx("db_migrate"), "rollback")
 
 
-def test_each_action_gets_a_fresh_checkout(setup, tmp_path):
+def test_each_action_gets_a_fresh_checkout_and_cleans_it_up(setup, tmp_path):
     executor, workspace, ctx, _, _ = setup
     executor.execute(ctx("preflight", mode="build"), "run")
     executor.execute(ctx("preflight", mode="build"), "run")
     assert len(workspace.checkouts) == 2
-    assert (tmp_path / "work" / "run1" / "preflight-run").is_dir()
+    assert not (tmp_path / "work" / "run1" / "preflight-run").exists()  # logs are in the store
+
+
+def test_terraform_shares_one_provider_cache_and_cleans_up(setup, tmp_path):
+    executor, _, ctx, _, tf_calls = setup
+    executor.execute(ctx("provision_storage", mode="build"), "plan")
+    assert all(c["cache"] == str(tmp_path / "tf-plugin-cache") for c in tf_calls())
+    assert (tmp_path / "tf-plugin-cache").is_dir()
+    assert not (tmp_path / "work" / "run1").exists() or not any((tmp_path / "work" / "run1").iterdir())
+
+
+def test_prune_keeps_only_active_runs(setup, tmp_path):
+    executor, *_ = setup
+    for run in ("old1", "old2", "active"):
+        (tmp_path / "work" / run / "step-run").mkdir(parents=True)
+    assert executor.prune({"active"}) == 2
+    assert sorted(p.name for p in (tmp_path / "work").iterdir()) == ["active"]
 
 
 def test_terraform_apply_uses_s3_state_per_environment_and_step(setup):

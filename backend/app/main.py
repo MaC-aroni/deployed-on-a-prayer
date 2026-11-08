@@ -33,7 +33,8 @@ EXCUSES = [
 
 
 @app.get("/api/health")
-def health():
+async def health():
+    # async on purpose: it answers from the event loop even when the worker threads are busy.
     return {"status": "ok"}
 
 

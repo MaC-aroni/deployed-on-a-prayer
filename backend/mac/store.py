@@ -86,8 +86,13 @@ class Store:
     def __init__(self, path: Path | str):
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self.db = sqlite3.connect(str(path), check_same_thread=False, timeout=10)
         self.lock = threading.Lock()
+        # WAL lets the API read run history while a run is writing hundreds of log lines; the
+        # default journal made readers wait on the writer, which stalled the live stream and the
+        # health check. NORMAL sync is safe in WAL mode and skips an fsync per log line.
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
         self.listeners: list[Callable[[Event], None]] = []
         with self.lock, self.db:
             self.db.executescript(
