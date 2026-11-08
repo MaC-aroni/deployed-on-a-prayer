@@ -2,6 +2,11 @@ app = "deployed-on-a-prayer"
 
 [env]
   APP_ENV = "production"
+  MAC_DATA_DIR = "/data" # run history, tickets and page ids; on the volume so deploys keep them
+
+[mounts]
+  source = "mac_data"
+  destination = "/data"
 
 [http_service]
   internal_port = 8080

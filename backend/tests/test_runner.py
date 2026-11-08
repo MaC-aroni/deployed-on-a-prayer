@@ -396,3 +396,12 @@ def test_branch_build_and_rehearse_but_never_deploy(env, spec_path):
 def test_overrides_must_name_a_pipeline_repo(env, spec_path):
     with pytest.raises(GateError, match="doesn't use"):
         env.runner.build(spec_path, overrides={"github.com/x/y": "b"})
+
+
+def test_any_llm_crash_never_fails_the_build(env, spec_path):
+    def crash(facts):
+        raise TimeoutError("The read operation timed out")
+
+    env.writer.write = crash
+    run = env.runner.build(spec_path)
+    assert run.status == RunStatus.SUCCEEDED and "timed out" in run.report["design_page"]["status"]

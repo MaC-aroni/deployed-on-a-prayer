@@ -3,7 +3,7 @@ import shutil
 import pytest
 from fastapi.testclient import TestClient
 
-from app import mac_api
+from app import auth, mac_api
 from app.main import app
 from mac.store import RunStatus
 
@@ -18,11 +18,12 @@ def api(env, tmp_path):
     (migrations / "claims").mkdir(parents=True)
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
     # Background work runs inline, so each response already reflects the finished work.
-    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(),
-                          token=None, require_token=False)
+    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn())
     mac_api.configure(state)
+    auth.configure(auth.AuthConfig(required=False, repo="MaC-aroni/deployed-on-a-prayer", github=None, key=b"k" * 32))
     yield TestClient(app), env, state
     mac_api.configure(None)
+    auth.configure(None)
 
 
 def latest_run(client, run_id):
@@ -172,23 +173,6 @@ def test_runs_list(api):
     assert [r["mode"] for r in runs] == ["build", "build"]
 
 
-def test_token_required_when_configured(api):
-    client, _, state = api
-    state.require_token, state.token = True, "s3cret"
-    assert client.get("/api/mac/migrations").status_code == 401
-    assert client.get("/api/mac/migrations", headers={"Authorization": "Bearer nope"}).status_code == 401
-    assert client.get("/api/mac/migrations", headers={"Authorization": "Bearer s3cret"}).status_code == 200
-    assert client.get("/api/mac/migrations", params={"token": "s3cret"}).status_code == 200
-    assert client.get("/api/health").status_code == 200  # the rest of the app stays public
-
-
-def test_production_without_a_token_is_off(api):
-    client, _, state = api
-    state.require_token, state.token = True, None
-    resp = client.post(f"/api/mac/migrations/{NAME}/build")
-    assert resp.status_code == 503 and "MAC_API_TOKEN" in resp.json()["detail"]
-
-
 def test_invalid_migration_is_listed_but_cannot_run(api):
     client, _, state = api
     broken = state.migrations_dir / "broken"
@@ -209,3 +193,19 @@ def test_recover_after_restart(env, spec_path):
     assert env.runner.recover() == [queued_build.id]
     assert env.store.get(stuck.id).status == RunStatus.ROLLBACK_FAILED
     assert env.runner.execute(queued_build.id).status == RunStatus.SUCCEEDED
+
+
+def test_a_crash_mid_build_is_failed_not_rollback_failed(api, env):
+    client, env, state = api
+    env.runner.execute = lambda run_id: (_ for _ in ()).throw(TimeoutError("The read operation timed out"))
+    run_id = client.post(f"/api/mac/migrations/{NAME}/build").json()["id"]
+    run = latest_run(client, run_id)
+    assert run["status"] == "failed" and "timed out" in run["reason"]
+
+
+def test_recover_fails_a_build_cut_short(env, spec_path):
+    stuck = env.runner.start_build(spec_path)
+    stuck.next_action, stuck.status = None, RunStatus.RUNNING
+    env.store.save(stuck)
+    assert env.runner.recover() == []
+    assert env.store.get(stuck.id).status == RunStatus.FAILED

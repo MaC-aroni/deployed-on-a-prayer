@@ -8,25 +8,33 @@ Everything is under **`/api/mac`**. JSON in and out, except the live stream.
 ## Running it while building the UI
 
 Use **`mise run dev-local`**. It runs the backend with the runner on your machine and the
-frontend at http://localhost:5173, and Vite forwards `/api/...` to it. Locally the API needs no
-token. Runs are stored in `backend/.mac/` (gitignored). Delete that folder to start fresh.
+frontend at http://localhost:5173, and Vite forwards `/api/...` to it. Locally nothing needs
+a sign-in. Runs are stored in `backend/.mac/` (gitignored). Delete that folder to start fresh.
 
 To make real Builds reach GitHub, put `GITHUB_TOKEN=<token>` in `backend/.env`. Until the demo
 repos exist, every Build fails with "repo or branch not found", which is still a real run,
 with events, that you can build screens against.
 
-`mise run dev` (the live backend on Fly) won't work for these endpoints. They need a token
-there (see Access).
+With `mise run dev` (the live backend on Fly) you can read everything, but the buttons need a
+sign-in there (see Access), and they change real AWS.
 
 ## Access
 
-- **Locally:** open.
-- **On Fly** (`APP_ENV=production`): every `/api/mac` endpoint needs the token in the
-  `MAC_API_TOKEN` Fly secret. Without that secret set, the API answers 503. Send it as
-  `Authorization: Bearer <token>`, or as `?token=<token>` for `EventSource`, which can't
-  send headers. Ask ob1-can-obi for it, and never commit it. A good UI pattern: a settings
-  box that keeps it in `localStorage`.
-- `/api/health` and the rest of the app stay public.
+- **Reading is open everywhere:** every `GET`, including the event stream.
+- **Locally:** the `POST`s (they start or change runs) are open too.
+- **On Fly** (`APP_ENV=production`): every `POST` needs someone signed in with GitHub who has
+  write access to `MaC-aroni/deployed-on-a-prayer`. Otherwise it answers `401` ("Sign in with
+  GitHub to do this"), or `503` if the GitHub OAuth app isn't configured. The session is a
+  cookie the browser sends by itself, so the UI sends no headers. The run's log records who
+  pressed the button (`requested by @login`).
+- Sign-in (`app/auth.py`):
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/auth/me` | `{login, required, available, repo}`: `login` is null when signed out; `required` is true on Fly; `available` is false when no OAuth app is set up |
+| `GET /api/auth/login` | Full-page link: goes to GitHub, comes back to `/`, signed in for 7 days |
+| `GET /api/auth/callback` | GitHub's return address. A failed sign-in comes back as `/?signin=no-access`, `expired` or `failed` |
+| `POST /api/auth/logout` | Signs out |
 
 ## How a button works
 
@@ -144,7 +152,7 @@ event as it happens, then `event: end` once the run stops moving. Reconnects res
 automatically through `Last-Event-ID`.
 
 ```js
-const es = new EventSource(`/api/mac/runs/${runId}/stream`); // + `?token=…` on Fly
+const es = new EventSource(`/api/mac/runs/${runId}/stream`);
 for (const kind of ["log", "step", "run", "diagnosis"]) {
   es.addEventListener(kind, (e) => {
     const ev = JSON.parse(e.data); // {seq, step, kind, message, ...}

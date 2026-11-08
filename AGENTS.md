@@ -20,6 +20,8 @@ The agents plan migrations from it and cite it, so it must agree with the demo p
 **The agents** (graph, planner, guide writer, code writer) are in `docs/agents.md`. Keep their
 rules in code (citations, documented repos only, the code writer's limits), not only in prompts.
 
+**Working on the UI?** Read `UI.md` first.
+
 **The UI talks to the runner only through `/api/mac`** (`backend/app/mac_api.py`), whose
 contract is `docs/api.md`. Keep that doc in sync when you change the API. The server enforces
 the run rules; the UI shows its answers instead of re-implementing them.

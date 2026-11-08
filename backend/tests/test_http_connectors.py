@@ -173,3 +173,20 @@ def test_resolve_and_not_found(http):
     assert GitHubAPI(None, api=http.url).resolve(REPO) == SHA
     with pytest.raises(IntegrationError, match="repo or branch not found"):
         GitHubAPI(None, api=http.url).resolve(RepoRef(owner="o", name="missing"))
+
+
+def test_slow_responses_become_integration_errors(http):
+    import time as _time
+
+    original = http.server.RequestHandlerClass.do_POST
+
+    def slow(handler):
+        _time.sleep(1.5)
+        original(handler)
+
+    http.server.RequestHandlerClass.do_POST = slow
+    http.route("POST", "/v1/chat/completions", {"choices": [{"message": {"content": "x"}}]})
+    from mac.llm import NIMChat
+    with pytest.raises(IntegrationError, match="timed out"):
+        NIMChat("k", "m", base_url=f"{http.url}/v1", timeout=1).complete("s", "u")
+    assert NIMChat("k", "m", base_url=f"{http.url}/v1", timeout=5).complete("s", "u") == "x"  # timeout is honoured

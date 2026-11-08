@@ -13,48 +13,116 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | | |
 |---|---|
 | Repo | https://github.com/MaC-aroni/deployed-on-a-prayer (public, org `MaC-aroni`) |
-| Live app | https://deployed-on-a-prayer.fly.dev (placeholder pages, plus `/excuses`) |
+| Live app | https://deployed-on-a-prayer.fly.dev: the MaC console at `/`. Anyone can watch; the buttons need **Sign in with GitHub** and write access to this repo. Real AWS, Jira and Confluence behind it. Run history on the Fly volume `mac_data` |
 | Stack | FastAPI backend (`backend/`), React + Vite frontend (`frontend/`), one Fly.io app |
 | MaC runner | `backend/mac/`, spec `mac/v0.3`, rules in [`docs/runner.md`](docs/runner.md) |
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
-| Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` (built and tested; waiting to be created on GitHub) |
+| Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` on GitHub in `MaC-aroni`, protected and reviewed |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
 | Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
-| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review (set up locally, waiting to be created) |
+| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
-| UI | `frontend/`: GitLab-style pipeline console over `/api/mac` (migrations, Build/Rehearse/Deploy, live DAG, step logs, approvals, Build report, run history), plus a mock pitch page at `/demo` |
-| Not built yet | Real credentials (Zafeer), API endpoints for the agents |
+| UI | `frontend/`: the console at `/` (Build → Migrate · Pipelines, live DAG, step logs, approvals, Build report, runs), mock pitch page at `/demo`; rules in [`UI.md`](UI.md) |
+| Planning API | `/api/mac/services`, `/plan`, `/ingest`, `/plans/...` in `backend/app/planning_api.py`, contract in [`docs/planning-api.md`](docs/planning-api.md) |
+| Not built yet | API endpoints for the guide and code writers; the Diagnostician behind Explain · Report · Auto-fix |
 
 ---
 
 ## Entries
 
-### 2026-11-08: The UI, against `/api/mac` (Elathius, with Claude Code)
+### 2026-11-08: The console at `/`, the Migrate flow, planning endpoints (Elathius, with Claude Code)
 
 #### What changed
-- **The pipeline console** in `frontend/`, in the GitLab pipeline style the team picked:
-  - `/migrations`: every migration the runner knows, with its latest Build, Rehearse and Deploy.
-  - `/migrations/<name>`: stages as columns, steps as cards coloured by the runner's step
-    states, dependency lines (explicit `needs`, else stage order), and the top-bar buttons
-    **Build · Rehearse · Deploy** with the **Explain · Report · Auto-fix** selector. Buttons
-    are only greyed as a hint; the server's `409` reason is shown as it is.
-  - A selected step opens a panel under the graph with its logs (live over the SSE stream),
-    repo and locked commit, undo, and a **Play** button when the step is `waiting`.
-  - Tabs for **Approvals** (ticket, chain, design page, why it's waiting), the **Build
-    report** (locked commits, guardrails, approvals, design page), **Activity** (the run's
-    events) and **History**. `Resume` and `Undo` appear when the run allows them.
-  - `/runs`: run history across migrations. `/demo`: the pitch rehearsal on mock data with
-    Nemotron reasoning traces, kept until the agent endpoints exist.
-  - An **API token** box in the sidebar stores `MAC_API_TOKEN` in `localStorage` for Fly.
-- The frontend has one new dependency, `lucide-react` (icons).
+- **`/` is the full console** (`frontend/src/pages/`, `components/`), replacing the first
+  console from #12, which stays in `frontend/src/mac/Console.jsx` unrouted until the team agrees
+  to remove it. It keeps the rules in `UI.md`: every call goes through
+  `frontend/src/mac/api.js`, `409` reasons are shown as they are, sign-in is the server's cookie
+  (`GET /api/auth/me` drives the Sign-in button), the server decides.
+  - Sidebar **Build → Migrate · Pipelines**, then Runs and a mock Pitch demo (`/demo`).
+  - Pipeline lines are one chain in the runner's execution order (a failure skips the rest),
+    plus explicit `needs`. Clicking a step opens a panel with live logs, repo and locked commit,
+    undo, ▶ for manual steps. Tabs: Approvals, Build report, Activity, History.
+- **Migrate flow:** `/migrate` lists the services in the knowledge graph with their repos;
+  "Migrate to AWS" runs the Planner and shows each attempt live (`/migrate/<run>`), then
+  "Open pipeline" lands on the generated plan (`/plans/<run>`) where Build / Rehearse / Deploy
+  work as for a reviewed spec.
+- **Planning endpoints** in a module of their own, `backend/app/planning_api.py`, mounted by
+  one line in `backend/app/main.py`: `GET /api/mac/services`, `POST /api/mac/plan`,
+  `POST /api/mac/ingest`, `GET /api/mac/plans`, `GET /api/mac/plans/{run}`,
+  `POST /api/mac/plans/{run}/build|rehearse|deploy`. Plans and ingests are ordinary runs
+  (modes `plan`, `ingest`), so `/runs/{id}`, `/events` and `/stream` follow them unchanged.
+  Contract: [`docs/planning-api.md`](docs/planning-api.md). It's separate from `mac_api.py`
+  (not what `UI.md` says) so the UI team's additions never touch the runner API's module;
+  it imports `mac_api`, `auth` and `mac.agents_cli` and changes none of them.
+- `backend/.env.example` says, for every variable, what it is and where to get it.
+- Frontend dependency: `lucide-react` (icons).
 
 #### How to adapt
-- Run `mise run dev-local` and open http://localhost:5173. Put `GITHUB_TOKEN` in
-  `backend/.env`, or repeated Builds hit GitHub's anonymous rate limit.
-- **API changes:** the UI reads exactly the fields in `docs/api.md`. New step states or run
-  statuses need a colour in `frontend/src/status.js`.
-- **Agent endpoints:** when they exist, the `/demo` page's traces should come from them.
+- Run the knowledge-graph ingest once before a demo (`/migrate` → Ingest, or `mise run mac
+  ingest`); it's 14 LLM calls. The API and CLI share `.mac/` at the repo root.
+- **Nemotron track:** the live site's `MAC_LLM_BASE_URL` / `MAC_LLM_MODEL` currently point at
+  Grok. Point them at NVIDIA NIM (and set `NVIDIA_API_KEY`) before the pitch.
+- New step states or run statuses need a colour in `frontend/src/status.js`.
+
+### 2026-11-08: Sign in with GitHub replaces the MaC API token (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The live console has a **Sign in with GitHub** button instead of the token box. Anyone can
+  open the site and watch runs; pressing a button (Build, Rehearse, Deploy, ▶, Check
+  approvals, Undo) needs a GitHub account with write access to `MaC-aroni/deployed-on-a-prayer`.
+- `MAC_API_TOKEN` is gone. Every `GET` under `/api/mac` is now open; every `POST` needs the
+  sign-in on Fly. New endpoints under `/api/auth` (`docs/api.md`, Access).
+- Each run's log says who started it: `requested by @login`.
+- Locally nothing changes: `mise run dev-local` needs no sign-in.
+
+#### What you need to do
+- Nothing locally. On the live site, click **Sign in with GitHub** once; it lasts 7 days.
+- UI work: read `GET /api/auth/me` for who's signed in. Don't add tokens or headers.
+
+### 2026-11-08: The console is live on Fly (ob1-can-obi, with Claude Code)
+
+#### What changed
+- https://deployed-on-a-prayer.fly.dev now serves the MaC console, backed by the real runner:
+  AWS (account …5238), Jira project `MAC`, Confluence space `CLAIMS`, Grok for the design page.
+- Run history, tickets and page ids live on a Fly volume (`MAC_DATA_DIR=/data`), so deploys keep them.
+- A crashed Build now ends `failed`, not `rollback_failed` (a Build changes nothing).
+- The console's AI setting (Explain / Report / Auto-fix) moved off the action row, and Rehearse
+  and Deploy now ask for confirmation.
+
+#### What you need to do
+- **Elathius:** build the UI on top of this; read `UI.md` first. Develop against your local copy
+  (`mise run dev-local`): buttons on the live site make real AWS, Jira and Confluence changes.
+- Ask ob1-can-obi for the MaC API token to use the live console.
+
+### 2026-11-08: The MaC console UI, and Grok for testing (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **`/` is now the MaC console** (`frontend/src/mac/`), a GitLab-style pipeline view on
+  `/api/mac`:
+  - migrations listed on the left
+  - Build / Rehearse / Deploy, with the Explain · Report · Auto-fix selector
+  - stages as columns and steps as cards, with live status icons, ▶ for manual steps, 🔒
+    approval counts, and an "AI" badge for `codegen: llm`
+  - a live log per step, streamed from the server
+  - approvals with their Jira links, the design page link, and run history
+  - Check approvals and Undo buttons
+- The old pages moved to `/hello` and `/excuses`.
+- **Any OpenAI-compatible LLM:** set `MAC_LLM_API_KEY`, `MAC_LLM_BASE_URL` and
+  `MAC_LLM_MODEL` (we test with xAI `grok-4.7`). `NVIDIA_API_KEY` still works.
+- The API now keeps run history in `.mac/` at the repo root, the same history as `mise run mac`.
+- **Fixed:** LLM calls were capped at 30 seconds, and a timeout crashed the Build. Now the
+  timeout is honoured, and no LLM or Confluence failure can fail a Build.
+- **Tested for real** through a headless browser against GitHub, AWS, Jira, Confluence and Grok:
+  - a Build started from the UI passed
+  - Grok wrote the design page into Confluence
+  - MaC raised Tech Risk MAC-5 after the page existed
+
+#### How to adapt
+- **Elathius:** this is the base to build on. All API calls are in `frontend/src/mac/api.js`;
+  the screens are in `Console.jsx` and `console.css`. Colours are CSS variables, with a dark
+  mode.
+- Run it with `mise run dev-local`. On Fly, paste the MaC API token in the box top right.
 
 ### 2026-11-07: The four agents (ob1-can-obi, with Claude Code)
 
