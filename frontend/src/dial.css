@@ -1039,3 +1039,39 @@ a {
 .metrics {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
+
+/* ---------- sober ground: no sunburst, a quieter silver; the night dial is plain ---------- */
+:root,
+:root[data-theme="light"] {
+  --bg: #ecebe7;
+  --surface: #f6f5f2;
+  --surface-2: #e9e7e1;
+  --hover: #e6e4dd;
+  --hover-strong: #dedbd3;
+  --line: rgba(28, 30, 36, 0.12);
+  --line-strong: rgba(28, 30, 36, 0.22);
+  --topbar-bg: rgba(236, 235, 231, 0.92);
+}
+:root[data-theme="dark"] {
+  --bg: #15161a;
+  --surface: #1b1c21;
+  --surface-2: #232429;
+  --topbar-bg: rgba(21, 22, 26, 0.92);
+}
+body::before,
+:root[data-theme="dark"] body::before,
+:root[data-theme="light"] body::before {
+  background: none;
+  content: none;
+}
+
+/* ---------- graph frames never clip a card's hairline ---------- */
+.dag-canvas {
+  padding: 1px 2px 2px 2px;
+}
+.col-card {
+  padding-bottom: 1px;
+}
+.node {
+  box-sizing: border-box;
+}
