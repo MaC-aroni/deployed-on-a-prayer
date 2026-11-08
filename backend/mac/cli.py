@@ -17,6 +17,8 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .design import NIMDesignWriter
 from .executors import Executor, TerraformState
 from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
@@ -136,6 +138,9 @@ def cmd_publish_knowledge(runner: Runner, directory: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Local secrets (backend/.env, gitignored). Real environment variables win, so Fly secrets
+    # and CI settings are never overridden by a stray file.
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
     parser = argparse.ArgumentParser(prog="mac", description="Migration as Code runner")
     sub = parser.add_subparsers(dest="command", required=True)
 
