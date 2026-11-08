@@ -29,11 +29,12 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from mac import agents_cli
+from mac import agents_cli, cli as mac_cli
 from mac.graph import Graph, extract
 from mac.integrations import GitHubAPI, IntegrationError, TicketRequest, _request, open_pull_request, read_files
 from mac.knowledge import KnowledgeError, KnowledgePage, load_pages, publish
-from mac.llm import LLM, parse_json
+from mac.knowledge import render as render_page
+from mac.llm import DEFAULT_MODEL, LLM, parse_json
 from mac.planner import plan, pr_body
 from mac.runner import GateError
 from mac.sources import sections_from_pages
@@ -63,6 +64,7 @@ class Planning:
     repo_reader: Callable[[str], dict] | None = None  # slug -> README, file list, description (None: GitHub)
     code_reader: Callable[[str, str, str], dict[str, str]] | None = None  # (slug, sha, prefix) -> files
     pr_opener: Callable[..., str] | None = None  # open_pull_request's arguments, minus the api -> PR url
+    repo_meta_reader: Callable[[str], dict] | None = None  # slug -> {"repo": GitHub repo json, "license": {...} | None}
 
 
 _config: Planning | None = None
@@ -260,6 +262,27 @@ def knowledge_page(page_id: str, state: mac_api.State = Depends(mac_api.get_stat
     return {"id": page.id, "title": page.title, "body": page.body, "parent": page.parent, "owner": page.owner,
             "labels": list(page.labels), "source": page.source, "url": _urls(state).get(page.id),
             "generated": "generated" in {label.lower() for label in page.labels}, "review": meta or None}
+
+
+@router.post("/knowledge/{page_id}/publish")
+def publish_knowledge_page(page_id: str, state: mac_api.State = Depends(mac_api.get_state),
+                           config: Planning = Depends(get_config), user: str | None = Depends(signed_in)):
+    """Create (or update) this one page in Confluence and remember its URL, so the console's
+    Confluence door opens the real page from now on."""
+    page = next((p for p in _all_pages(state, config) if p.id == page_id), None)
+    if page is None:
+        raise HTTPException(404, f"no knowledge page {page_id!r}")
+    if state.runner.pages is None:
+        raise HTTPException(409, "Confluence isn't configured here (ATLASSIAN_* and CONFLUENCE_SPACE_KEY)")
+    store = state.runner.store
+    known = {k: v[0] for k, v in store.knowledge_pages().items()}
+    parent_id = known.get(page.parent) if page.parent else None
+    try:
+        conf_id, url = state.runner.pages.publish(page.title, render_page(page), known.get(page.id), parent_id=parent_id)
+    except IntegrationError as e:
+        raise HTTPException(409, f"Confluence refused: {e}") from e
+    store.save_knowledge_page(page.id, conf_id, url, page.title)
+    return {"id": page.id, "url": url, "page_id": conf_id, "published_by": user}
 
 
 # ---- Ingest: the whole knowledge base into the graph ------------------------------------------
@@ -604,6 +627,248 @@ def learn(body: LearnBody, state: mac_api.State = Depends(mac_api.get_state), co
     return mac_api._run_view(run)
 
 
+# ---- Health: what's configured here (names only, never values) --------------------------------
+
+
+@router.get("/health")
+def health(state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config)):
+    """Which integrations this deployment has, so the console can explain a 409 before the click."""
+    llm = config.llm_factory is not None
+    return {"llm": llm,
+            "model": (os.environ.get("MAC_LLM_MODEL") or DEFAULT_MODEL) if llm else None,
+            "github": bool(os.environ.get("GITHUB_TOKEN")),
+            "jira": not isinstance(state.runner.approvals, mac_cli._NoJira),
+            "confluence": state.runner.pages is not None,
+            "aws": bool(os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE")),
+            "approvals_live": state.poll_seconds > 0 or state.webhook_secret is not None}
+
+
+# ---- Run index: the run list with the fields the console's lists need --------------------------
+
+
+@router.get("/run-index")
+def run_index(migration: str | None = None, limit: int = 100, state: mac_api.State = Depends(mac_api.get_state)):
+    """Like GET /runs, plus `migration`, `based_on`, `diagnostics_mode` and `autofix`, so the Runs
+    page can link a run to its pipeline and the pipeline page can find the investigation of a
+    failed run. (The runner API's summaries leave those out; asked for in docs/ui-data-needs.md.)"""
+    out = []
+    for run in state.runner.store.runs(migration, min(max(limit, 1), 200)):
+        out.append({**mac_api._summary(run), "migration": run.migration, "based_on": run.based_on,
+                    "diagnostics_mode": run.diagnostics_mode, "autofix": run.autofix or None, "active": run.status.active})
+    return out
+
+
+# ---- Active services: every deployed endpoint across every pipeline -----------------------------
+
+
+@router.get("/services/active")
+def active_services(state: mac_api.State = Depends(mac_api.get_state)):
+    """One row per declared output of every pipeline (reviewed and generated), with its latest
+    production and rehearsal values and the probes that prove it answers. The Services tab."""
+    store = state.runner.store
+    rows = []
+    seen = set()
+    sources = [(name, spec, "reviewed", f"/migrations/{name}") for name, (_, spec, _) in mac_api._find(state).items() if spec]
+    sources += [(spec.metadata.name, spec, "generated", f"/plans/{run_id}") for run_id, spec in _generated(state)]
+    for name, spec, source, href in sources:
+        if name in seen:  # a generated plan usually keeps the reviewed spec's name: one row set per name
+            continue
+        seen.add(name)
+        for entry in mac_api._endpoints(store, name, spec):
+            last = None
+            for env in ("production", "rehearsal"):
+                if entry.get(env):
+                    probes = [p for p in store.probes(entry[env]["run_id"], limit=50)
+                              if (p["step"], p["output"]) == (entry["step"], entry["name"])]
+                    entry[env]["last_probe"] = probes[0] if probes else None
+            rows.append({"migration": name, "service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
+                         "source": source, "href": href, **entry})
+    return rows
+
+
+# ---- Repositories added by URL, with a licence check -------------------------------------------
+
+
+LICENCE_PROMPT = """You review open-source licences for an engineering team that wants to run and
+modify this repository's code inside their own migration pipelines (internal use, possibly
+deployed to their cloud, not redistributed as a product). From the licence text and SPDX id,
+classify it. Reply with JSON only:
+{"spdx": "<id or null>", "category": "permissive" | "weak-copyleft" | "copyleft" | "proprietary" | "none" | "unknown",
+ "risk": "ok" | "review" | "blocked",
+ "reason": "<one or two sentences for the reviewer: obligations, and why this risk level>"}
+Rules: MIT, BSD, Apache-2.0, ISC and similar are ok. LGPL/MPL are review (obligations on changes).
+GPL/AGPL/SSPL are review (copyleft reaches the deployed code). No licence at all is blocked
+(all rights reserved by default). Proprietary or custom terms are review unless clearly permissive."""
+
+RISK_BY_RULE = {  # used when no LLM is configured, by SPDX id
+    "mit": "ok", "bsd-2-clause": "ok", "bsd-3-clause": "ok", "apache-2.0": "ok", "isc": "ok", "unlicense": "ok",
+    "cc0-1.0": "ok", "0bsd": "ok", "mpl-2.0": "review", "lgpl-2.1": "review", "lgpl-3.0": "review",
+    "gpl-2.0": "review", "gpl-3.0": "review", "agpl-3.0": "review",
+}
+
+
+class RepoBody(BaseModel):
+    url: str
+
+
+def _repos_path(state: mac_api.State) -> Path:
+    return state.runner.data_dir / "repos.json"
+
+
+def _custom_repos(state: mac_api.State) -> list[dict]:
+    path = _repos_path(state)
+    if not path.is_file():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+
+
+def _save_custom_repos(state: mac_api.State, repos: list[dict]) -> None:
+    path = _repos_path(state)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(repos, indent=2), encoding="utf-8")
+
+
+def _github_repo_meta(slug: str) -> dict:
+    headers = _gh_headers()
+    repo = _request(f"{GITHUB_API}/repos/{slug}", headers) or {}
+    licence = None
+    try:
+        raw = _request(f"{GITHUB_API}/repos/{slug}/license", headers) or {}
+        info = raw.get("license") or {}
+        licence = {"spdx": info.get("spdx_id") if info.get("spdx_id") not in (None, "NOASSERTION") else None,
+                   "name": info.get("name"), "path": raw.get("path"),
+                   "text": base64.b64decode(raw.get("content") or b"").decode("utf-8", "replace")[:12000]}
+    except IntegrationError as e:
+        if e.status != 404:
+            raise
+    return {"repo": repo, "license": licence}
+
+
+def _parse_repo_url(url: str) -> str:
+    m = re.fullmatch(r"(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?", url.strip())
+    if not m:
+        raise HTTPException(422, "Give a public GitHub repository URL, like https://github.com/owner/name")
+    return f"{m.group(1)}/{m.group(2)}"
+
+
+def _execute_add_repo(state: mac_api.State, config: Planning, run_id: str, slug: str, llm: LLM | None, user: str | None) -> None:
+    store = state.runner.store
+    run = store.get(run_id)
+    emit = lambda kind, message, step=None: store.add_event(run_id, kind, message, step)  # noqa: E731
+    trace = _Trace(state, run_id, "licence", _model_name(llm) if llm else None)
+    try:
+        emit("step", f"licence: checking {slug}", "licence")
+        trace("director", "observation", f"{slug} was added by hand; it isn't in the org's list", role="Director",
+              model=trace.model, status="running")
+        trace("director", "reasoning", "a repository the Planner may build from must be one the company may run and "
+              "change: the Reader fetches its licence, the Compiler records the verdict and raises a review ticket "
+              "when a person has to decide")
+        trace("reader", "action", f"fetching {slug}'s metadata and LICENSE from GitHub", parent="director", role="Reader",
+              status="running")
+        try:
+            meta = (config.repo_meta_reader or _github_repo_meta)(slug)
+        except IntegrationError as e:
+            if e.status == 404:
+                raise ValueError(f"{slug} isn't a public GitHub repository (or doesn't exist)") from e
+            raise
+        repo, licence = meta.get("repo") or {}, meta.get("license")
+        if repo.get("private"):
+            raise ValueError(f"{slug} is private; only public repositories can be added here")
+        spdx = (licence or {}).get("spdx")
+        trace("reader", "outcome", (f"licence file {licence.get('path')}: {licence.get('name') or spdx or 'unrecognised'}"
+                                    if licence else "no licence file in the repository"), parent="director", status="succeeded")
+
+        trace("checker", "action", "classifying the licence for internal use and modification", parent="director",
+              role="Licence checker", model=trace.model, status="running")
+        verdict = None
+        if llm is not None:
+            prompt = (f"Repository: {slug}\nSPDX from GitHub: {spdx or '(none)'}\n"
+                      f"Licence file: {(licence or {}).get('path') or '(none)'}\n\nLicence text:\n"
+                      + ((licence or {}).get("text") or "(no licence file)"))
+            try:
+                reply = parse_json(llm.complete(LICENCE_PROMPT, prompt, max_tokens=800))
+                if isinstance(reply, dict) and reply.get("risk") in ("ok", "review", "blocked"):
+                    verdict = {"spdx": reply.get("spdx") or spdx, "category": reply.get("category") or "unknown",
+                               "risk": reply["risk"], "reason": str(reply.get("reason") or "").strip(), "by": "nemotron"}
+            except (ValueError, IntegrationError) as e:
+                emit("log", f"licence checker: model reply unusable ({e}); falling back to the SPDX rule", "licence")
+        if verdict is None:
+            key = (spdx or "").lower()
+            risk = "blocked" if licence is None else RISK_BY_RULE.get(key, "review")
+            verdict = {"spdx": spdx, "category": "none" if licence is None else ("permissive" if risk == "ok" else "unknown"),
+                       "risk": risk, "reason": ("no licence file: all rights reserved by default" if licence is None else
+                                                f"classified by SPDX rule ({spdx or 'unrecognised'})"), "by": "rule"}
+        trace("checker", "outcome", f"{verdict['spdx'] or 'no licence'} · {verdict['category']} · {verdict['risk']}: {verdict['reason']}",
+              parent="director", status="succeeded" if verdict["risk"] == "ok" else "failed" if verdict["risk"] == "blocked" else "succeeded")
+
+        trace("compiler", "action", "recording the repository" + ("" if verdict["risk"] == "ok" else " and raising a review ticket"),
+              parent="director", role="Compiler", status="running")
+        entry = {"name": slug.split("/")[1], "full_name": slug, "url": repo.get("html_url") or f"https://github.com/{slug}",
+                 "description": repo.get("description") or "", "pushed_at": _epoch(repo.get("pushed_at")),
+                 "archived": bool(repo.get("archived")), "custom": True, "added_by": user, "added_at": time.time(),
+                 "licence": verdict, "run_id": run_id}
+        if verdict["risk"] != "ok":
+            try:
+                raised = state.runner.approvals.raise_ticket(TicketRequest(
+                    approval_id=f"LIC-{_slug(slug)}", summary=f"Licence review: {slug} ({verdict['spdx'] or 'no licence'})",
+                    paragraphs=[f"{slug} was added to MaC's repository list" + (f" by @{user}" if user else "") + ".",
+                                f"Licence: {verdict['spdx'] or 'none found'} ({verdict['category']}); risk {verdict['risk']}.",
+                                verdict["reason"] or "", "Approve this ticket if the team may run and modify this code."],
+                    approver="tech-risk", labels=["mac", "licence-review"], links=[(slug, entry["url"])]))
+                entry["licence"].update(ticket=raised.key, ticket_url=raised.url)
+                emit("log", f"review ticket {raised.key}: {raised.url}", "licence")
+            except IntegrationError as e:
+                emit("log", f"review ticket not raised: {e}", "licence")
+        repos = [r for r in _custom_repos(state) if r["full_name"].lower() != slug.lower()] + [entry]
+        _save_custom_repos(state, repos)
+        _repo_cache["repos"] = None  # services() merges on the next call
+        run.report = {"repo": slug, "licence": verdict, "url": entry["url"]}
+        outcome = f"{slug} added: {verdict['spdx'] or 'no licence'} · {verdict['risk']}" + (f" · {verdict.get('ticket')}" if verdict.get("ticket") else "")
+        trace("compiler", "outcome", outcome, parent="director", status="succeeded")
+        emit("step", f"licence: {outcome}", "licence")
+        trace("director", "outcome", outcome, status="succeeded")
+        _finish(state, run, RunStatus.SUCCEEDED, outcome)
+    except Exception as e:  # noqa: BLE001 - a crash must never leave the run looking active
+        log.exception("add repo %s failed", run_id)
+        emit("step", f"licence: failed: {e}", "licence")
+        trace("director", "outcome", f"failed: {e}", status="failed")
+        _finish(state, run, RunStatus.FAILED, f"adding {slug} failed: {e}")
+
+
+@router.post("/repos", status_code=202)
+def add_repo(body: RepoBody, state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config),
+             user: str | None = Depends(signed_in)):
+    """Add a public repository by URL. An agent checks its licence (Nemotron when configured,
+    an SPDX rule otherwise) and raises a review ticket unless it's clearly fine."""
+    slug = _parse_repo_url(body.url)
+    llm = None
+    if config.llm_factory is not None:
+        try:
+            llm = config.llm_factory()
+        except SystemExit:
+            llm = None
+    migration = f"repo/{slug.split('/')[1]}"
+    _refuse_if_active(state, migration, "licence check")
+    run = _new_run(state, "ingest", migration)
+    state.runner.store.add_event(run.id, "run", f"Repository added: {slug}" + (f" (by @{user})" if user else ""))
+    state.submit(lambda: _execute_add_repo(state, config, run.id, slug, llm, user))
+    return mac_api._run_view(run)
+
+
+@router.delete("/repos/{owner}/{name}")
+def remove_repo(owner: str, name: str, state: mac_api.State = Depends(mac_api.get_state), user: str | None = Depends(signed_in)):
+    slug = f"{owner}/{name}".lower()
+    repos = _custom_repos(state)
+    kept = [r for r in repos if r["full_name"].lower() != slug]
+    if len(kept) == len(repos):
+        raise HTTPException(404, f"{owner}/{name} wasn't added by hand")
+    _save_custom_repos(state, kept)
+    return {"removed": f"{owner}/{name}"}
+
+
 # ---- Services --------------------------------------------------------------------------------
 
 
@@ -702,8 +967,19 @@ def services(state: mac_api.State = Depends(mac_api.get_state), config: Planning
     except IntegrationError as e:
         repos_error = (f"GitHub answered HTTP {e.status}; the organisation's repositories appear when it recovers"
                        if e.status else f"GitHub couldn't be reached ({str(e)[:120]})")
+    listed = {r["full_name"].lower() for r in repos}
+    for custom in _custom_repos(state):
+        if custom["full_name"].lower() in listed:
+            # the org's own repo, added by hand too: keep GitHub's row, carry the licence verdict
+            for r in repos:
+                if r["full_name"].lower() == custom["full_name"].lower():
+                    r["licence"], r["custom"] = custom.get("licence"), True
+            continue
+        repos.append(dict(custom))
     owner_of = {repo.lower(): svc for svc in by_name.values() for repo in svc["repos"]}
     for repo in repos:
+        repo.setdefault("custom", False)
+        repo.setdefault("licence", None)
         svc = owner_of.get(repo["full_name"].lower())
         repo["service"] = svc["name"] if svc else None
         repo["page"] = svc["page"] if svc else None
@@ -949,7 +1225,7 @@ def get_plan(run_id: str, state: mac_api.State = Depends(mac_api.get_state)):
     return {
         "name": name, "service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
         "target": spec.target.model_dump(mode="json"), "diagnostics_default": spec.diagnostics.mode,
-        "stages": mac_api._stages(spec), "approvals": approvals,
+        "stages": mac_api._stages(spec), "approvals": approvals, "endpoints": mac_api._endpoints(store, name, spec),
         "design_page": {"url": page.url, "current": page.digest == spec.digest()} if page else None,
         "issues": [str(i) for i in validate(spec)], "latest": mac_api._latest(state, name),
         "active_run": mac_api._summary(active),

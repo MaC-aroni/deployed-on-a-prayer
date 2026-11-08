@@ -31,6 +31,42 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: ui_v2: Cancel, endpoints, Services tab, AI marks, repos by URL, bigger console (Elathius, with Claude Code)
+
+#### What changed
+- **Pipeline page catches up with main:** Cancel (with confirmation) on active runs, `cancelled`
+  and `undone` in purple, Retry undo on `rollback_failed`, live approval status from the
+  migration detail with "Sync with Jira", `diagnosis` events rendered as Markdown, Download
+  report when `ai_report`, an auto-fix strip (branch, attempt, PR), one failure card for the
+  runner's AI help and Investigate together, an **Endpoints** tab (outputs, probe buttons with
+  status · request id · elapsed · body · copyable curl, probe history).
+- **Services** page (`/services`, Observe): every deployed endpoint across pipelines with
+  on / off / not probed, last probe, and Ping per probe. Backed by `GET /api/mac/services/active`.
+- **AI marks:** a green robot on every step AI touched (planned by Nemotron, LLM-written code,
+  auto-fix branch, diagnosed), with the reasons in the tooltip and an "AI assistance" row in the
+  step panel. The robot no longer hides the lock/pause marks.
+- **Repositories by URL:** Add repository on the Migration page; an agent fetches the licence,
+  Nemotron (or an SPDX rule without a model) classifies it, a review ticket is raised unless it's
+  clearly fine; licence pill on the row; remove. `POST /api/mac/repos`, `DELETE /api/mac/repos/{owner}/{name}`.
+- **Confluence doors:** open the real page when known; "Create in Confluence" publishes a page
+  on demand (`POST /api/mac/knowledge/{page}/publish`); without Confluence configured the door
+  opens the console's copy.
+- `GET /api/mac/health` (what's configured, names only): buttons that need the LLM are greyed
+  with the reason, and a 409 now shows inline under the actions as well as in the toast (why
+  Investigate "did nothing": no LLM key locally).
+- `GET /api/mac/run-index`: `GET /runs` plus `migration`, `based_on`, `autofix`; the Runs page
+  and the pipeline's history use it.
+- Look: pipeline blocks 300×80 with 15px names and 14px status dots, the graph scrolls instead
+  of shrinking below 92%; status dots and cards transition between states; skeleton loading
+  instead of "Loading…"; every list row is one large button; sidebar 288px with 50/68px items.
+
+#### How to adapt
+- `GET /services/active`, `/run-index`, `/repos`, `/knowledge/{page}/publish`, `/health` are in
+  `backend/app/planning_api.py` (docs/planning-api.md); `mac_api.py` is untouched. Two small
+  backend asks are in `docs/ui-data-needs.md` §8 (`migration`/`based_on` on run summaries,
+  `expected_live` for cancelled Deploys).
+- Added repositories live in `<MAC_DATA_DIR>/repos.json`.
+
 ### 2026-11-08: Migration flow with agents: Learn, detect-or-plan, breakpoints, investigate (Elathius, with Claude Code)
 
 #### What changed

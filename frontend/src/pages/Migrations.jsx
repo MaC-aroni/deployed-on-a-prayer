@@ -3,7 +3,8 @@ import { Cloud, Search, Sparkles, Users, Wand2 } from "lucide-react";
 import { EmptyState } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { api, fmtAgo } from "../mac/api.js";
-import { Link } from "../router.jsx";
+import { SkeletonPage } from "../components/Skeleton.jsx";
+import { Link, navigate } from "../router.jsx";
 import { MODE_LABEL, runMeta } from "../status.js";
 import { cx } from "../lib.js";
 
@@ -64,7 +65,7 @@ export default function Migrations() {
       </EmptyState>
     );
   }
-  if (!rows) return <EmptyState title="Loading…" />;
+  if (!rows) return <SkeletonPage rows={4} cols={5} />;
 
   const shown = rows.filter((m) => !q || `${m.name} ${m.service ?? ""} ${m.owner_team ?? ""} ${m.source}`.toLowerCase().includes(q.toLowerCase()));
 
@@ -86,11 +87,11 @@ export default function Migrations() {
           <span className="metric-value">{rows.filter((r) => headline(r.latest) && ACTIVE.has(headline(r.latest).status)).length}</span>
           <span className="metric-sub">Build, Rehearse or Deploy in progress</span>
         </div>
-        <div className="metric">
+        <Link to="/services" className="metric metric-link" title="Open Services">
           <span className="label">Deployed</span>
           <span className="metric-value">{rows.filter((r) => r.latest?.deploy?.status === "succeeded").length}</span>
-          <span className="metric-sub">pipelines with a passing Deploy</span>
-        </div>
+          <span className="metric-sub">pipelines with a passing Deploy · see Services</span>
+        </Link>
       </div>
 
       <div className="toolbar">
@@ -115,7 +116,7 @@ export default function Migrations() {
           const head = headline(m.latest);
           const hm = head ? runMeta(head.status, head.mode) : runMeta("none");
           return (
-            <div className="tr" key={m.key}>
+            <button type="button" className="tr row-btn" key={m.key} onClick={() => navigate(m.href)}>
               <div className="cell-status">
                 {m.valid === false ? (
                   <Pill tone="red">
@@ -130,12 +131,12 @@ export default function Migrations() {
                 {head && <span className="muted small">{fmtAgo(head.updated)}</span>}
               </div>
               <div className="cell-title">
-                <Link to={m.href} className="row-title">
+                <Link to={m.href} className="row-title" onClick={(e) => e.stopPropagation()}>
                   {m.service ?? m.name}
                 </Link>
                 <span className="row-meta">
                   {m.source === "generated" ? (
-                    <Link to={`/migrate/${m.run_id}`} className="pill tone-violet tag pill-link" title="Open the planning run">
+                    <Link to={`/migrate/${m.run_id}`} className="pill tone-violet tag pill-link" title="Open the planning run" onClick={(e) => e.stopPropagation()}>
                       <Sparkles size={11} /> planned by Nemotron
                     </Link>
                   ) : (
@@ -168,11 +169,9 @@ export default function Migrations() {
                 ))}
               </div>
               <div className="cell-actions">
-                <Link to={m.href} className="btn btn-ghost">
-                  Open
-                </Link>
+                <span className="btn btn-ghost row-action">Open</span>
               </div>
-            </div>
+            </button>
           );
         })}
         {shown.length === 0 && rows.length > 0 && <div className="tr empty-row">No pipelines match.</div>}

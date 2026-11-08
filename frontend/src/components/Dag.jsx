@@ -7,7 +7,7 @@ import { cx } from "../lib.js";
 //   edges:   [{ from, to }]  (step ids)
 // Same-column edges route through a gutter on the column's left.
 
-const GUTTER = 22;
+const GUTTER = 28;
 
 function collect(id, map) {
   const out = new Set();
@@ -35,7 +35,7 @@ function edgePath(a, b, sameColumn) {
   return `M${x},${y1} C${bulge},${y1} ${bulge},${y2} ${x},${y2}`;
 }
 
-export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, emptyHint, failedId = null, onAgent }) {
+export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, minScale = 0.92, emptyHint, failedId = null, onAgent }) {
   const outerRef = useRef(null);
   const canvasRef = useRef(null);
   const nodeEls = useRef(new Map());
@@ -89,7 +89,7 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
   }, [measure]);
 
   // Shrink to fit, but never below a readable size; past that the canvas scrolls.
-  const scale = fit && geo.w > 0 && avail > 0 ? Math.max(0.62, Math.min(1, avail / geo.w)) : 1;
+  const scale = fit && geo.w > 0 && avail > 0 ? Math.max(minScale, Math.min(1, avail / geo.w)) : 1;
 
   if (!columns.length) return <div className="dag-empty muted">{emptyHint ?? "Nothing to draw."}</div>;
 
@@ -130,7 +130,7 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
                     onMouseEnter={() => setHover(step.id)}
                     onMouseLeave={() => setHover(null)}
                   >
-                    <StatusIcon status={step.status} size={26} agent={step.agent} onAgent={onAgent && (() => onAgent(step.id))} />
+                    <StatusIcon status={step.status} size={32} agent={step.agent} onAgent={onAgent && (() => onAgent(step.id))} />
                     <span className="node-text">
                       <span className="node-name">{step.name}</span>
                       {step.sub && <span className="node-sub">{step.sub}</span>}

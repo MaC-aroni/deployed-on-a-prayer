@@ -158,7 +158,7 @@ export default function Demo() {
           </div>
 
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} onAgent={() => navigate("/agents/demo")} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} minScale={0.66} onAgent={() => navigate("/agents/demo")} />
           </div>
 
           {step && <NodeDrawer step={step} t={t} onClose={() => setSelected(null)} />}

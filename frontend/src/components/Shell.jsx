@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Activity, ChevronRight, Github, Hammer, PanelLeft, Presentation, Search, Sparkles, Workflow, Wand2 } from "lucide-react";
+import { Activity, ChevronRight, Github, Hammer, PanelLeft, Presentation, Radio, Search, Sparkles, Workflow, Wand2 } from "lucide-react";
 import { SIGN_IN_URL, api, signOut } from "../mac/api.js";
 import { Link, usePath } from "../router.jsx";
 import { cx } from "../lib.js";
@@ -15,6 +15,7 @@ const NAV = [
   {
     section: "Observe",
     items: [
+      { to: "/services", label: "Services", Icon: Radio, hint: "live endpoints", match: (p) => p.startsWith("/services") },
       { to: "/runs", label: "Runs", Icon: Activity, match: (p) => p.startsWith("/runs") || p.startsWith("/agents") },
       { to: "/demo", label: "Pitch demo", Icon: Presentation, match: (p) => p.startsWith("/demo") },
     ],
@@ -33,7 +34,7 @@ function readCollapsed() {
 
 // Who is signed in (GET /api/auth/me). `locked` means the server will refuse POSTs until the
 // person signs in; the UI only greys buttons as a hint, the server decides.
-const AuthContext = createContext({ me: null, locked: false });
+const AuthContext = createContext({ me: null, locked: false, health: null });
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -93,6 +94,19 @@ export default function Shell({ crumbs = [], actions, children }) {
 
   const locked = Boolean(me?.required && !me.login);
 
+  // What this deployment has configured (GET /api/mac/health): pages grey out what can't work.
+  const [health, setHealth] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api.health().then((h) => alive && setHealth(h)).catch(() => {});
+    load();
+    const id = setInterval(load, 60000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
   // Pipelines exist only once a migration has been started; the count says how many there are.
   const [counts, setCounts] = useState({ pipelines: null });
   useEffect(() => {
@@ -108,7 +122,7 @@ export default function Shell({ crumbs = [], actions, children }) {
   }, [path]);
 
   return (
-    <AuthContext.Provider value={{ me, locked }}>
+    <AuthContext.Provider value={{ me, locked, health }}>
       <div className={cx("shell", { collapsed })}>
         <aside className="sidebar">
           <Link to="/" className="brand" title="MaC · Migration as Code">
@@ -138,7 +152,7 @@ export default function Shell({ crumbs = [], actions, children }) {
                     <Icon size={primary ? 20 : 18} />
                     <span className="nav-label">
                       {label}
-                      {primary && hint && <span className="nav-hint">{hint}</span>}
+                      {hint && <span className="nav-hint">{hint}</span>}
                     </span>
                     {count && counts[count] != null && <span className={cx("nav-count", { zero: counts[count] === 0 })}>{counts[count]}</span>}
                   </Link>

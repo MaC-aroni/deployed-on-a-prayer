@@ -8,6 +8,7 @@ import Migration from "./pages/Migration.jsx";
 import Migrations from "./pages/Migrations.jsx";
 import Planning from "./pages/Planning.jsx";
 import Runs from "./pages/Runs.jsx";
+import Services from "./pages/Services.jsx";
 import Excuses from "./Excuses.jsx";
 import Home from "./Home.jsx";
 import { RouterProvider, matchPath, usePath } from "./router.jsx";
@@ -70,6 +71,13 @@ function Routes() {
     return (
       <Shell crumbs={[ORG, { label: `planning ${m.runId}` }]}>
         <Planning key={m.runId} runId={m.runId} />
+      </Shell>
+    );
+  }
+  if (path === "/services") {
+    return (
+      <Shell crumbs={[ORG, { label: "Services" }]}>
+        <Services />
       </Shell>
     );
   }

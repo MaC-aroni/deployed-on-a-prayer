@@ -44,6 +44,12 @@ export const api = {
     return call("GET", `/runs?${q}`);
   },
   run: (id) => call("GET", `/runs/${enc(id)}`),
+  // GET /runs plus migration, based_on and autofix per run (planning API), for lists that link runs
+  runIndex: (migration, limit = 100) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (migration) q.set("migration", migration);
+    return call("GET", `/run-index?${q}`);
+  },
   events: (id, after = 0, step) => {
     const q = new URLSearchParams({ after: String(after) });
     if (step) q.set("step", step);
@@ -52,6 +58,11 @@ export const api = {
   play: (id, step) => call("POST", `/runs/${enc(id)}/steps/${enc(step)}/play`),
   resume: (id) => call("POST", `/runs/${enc(id)}/resume`),
   undo: (id) => call("POST", `/runs/${enc(id)}/undo`),
+  cancel: (id) => call("POST", `/runs/${enc(id)}/cancel`),
+  approvalsSync: (name) => call("POST", `/migrations/${enc(name)}/approvals/sync`),
+  // Outputs and probes: proof the deployed service answers from AWS
+  probe: (id, step, output, probe) => call("POST", `/runs/${enc(id)}/outputs/${enc(step)}/${enc(output)}/probes/${enc(probe)}`),
+  probes: (id) => call("GET", `/runs/${enc(id)}/probes`),
 
   // Planning: the knowledge graph, the Planner, and the plans it generated
   services: () => call("GET", "/services"),
@@ -67,9 +78,21 @@ export const api = {
   investigate: (runId, mode) => call("POST", `/runs/${enc(runId)}/investigate`, mode ? { mode } : {}),
   approveFix: (runId) => call("POST", `/runs/${enc(runId)}/approve-fix`),
 
+  // What this deployment has configured (names only): { llm, model, github, jira, confluence, aws, approvals_live }
+  health: () => call("GET", "/health"),
+  // Every deployed endpoint across every pipeline, for the Services tab
+  activeServices: () => call("GET", "/services/active"),
+  // Repositories added by URL (an agent checks the licence) and the Confluence door's "create page"
+  addRepo: (url) => call("POST", "/repos", { url }),
+  removeRepo: (slug) => call("DELETE", `/repos/${slug}`),
+  publishKnowledge: (page) => call("POST", `/knowledge/${enc(page)}/publish`),
+
   // Sign-in: { login, required, available, repo }
   me: () => call("GET", "/auth/me"),
 };
+
+// The AI report a Report or Auto-fix run wrote (a download; 404 when there is none).
+export const reportUrl = (runId) => `/api/mac/runs/${enc(runId)}/report.md`;
 
 // A pipeline page reads one of two sources with the same shape.
 export function sourceApi(source) {

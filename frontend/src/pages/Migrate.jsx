@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, ExternalLink, GitBranch, Github, Rocket, Sparkles, Wand2 } from "lucide-react";
+import { BookOpen, ExternalLink, GitBranch, Github, Plus, Rocket, Scale, Sparkles, Trash2, Wand2 } from "lucide-react";
 import Menu from "../components/Menu.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
+import { SkeletonPage } from "../components/Skeleton.jsx";
 import { Pill } from "../components/StatusIcon.jsx";
 import { api, fmtAgo } from "../mac/api.js";
 import { Link, navigate } from "../router.jsx";
@@ -38,7 +39,7 @@ function Step({ label, status, text }) {
 }
 
 // The two doors: the Confluence page (or the console's copy of it) and the GitHub repository.
-function Doors({ pageUrl, pageId, repoUrl, learn, busy = false, size = "sm", stop = true }) {
+function Doors({ pageUrl, pageId, repoUrl, learn, create, busy = false, size = "sm", stop = true }) {
   const onClick = stop ? (e) => e.stopPropagation() : undefined;
   return (
     <span className={cx("doors", size)}>
@@ -46,9 +47,13 @@ function Doors({ pageUrl, pageId, repoUrl, learn, busy = false, size = "sm", sto
         <a className="btn door" href={pageUrl} target="_blank" rel="noreferrer" onClick={onClick} title="Open the Confluence page">
           <BookOpen size={14} /> Confluence <ExternalLink size={11} />
         </a>
+      ) : pageId && create ? (
+        <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), create())} disabled={busy} title="Create this page in Confluence and link it here from now on">
+          <BookOpen size={14} /> {busy ? "Creating…" : "Create in Confluence"}
+        </button>
       ) : pageId ? (
-        <Link className="btn door" to={`/knowledge/${pageId}`} onClick={onClick} title="Open the knowledge page">
-          <BookOpen size={14} /> Confluence
+        <Link className="btn door" to={`/knowledge/${pageId}`} onClick={onClick} title="Confluence isn't configured here: open the console's copy of the page">
+          <BookOpen size={14} /> Page
         </Link>
       ) : learn ? (
         <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), learn())} disabled={busy} title="Launch an agent to write this repository's knowledge page and raise a review ticket">
@@ -73,8 +78,12 @@ function Doors({ pageUrl, pageId, repoUrl, learn, busy = false, size = "sm", sto
 }
 
 export default function Migrate() {
-  const { locked } = useAuth();
+  const { locked, health } = useAuth();
+  const noLlm = health ? !health.llm : false;
+  const llmHint = noLlm ? "No LLM is configured here: set MAC_LLM_API_KEY (or NVIDIA_API_KEY) in backend/.env and restart" : undefined;
   const [data, setData] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [repoUrl, setRepoUrl] = useState("");
   const [plans, setPlans] = useState([]);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -112,11 +121,36 @@ export default function Migrate() {
   const learnAll = () => launch("ingest", () => api.ingest(), (r) => `/agents/${r.id}`);
   const learnRepo = (repo) => launch(repo.full_name, () => api.learn(repo.full_name), (r) => `/agents/${r.id}`);
   const plan = (svc, opts = {}) => launch(svc.name, () => api.plan({ service: svc.name, pr: withPr, build: true, ...opts }), (r) => `/migrate/${r.id}`);
+  const addRepo = (e) => {
+    e?.preventDefault();
+    if (!repoUrl.trim()) return;
+    launch("add-repo", () => api.addRepo(repoUrl.trim()), (r) => `/agents/${r.id}`);
+  };
+  async function removeRepo(r) {
+    try {
+      await api.removeRepo(r.full_name);
+      load();
+    } catch (err) {
+      fail(err);
+    }
+  }
+  async function createPage(pageId) {
+    setBusy(`page:${pageId}`);
+    try {
+      const res = await api.publishKnowledge(pageId);
+      setToast({ tone: "green", text: `Confluence page created: ${res.url}` });
+      await load();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const planById = useMemo(() => Object.fromEntries(plans.map((p) => [p.run_id, p])), [plans]);
 
   if (error) return <EmptyState title="Backend unreachable" body={error.detail} />;
-  if (!data) return <EmptyState title="Loading…" />;
+  if (!data) return <SkeletonPage rows={4} cols={4} />;
 
   const learnedLine = data.ingested ? `learned ${fmtAgo(data.graph_updated)}` : "not learned yet";
   const repoUrlOf = (full) => data.repos.find((r) => r.full_name.toLowerCase() === full.toLowerCase())?.url ?? `https://github.com/${full}`;
@@ -142,7 +176,7 @@ export default function Migrate() {
             <span className="toggle-knob" />
           </button>
         </label>
-        <button className={cx("btn btn-secondary", { hint: locked })} onClick={learnAll} disabled={busy === "ingest"} title="Launch the agents that read the whole knowledge base into the graph">
+        <button className={cx("btn btn-secondary", { hint: locked })} onClick={learnAll} disabled={busy === "ingest" || noLlm} title={llmHint ?? "Launch the agents that read the whole knowledge base into the graph"}>
           <BookOpen size={14} /> {busy === "ingest" ? "Launching…" : data.ingested ? "Re-learn knowledge base" : "Learn knowledge base"}
         </button>
       </div>
@@ -159,10 +193,10 @@ export default function Migrate() {
             ? { label: "Open pipeline", onClick: () => navigate(`/migrations/${encodeURIComponent(svc.migration)}`), icon: <Wand2 size={14} />, title: "A reviewed migration.yaml exists" }
             : latestPlanId
               ? { label: "Open pipeline", onClick: () => navigate(`/plans/${latestPlanId}`), icon: <Wand2 size={14} />, title: "The plan the agent wrote" }
-              : { label: "Launch agent", onClick: () => plan(svc), icon: <Rocket size={14} />, title: svc.learned ? "Detect or write migration.yaml, then Build" : "Learn the knowledge base, detect or write migration.yaml, then Build" };
+              : { label: "Launch agent", onClick: () => plan(svc), icon: <Rocket size={14} />, needsLlm: true, title: svc.learned ? "Detect or write migration.yaml, then Build" : "Learn the knowledge base, detect or write migration.yaml, then Build" };
           return (
             <article className="card service-card" key={svc.name}>
-              <header className="card-head">
+              <header className="card-head card-head-btn" role="button" tabIndex={0} onClick={primary.onClick} onKeyDown={(e) => e.key === "Enter" && primary.onClick()} title={primary.label}>
                 <div className="card-title">
                   <strong>{svc.name}</strong>
                   <span className="muted">{svc.team ?? "owner unknown"}</span>
@@ -196,9 +230,9 @@ export default function Migrate() {
                 <Step label="Plan" status={planStatus} text={svc.migration ? "yaml found" : latestPlan ? `${latestPlan.iterations ?? "?"} attempt${latestPlan.iterations === 1 ? "" : "s"}` : "detect or write"} />
                 <Step label="Build" status={buildMeta ? buildMeta.tone : "grey"} text={buildMeta ? buildMeta.label.toLowerCase() : "runner"} />
               </div>
-              <Doors pageUrl={svc.page_url} pageId={svc.page} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} size="lg" stop={false} />
+              <Doors pageUrl={svc.page_url} pageId={svc.page} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} create={health?.confluence && svc.page ? () => createPage(svc.page) : null} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
               <footer className="card-foot">
-                <button className={cx("btn btn-primary", { hint: locked })} onClick={primary.onClick} disabled={busy === svc.name || busy === "ingest"} title={primary.title}>
+                <button className={cx("btn btn-primary", { hint: locked })} onClick={primary.onClick} disabled={busy === svc.name || busy === "ingest" || (primary.needsLlm && noLlm)} title={primary.needsLlm && llmHint ? llmHint : primary.title}>
                   {primary.icon} {busy === svc.name ? "Launching…" : primary.label}
                 </button>
                 {svc.approvers.length > 0 && <span className="muted small">approvers: {svc.approvers.join(", ")}</span>}
@@ -215,10 +249,23 @@ export default function Migrate() {
       </div>
 
       <div className="toolbar" style={{ marginTop: 32 }}>
-        <span className="label">Repositories in the organisation</span>
+        <span className="label">Repositories</span>
         <span className="spacer" />
         <span className="muted small">{data.repos.length} repositories · pipelines start from the services above · Learn writes a page for an undocumented repo</span>
+        <button className={cx("btn btn-secondary", { hint: locked })} onClick={() => setAdding((v) => !v)} title="Add a public GitHub repository by URL; an agent checks its licence">
+          <Plus size={14} /> Add repository
+        </button>
       </div>
+      {adding && (
+        <form className="add-repo" onSubmit={addRepo}>
+          <Github size={16} className="muted" />
+          <input className="filter-input add-repo-input" placeholder="https://github.com/owner/name" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} autoFocus aria-label="Repository URL" />
+          <button type="submit" className={cx("btn btn-primary", { hint: locked })} disabled={busy === "add-repo" || !repoUrl.trim()}>
+            <Scale size={14} /> {busy === "add-repo" ? "Launching…" : "Add and check licence"}
+          </button>
+          <span className="muted small">Public repositories only. {health?.llm ? "Nemotron" : "An SPDX rule"} classifies the licence; anything not clearly fine raises a review ticket.</span>
+        </form>
+      )}
       {data.repos_error && <p className="muted small">{data.repos_error}</p>}
       {data.repos.length > 0 && (
         <div className="table repos-table">
@@ -232,7 +279,7 @@ export default function Migrate() {
                   <span className="muted small">{r.description || "no description"}</span>
                 </div>
                 <div className="muted small">{r.pushed_at ? `pushed ${fmtAgo(r.pushed_at)}` : ""}</div>
-                <div>
+                <div className="cell-pills">
                   {svc ? (
                     <Pill tone={svc.learned ? "green" : svc.generated ? "amber" : "grey"}>
                       {svc.generated ? "under review · " : "part of "}
@@ -241,9 +288,21 @@ export default function Migrate() {
                   ) : (
                     <span className="faint small">not in the knowledge base</span>
                   )}
+                  {r.licence && (
+                    <a className={cx("pill", `tone-${r.licence.risk === "ok" ? "green" : r.licence.risk === "blocked" ? "red" : "amber"}`, "pill-link")} href={r.licence.ticket_url ?? r.url} target="_blank" rel="noreferrer" title={r.licence.reason ?? ""}>
+                      <Scale size={11} /> {r.licence.spdx ?? "no licence"} · {r.licence.risk}
+                      {r.licence.ticket ? ` · ${r.licence.ticket}` : ""}
+                    </a>
+                  )}
+                  {r.custom && <Pill tone="grey">added by hand</Pill>}
                 </div>
                 <div className="cell-actions">
-                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : () => learnRepo(r)} busy={learning} size="md" stop={false} />
+                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} create={health?.confluence && r.page ? () => createPage(r.page) : null} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
+                  {r.custom && (
+                    <button className="icon-btn" title="Remove from the list" onClick={() => removeRepo(r)}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
               </div>
             );

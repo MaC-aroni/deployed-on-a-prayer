@@ -183,3 +183,38 @@ it was already approved, or when `GITHUB_TOKEN` is missing. Nothing merges by it
 
 Investigations are listed by `GET /runs?migration=<name>` beside the runs they explain, so the
 pipeline page can show "fix proposed" under a failed run.
+
+## Health, run index, active services
+
+- `GET /api/mac/health` → `{llm, model, github, jira, confluence, aws, approvals_live}`: what this
+  deployment has configured, names only. The console greys Launch agent, Learn and Investigate
+  when `llm` is false and says why.
+- `GET /api/mac/run-index?migration=&limit=`: `GET /runs` plus `migration`, `based_on`,
+  `diagnostics_mode`, `autofix` and `active` per run, so lists can link a run to its pipeline and
+  the pipeline page can find the investigation of a failed run.
+- `GET /api/mac/services/active`: one row per declared output of every pipeline (reviewed and
+  generated), `{migration, service, owner_team, source, href, step, name, description, probes,
+  production?, rehearsal?}` where each environment entry is the runner API's
+  (`run_id, value, run_status, expected_live`) plus `last_probe` (the newest probe answer for
+  that output, or null). The Services tab; Ping calls the runner API's probe endpoint.
+- `GET /plans/{id}` now carries `endpoints` like `GET /migrations/{name}`.
+
+## Repositories added by URL
+
+`POST /api/mac/repos {"url": "https://github.com/owner/name"}` → `202` plus a run (mode
+`ingest`, migration `repo/<name>`), `422` for anything that isn't a GitHub repository URL. The
+Reader fetches the repository and its LICENSE from GitHub (a private or missing repo fails the
+run); the Licence checker asks the model to classify it for internal use and modification
+(`{spdx, category, risk: ok | review | blocked, reason}`), or, without an LLM, applies an SPDX
+rule (permissive → ok, copyleft → review, no licence → blocked); the Compiler records the
+repository in `<MAC_DATA_DIR>/repos.json` and **raises a Jira review ticket** when the risk
+isn't `ok`. `GET /services` lists it in `repos[]` with `custom: true` and `licence` (with
+`ticket`/`ticket_url` when raised); `DELETE /api/mac/repos/{owner}/{name}` removes it.
+
+## Create a Confluence page
+
+`POST /api/mac/knowledge/{page}/publish` creates or updates that one page in Confluence
+(`state.runner.pages`; the parent is linked when it was published before) and records the URL,
+so `page_url` is set from then on. `409` when Confluence isn't configured; `404` for an unknown
+page. For a repository with no page at all, `POST /learn` is the agent that writes and
+publishes one.

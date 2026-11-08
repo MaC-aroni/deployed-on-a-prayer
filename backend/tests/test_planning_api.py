@@ -303,3 +303,128 @@ def test_investigate_then_approve_fix_opens_a_pull_request(api):
     # A run that passed has nothing to investigate.
     ok_build = client.get(f"/api/mac/runs?migration={NAME}").json()[-1]
     assert client.post(f"/api/mac/runs/{ok_build['id']}/investigate").status_code == 409
+
+
+def _deployed(client, env):
+    env.approvals.default = "approved"
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    reh = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()
+    client.post(f"/api/mac/runs/{reh['id']}/steps/db_migrate/play")
+    dep = client.post(f"/api/mac/migrations/{NAME}/deploy").json()
+    client.post(f"/api/mac/runs/{dep['id']}/steps/db_migrate/play")
+    return reh["id"], dep["id"]
+
+
+def test_health_says_what_is_configured_without_values(api):
+    client, env, holder = api
+    h = client.get("/api/mac/health").json()
+    assert h["llm"] is True and h["model"] and h["jira"] is True and h["confluence"] is True
+    assert set(h) == {"llm", "model", "github", "jira", "confluence", "aws", "approvals_live"}
+    planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE))
+    h = client.get("/api/mac/health").json()
+    assert h["llm"] is False and h["model"] is None
+
+
+def test_active_services_list_every_deployed_endpoint_with_its_last_probe(api):
+    client, env, holder = api
+    assert client.get("/api/mac/services/active").json() == [
+        {"migration": NAME, "service": SERVICE, "owner_team": "claims-platform", "source": "reviewed",
+         "href": f"/migrations/{NAME}", **e} for e in client.get(f"/api/mac/migrations/{NAME}").json()["endpoints"]]
+    reh, dep = _deployed(client, env)
+    state = mac_api.get_state()
+    state.prober = lambda url, probe, region: {"url": url, "status": 200, "ok": True, "checked": 1.0, "error": None,
+                                               "elapsed_ms": 7, "request_id": "req-1", "served_by_aws": True, "curl": "curl"}
+    client.post(f"/api/mac/runs/{dep}/outputs/deploy_service/url/probes/health")
+    rows = client.get("/api/mac/services/active").json()
+    svc = next(r for r in rows if r["step"] == "deploy_service")
+    assert svc["production"]["run_id"] == dep and svc["production"]["expected_live"] is True
+    assert svc["production"]["last_probe"]["request_id"] == "req-1" and svc["production"]["last_probe"]["ok"] is True
+    assert svc["rehearsal"]["expected_live"] is False and svc["rehearsal"]["last_probe"] is None
+    other = next(r for r in rows if r["step"] == "provision_storage")
+    assert other["production"]["last_probe"] is None and other["probes"] == []
+
+
+def _repo_meta(spdx, text="MIT License\n\nPermission is hereby granted...", private=False):
+    def read(slug):
+        owner, name = slug.split("/")
+        return {"repo": {"full_name": slug, "html_url": f"https://github.com/{slug}", "description": f"{name} repo",
+                         "pushed_at": "2026-11-08T10:00:00Z", "archived": False, "private": private},
+                "license": None if spdx is None else {"spdx": spdx, "name": spdx, "path": "LICENSE", "text": text}}
+    return read
+
+
+def test_add_repo_by_url_checks_the_licence_and_raises_a_review_ticket_when_needed(api):
+    client, env, holder = api
+    verdict_ok = json.dumps({"spdx": "MIT", "category": "permissive", "risk": "ok", "reason": "MIT allows internal use and changes."})
+    verdict_gpl = json.dumps({"spdx": "GPL-3.0", "category": "copyleft", "risk": "review", "reason": "Copyleft reaches deployed code."})
+    holder["llm"] = ScriptedLLM(verdict_ok)
+    planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: FAKE_REPOS, repo_meta_reader=_repo_meta("MIT")))
+    assert client.post("/api/mac/repos", json={"url": "not a url"}).status_code == 422
+
+    res = client.post("/api/mac/repos", json={"url": "https://github.com/pallets/flask.git"})
+    assert res.status_code == 202, res.text
+    run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert run["mode"] == "ingest" and run["migration"] == "repo/flask" and run["status"] == "succeeded", run["reason"]
+    assert run["report"]["licence"]["risk"] == "ok" and run["report"]["licence"]["by"] == "nemotron"
+    assert env.approvals.raised == []  # clearly fine: nobody is asked
+    agents = agent_events(client, run["id"])
+    assert {a["agent"] for a in agents} == {"director", "reader", "checker", "compiler"}
+    repo = next(r for r in client.get("/api/mac/services").json()["repos"] if r["full_name"] == "pallets/flask")
+    assert repo["custom"] is True and repo["licence"]["spdx"] == "MIT" and repo["service"] is None
+
+    # A copyleft licence: the verdict is recorded and a reviewer is asked.
+    holder["llm"] = ScriptedLLM(verdict_gpl)
+    planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: FAKE_REPOS, repo_meta_reader=_repo_meta("GPL-3.0", "GNU GPL v3")))
+    run = client.get(f"/api/mac/runs/{client.post('/api/mac/repos', json={'url': 'github.com/gnu/thing'}).json()['id']}").json()
+    assert run["report"]["licence"]["risk"] == "review" and run["report"]["licence"]["ticket"] == "MAC-1"
+    [ticket] = env.approvals.raised
+    assert ticket.summary.startswith("Licence review: gnu/thing") and "licence-review" in ticket.labels
+    repos = {r["full_name"]: r for r in client.get("/api/mac/services").json()["repos"]}
+    assert repos["gnu/thing"]["licence"]["ticket"] == "MAC-1" and repos["pallets/flask"]["licence"]["risk"] == "ok"
+
+    # No LLM: the SPDX rule decides; no licence at all is blocked.
+    planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: FAKE_REPOS, repo_meta_reader=_repo_meta(None)))
+    run = client.get(f"/api/mac/runs/{client.post('/api/mac/repos', json={'url': 'https://github.com/x/bare'}).json()['id']}").json()
+    assert run["status"] == "succeeded" and run["report"]["licence"] == {
+        "spdx": None, "category": "none", "risk": "blocked", "reason": "no licence file: all rights reserved by default",
+        "by": "rule", "ticket": "MAC-2", "ticket_url": "https://example.atlassian.net/browse/MAC-2"}
+    # Private repos are refused; removal works once.
+    planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: FAKE_REPOS, repo_meta_reader=_repo_meta("MIT", private=True)))
+    run = client.get(f"/api/mac/runs/{client.post('/api/mac/repos', json={'url': 'https://github.com/x/secret'}).json()['id']}").json()
+    assert run["status"] == "failed" and "private" in run["reason"]
+    assert client.delete("/api/mac/repos/pallets/flask").status_code == 200
+    assert client.delete("/api/mac/repos/pallets/flask").status_code == 404
+    assert "pallets/flask" not in {r["full_name"] for r in client.get("/api/mac/services").json()["repos"]}
+
+
+def test_publish_one_knowledge_page_to_confluence_and_remember_its_url(api):
+    client, env, holder = api
+    assert client.get("/api/mac/services").json()["services"][1]["page_url"] is None
+    res = client.post("/api/mac/knowledge/service-claims-adjudication/publish")
+    assert res.status_code == 200, res.text
+    assert res.json()["url"].startswith("https://example.atlassian.net/wiki/")
+    [(title, html, page_id, parent_id)] = env.pages.published
+    assert title == "Services: ClaimsAdjudicationService" and page_id is None and parent_id is None and "<h2>" in html
+    svc = by_name(client.get("/api/mac/services").json()["services"], SERVICE)
+    assert svc["page_url"] == res.json()["url"]
+    assert client.get("/api/mac/knowledge/service-claims-adjudication").json()["url"] == res.json()["url"]
+    # Again: updates the same page (its id is passed back), and the parent is known when published.
+    second = client.post("/api/mac/knowledge/service-claims-adjudication/publish").json()
+    assert env.pages.published[-1][2] == res.json()["page_id"] and second["url"] == res.json()["url"]
+    assert client.post("/api/mac/knowledge/nope/publish").status_code == 404
+    env.runner.pages = None
+    assert client.post("/api/mac/knowledge/service-claims-adjudication/publish").status_code == 409
+
+
+def test_run_index_carries_migration_and_based_on(api):
+    client, env, holder = api
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    [row] = client.get("/api/mac/run-index").json()
+    assert row["migration"] == NAME and row["mode"] == "build" and row["based_on"] is None and row["active"] is False
+    assert set(row) >= {"id", "mode", "status", "reason", "failed_step", "created", "updated", "migration", "based_on"}
+    assert client.get(f"/api/mac/run-index?migration={NAME}&limit=1").json()[0]["id"] == row["id"]
+    assert client.get("/api/mac/run-index?migration=nothing").json() == []

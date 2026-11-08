@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Copy, Download, ExternalLink, Play, X } from "lucide-react";
+import Markdown from "./Markdown.jsx";
 import StatusIcon, { Pill } from "./StatusIcon.jsx";
 import { fmtTime, githubUrl, shortRepo, shortSha } from "../mac/api.js";
 import { STATUS } from "../status.js";
@@ -49,7 +50,7 @@ function Row({ label, children }) {
   );
 }
 
-export default function StepInspector({ step, state, run, events, approvals = [], report, onPlay, onClose, busy }) {
+export default function StepInspector({ step, state, run, events, approvals = [], report, onPlay, onClose, busy, ai = [] }) {
   const [tab, setTab] = useState("logs");
   const [query, setQuery] = useState("");
   const logRef = useRef(null);
@@ -118,7 +119,7 @@ export default function StepInspector({ step, state, run, events, approvals = []
                       <span className="ln-ts">{fmtTime(e.ts)}</span>
                       <span className="ln-text">
                         {e.kind !== "log" && <span className="ln-kind">{e.kind}</span>}
-                        {e.message || " "}
+                        {e.kind === "diagnosis" ? <Markdown text={e.message} className="markdown markdown-inline" /> : e.message || " "}
                       </span>
                     </div>
                   ))}
@@ -196,6 +197,17 @@ export default function StepInspector({ step, state, run, events, approvals = []
                 "engineers"
               )}
             </Row>
+            {ai.length > 0 && (
+              <Row label="AI assistance">
+                <ul className="plain ai-list">
+                  {ai.map((line) => (
+                    <li key={line}>
+                      <Bot size={12} className="ai-mark" /> {line}
+                    </li>
+                  ))}
+                </ul>
+              </Row>
+            )}
             {env && (
               <Row label="Environment">
                 {env} · resources named <span className="mono">mac-claims-{env}-…</span>
@@ -205,10 +217,10 @@ export default function StepInspector({ step, state, run, events, approvals = []
               <Row label="Waits for">
                 <ul className="plain approvals-list">
                   {waits.map(({ id, a, r }) => {
-                    const st = r?.status ?? (a?.ticket ? "pending" : "unknown");
+                    const st = (a?.status && a.status !== "not_requested" ? a.status : null) ?? r?.status ?? (a?.ticket ? "pending" : "unknown");
                     return (
                       <li key={id}>
-                        <Pill tone={STATUS[st]?.tone ?? "grey"} title={r?.detail ?? ""}>
+                        <Pill tone={STATUS[st]?.tone ?? "grey"} title={a?.detail ?? r?.detail ?? ""}>
                           <span className="mono">{id}</span>
                         </Pill>
                         {(a?.ticket?.url || r?.url) ? (
