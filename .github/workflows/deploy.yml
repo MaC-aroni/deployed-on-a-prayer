@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   deploy:
-    # Maintainers, same as .github/CODEOWNERS. Anyone else gets a skipped run, not a deploy.
+    # Maintainers only (listed in AGENTS.md). Anyone else gets a skipped run, not a deploy.
     if: >-
       contains(fromJSON('["ob1-can-obi", "Elathius", "Zafeer-R"]'), github.actor)
       && github.ref == 'refs/heads/main'

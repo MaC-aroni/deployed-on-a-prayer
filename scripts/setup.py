@@ -57,7 +57,8 @@ def main():
     print("\nInstalling backend dependencies...")
     if not venv_python().exists():
         run([sys.executable, "-m", "venv", ".venv"], cwd=BACKEND)
-    run([venv_python(), "-m", "pip", "install", "-q", "--disable-pip-version-check", "-r", "requirements.txt"], cwd=BACKEND)
+    run([venv_python(), "-m", "pip", "install", "-q", "--disable-pip-version-check",
+         "-r", "requirements.txt", "-r", "requirements-dev.txt"], cwd=BACKEND)
 
     env_file = BACKEND / ".env"
     if not env_file.exists():

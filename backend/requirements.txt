@@ -21,7 +21,9 @@ idna==3.20
 opentelemetry-api==1.45.2
     # via fastapi
 pydantic==2.14.3
-    # via fastapi
+    # via
+    #   -r backend/requirements.in
+    #   fastapi
 pydantic-core==2.50.4
     # via pydantic
 python-dotenv==1.2.4
@@ -29,7 +31,9 @@ python-dotenv==1.2.4
     #   -r backend/requirements.in
     #   uvicorn
 pyyaml==6.0.3
-    # via uvicorn
+    # via
+    #   -r backend/requirements.in
+    #   uvicorn
 starlette==1.10.0
     # via fastapi
 typing-extensions==4.16.0

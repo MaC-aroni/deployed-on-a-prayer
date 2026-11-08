@@ -7,19 +7,24 @@ against the live backend, and `mise run dev-local` runs both on this machine.
 
 **First-time setup or a broken local environment:** follow `.claude/skills/setup-dev/SKILL.md`.
 
+**The MaC runner** (`backend/mac/`) builds, rehearses and deploys `migration.yaml` pipelines.
+Read `docs/runner.md` before changing it or writing a repo it runs. It must stay deterministic:
+no model calls in `runner.py` or `executors.py`. Any step failing undoes everything. Run the
+tests with `mise run test`.
+
 ## Repo and team
 
 - Repo: https://github.com/MaC-aroni/deployed-on-a-prayer (public, in the MaC-aroni org).
   Clone with `gh repo clone MaC-aroni/deployed-on-a-prayer`.
-- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. Any of them can approve and
-  merge PRs (not their own) and run Deploy (Actions → Deploy → Run workflow on `main`).
-  The list lives in `.github/CODEOWNERS` and in `.github/workflows/deploy.yml`; change both together.
+- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. Only they can run Deploy
+  (Actions → Deploy → Run workflow on `main`); the list is in `.github/workflows/deploy.yml`.
+- PRs need no review: anyone with write access merges once CI passes.
 - Only ob1-can-obi has access to the Fly app, so API key values and Fly problems go to them.
 
 ## Rules
 
-- Never commit to `main`. Use a branch and open a PR (`gh pr create`); a maintainer
-  (ob1-can-obi, Elathius, Zafeer-R) approves and merges.
+- Never commit to `main`. Use a branch and open a PR (`gh pr create`). No review is needed;
+  merge it once CI passes.
 - Don't add AI attribution to commits: no `Co-Authored-By: Claude ...` (or any other agent)
   trailer, and no "Generated with ..." lines in commit messages.
 - Never put API keys in code, and never commit `.env` files. New keys: add the name to
