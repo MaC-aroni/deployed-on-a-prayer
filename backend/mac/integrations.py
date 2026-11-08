@@ -84,8 +84,11 @@ RETRIES = 3  # for GET/HEAD only: a repeated POST could raise a second ticket or
 RETRY_DELAY = 2.0
 
 
-def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None, timeout: int = 30):
-    attempts = RETRIES if method in ("GET", "HEAD") else 1
+def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None, timeout: int = 30,
+             retries: int | None = None):
+    """retries: how many attempts in all. Default: 3 for reads, 1 for writes (a repeated POST could
+    raise a second ticket). Callers whose POST has no side effects (LLM calls) can ask for more."""
+    attempts = retries or (RETRIES if method in ("GET", "HEAD") else 1)
     for attempt in range(1, attempts + 1):
         try:
             return _request_once(url, headers, method=method, body=body, timeout=timeout)

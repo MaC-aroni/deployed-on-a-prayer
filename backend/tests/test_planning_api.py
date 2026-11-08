@@ -1,5 +1,5 @@
 """The planning API: the knowledge graph and the Planner over HTTP, with a scripted LLM.
-Runs inline (submit=lambda fn: fn()), so every response already reflects the finished work."""
+Runs inline (submit=lambda fn: fn(), submit_agent=lambda fn: fn()), so every response already reflects the finished work."""
 
 import json
 import shutil
@@ -40,7 +40,7 @@ def api(env, tmp_path):
     migrations = tmp_path / "migrations"
     (migrations / "claims").mkdir(parents=True)
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
-    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn())
+    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(), submit_agent=lambda fn: fn())
     mac_api.configure(state)
     holder = {"llm": None, "repos": lambda: FAKE_REPOS}
     planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,

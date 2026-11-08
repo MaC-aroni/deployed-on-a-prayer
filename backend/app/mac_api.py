@@ -43,7 +43,11 @@ log = logging.getLogger("mac.api")
 class State:
     runner: Runner
     migrations_dir: Path
-    submit: Callable[[Callable[[], None]], None]  # runs work in the background
+    submit: Callable[[Callable[[], None]], None]  # runs pipeline work in the background
+    # Agent jobs (ingest, learn, plan, investigate) only call the LLM and write records, so a
+    # restart can simply fail them. Daemon threads: they never keep a stopping server alive.
+    submit_agent: Callable[[Callable[[], None]], None] = lambda fn: threading.Thread(
+        target=fn, name="mac-agent", daemon=True).start()
     poll_seconds: int = 0  # how often to ask Jira about pending approvals; 0 = never
     webhook_secret: str | None = None  # MAC_JIRA_WEBHOOK_SECRET; None = the Jira webhook is off
     prober: Callable = probes.send  # (url, probe, region) -> result; tests swap it
@@ -382,6 +386,14 @@ def _get_run(state: State, run_id: str) -> RunRecord:
         return state.runner.store.get(run_id)
     except KeyError as e:
         raise HTTPException(404, f"no run {run_id!r}") from e
+
+
+@router.get("/activity")
+def activity(state: State = Depends(get_state)):
+    """Everything in flight. The Deploy workflow waits for `busy` to clear before restarting the
+    server, so a deploy never cuts a Rehearse, Deploy or agent job off mid-way."""
+    active = [_summary(r) for r in state.runner.store.runs(limit=200) if r.status.active]
+    return {"busy": bool(active), "active": active}
 
 
 @router.get("/runs")
