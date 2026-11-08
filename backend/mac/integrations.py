@@ -20,6 +20,10 @@ ApprovalStatus = Literal["approved", "pending", "rejected"]
 class IntegrationError(Exception):
     """A service couldn't be reached or answered with an error."""
 
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
 
 @dataclass(frozen=True)
 class Check:
@@ -56,7 +60,7 @@ def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=Non
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
-        raise IntegrationError(f"{method} {url} -> HTTP {e.code}: {detail}") from e
+        raise IntegrationError(f"{method} {url} -> HTTP {e.code}: {detail}", status=e.code) from e
     except urllib.error.URLError as e:
         raise IntegrationError(f"{method} {url} -> {e.reason}") from e
 
@@ -77,7 +81,13 @@ class GitHubAPI:
 
     def resolve(self, repo: RepoRef) -> str:
         ref = urllib.parse.quote(repo.ref, safe="")
-        return self._get(f"/repos/{repo.slug}/commits/{ref}")["sha"]
+        try:
+            return self._get(f"/repos/{repo.slug}/commits/{ref}")["sha"]
+        except IntegrationError as e:
+            if e.status in (404, 422):
+                raise IntegrationError(f"{repo}: repo or branch not found, or GITHUB_TOKEN can't read it",
+                                       status=e.status) from e
+            raise
 
     def guardrails(self, repo: RepoRef, sha: str, rules: Guardrails) -> list[Check]:
         checks = []
