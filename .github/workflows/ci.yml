@@ -14,11 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2 # same Node/Python as mise.toml
-      - run: pip install -r requirements.txt ruff
+      - run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Lint (real errors only, not style)
         run: python -m ruff check --select E9,F63,F7,F82 . ../scripts
       - name: App imports
         run: python -c "from app.main import app"
+      - name: Tests
+        run: python -m pytest -q
+      - name: Example migrations are valid
+        run: for spec in ../examples/*/migration.yaml; do python -m mac validate "$spec"; done
 
   frontend:
     runs-on: ubuntu-latest

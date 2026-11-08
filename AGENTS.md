@@ -7,6 +7,11 @@ against the live backend, and `mise run dev-local` runs both on this machine.
 
 **First-time setup or a broken local environment:** follow `.claude/skills/setup-dev/SKILL.md`.
 
+**The MaC runner** (`backend/mac/`) builds, rehearses and deploys `migration.yaml` pipelines.
+Read `docs/runner.md` before changing it or writing a repo it runs. It must stay deterministic:
+no model calls in `runner.py` or `executors.py`. Any step failing undoes everything. Run the
+tests with `mise run test`.
+
 ## Repo and team
 
 - Repo: https://github.com/MaC-aroni/deployed-on-a-prayer (public, in the MaC-aroni org).
