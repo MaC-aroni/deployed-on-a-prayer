@@ -579,11 +579,11 @@ def test_the_model_switch_is_in_health_and_changes_what_agents_use(api, monkeypa
     assert health["llm_provider"] == "nemotron" and health["model"].startswith("nvidia/nemotron")
     assert [p["id"] for p in health["llm_providers"]] == ["nemotron", "grok"]
     switched = client.post("/api/mac/settings/llm", json={"provider": "grok"}).json()
-    assert switched["llm_provider"] == "grok" and switched["model"] == "grok-4.7"
+    assert switched["llm_provider"] == "grok" and switched["model"] == "grok-4.20-0309-non-reasoning"
     assert client.get("/api/mac/health").json()["llm_provider"] == "grok"  # remembered
     from mac.llm import RoutedLLM
     routed = RoutedLLM()
-    assert routed.provider == "grok" and routed.model == "grok-4.7" and routed._client().url.startswith("https://api.x.ai/")
+    assert routed.provider == "grok" and routed.model == "grok-4.20-0309-non-reasoning" and routed._client().url.startswith("https://api.x.ai/")
     assert client.post("/api/mac/settings/llm", json={"provider": "claude"}).status_code == 409
     monkeypatch.delenv("GROK_API_KEY")
     assert client.get("/api/mac/health").json()["llm_provider"] == "nemotron"  # a missing key falls back
