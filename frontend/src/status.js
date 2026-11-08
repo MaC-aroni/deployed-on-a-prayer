@@ -34,8 +34,16 @@ export const RUN_STATUS = {
   none: { label: "No runs yet", tone: "grey", icon: "pending" },
 };
 
-export function runMeta(status) {
+// Plan and ingest runs have nothing to roll back: a cut-off one is just interrupted.
+const AGENT_MODES = new Set(["plan", "ingest"]);
+
+export function runMeta(status, mode) {
+  if (AGENT_MODES.has(mode)) {
+    if (status === "rollback_failed") return { label: "Interrupted", tone: "red", icon: "failed" };
+    if (status === "succeeded") return { label: mode === "plan" ? "Plan ready" : "Ingested", tone: "green", icon: "succeeded" };
+    if (status === "running") return { label: mode === "plan" ? "Planning" : "Ingesting", tone: "violet", icon: "running" };
+  }
   return RUN_STATUS[status] ?? RUN_STATUS.none;
 }
 
-export const MODE_LABEL = { build: "Build", rehearse: "Rehearse", deploy: "Deploy" };
+export const MODE_LABEL = { build: "Build", rehearse: "Rehearse", deploy: "Deploy", plan: "Plan", ingest: "Ingest" };

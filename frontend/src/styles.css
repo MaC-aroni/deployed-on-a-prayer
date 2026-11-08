@@ -1482,3 +1482,99 @@ a.row-title {
 .inspector-head .btn {
   flex: none;
 }
+
+/* ---------- sign-in, confirm, migrate flow ---------- */
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.link-btn {
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.btn-github {
+  background: #24292f;
+  border-color: #24292f;
+  color: #fff;
+}
+.btn-github:hover {
+  background: #32383f;
+  text-decoration: none;
+}
+.banner {
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--tone-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--tone);
+  font-size: 13px;
+}
+.banner a {
+  font-weight: 600;
+}
+.run-actions {
+  flex-direction: column;
+  align-items: flex-end;
+}
+.actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  animation: rise 0.15s ease-out;
+}
+.pill-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+a.pill-link {
+  text-decoration: none;
+}
+a.pill-link:hover {
+  filter: brightness(0.95);
+}
+.card-wide {
+  max-width: 720px;
+}
+.service-card .card-head strong {
+  font-size: 15px;
+}
+.repo-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.repo-list .stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ingest-log {
+  max-height: 260px;
+  overflow: auto;
+  margin-bottom: 16px;
+}
+.toolbar .btn-primary {
+  margin-left: auto;
+}

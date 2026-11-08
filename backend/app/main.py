@@ -10,11 +10,12 @@ from fastapi.staticfiles import StaticFiles
 # backend/.env for local dev. On Fly, keys arrive as Fly secrets (real env vars).
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from . import auth, mac_api  # noqa: E402 - read env vars, so after load_dotenv
+from . import auth, mac_api, planning_api  # noqa: E402 - read env vars, so after load_dotenv
 
 app = FastAPI(title="deployed-on-a-prayer")
 app.include_router(auth.router)  # before the frontend catch-all below
 app.include_router(mac_api.router)
+app.include_router(planning_api.router)  # the Planner and knowledge graph over HTTP (docs/planning-api.md)
 
 EXCUSES = [
     "It worked on my laptop. My laptop has since entered witness protection.",

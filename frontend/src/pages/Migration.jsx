@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Cloud, ExternalLink, FlaskConical, Hammer, Hand, Lock, Play, Rocket, RotateCw, Sparkles, Undo2, Users } from "lucide-react";
 import Dag from "../components/Dag.jsx";
-import { EmptyState } from "../components/Shell.jsx";
+import { Confirm, EmptyState, useAuth } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import StepInspector from "../components/StepInspector.jsx";
-import { api, fmtAgo, fmtTime, shortRepo, streamRun } from "../api.js";
+import { api, fmtAgo, fmtTime, follow, shortRepo, sourceApi } from "../mac/api.js";
+import { Link } from "../router.jsx";
 import { MODE_LABEL, STATUS, runMeta } from "../status.js";
 import { cx } from "../lib.js";
+
+// The pipeline page. `source` is { kind: "migration", id: name } for a reviewed spec in
+// examples/, or { kind: "plan", id: runId } for a plan the Planner generated; both read the
+// same shape (docs/api.md, docs/planning-api.md).
 
 const AI_MODES = [
   ["explain", "Explain"],
@@ -45,7 +50,7 @@ function Toggle({ checked, onChange, label }) {
 function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(onClose, 7000);
+    const id = setTimeout(onClose, 8000);
     return () => clearTimeout(id);
   }, [toast, onClose]);
   if (!toast) return null;
@@ -62,7 +67,9 @@ function approvalStatus(reportRun, id) {
   return typeof v === "string" ? { status: v } : v;
 }
 
-export default function Migration({ name, initialRun }) {
+export default function Migration({ source, initialRun }) {
+  const { locked } = useAuth();
+  const src = useMemo(() => sourceApi(source), [source.kind, source.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [mig, setMig] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -77,12 +84,14 @@ export default function Migration({ name, initialRun }) {
   const [ai, setAi] = useState(null);
   const [toast, setToast] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(null); // "rehearse" | "deploy"
   const [withLogs, setWithLogs] = useState(false);
   const chosen = useRef(Boolean(initialRun));
 
   const refresh = useCallback(async () => {
     try {
-      const [m, rs] = await Promise.all([api.migration(name), api.runs(name)]);
+      const m = await src.detail();
+      const rs = await api.runs(m.name);
       setMig(m);
       setRuns(rs);
       setLoadError(null);
@@ -92,7 +101,7 @@ export default function Migration({ name, initialRun }) {
       setLoadError(e);
       return null;
     }
-  }, [name]);
+  }, [src]);
 
   useEffect(() => {
     let alive = true;
@@ -121,7 +130,7 @@ export default function Migration({ name, initialRun }) {
       return;
     }
     let alive = true;
-    let close = null;
+    let stop = () => {};
     (async () => {
       try {
         const [r, evs] = await Promise.all([api.run(runId), api.events(runId)]);
@@ -145,31 +154,33 @@ export default function Migration({ name, initialRun }) {
           } while (again && alive);
           fetching = false;
         };
-        const last = evs.length ? evs[evs.length - 1].seq : 0;
-        close = streamRun(runId, last, {
-          onEvent: (ev) => {
+        stop = follow(
+          runId,
+          evs.at(-1)?.seq ?? 0,
+          (ev) => {
             if (!alive) return;
             setEvents((prev) => (prev.some((p) => p.seq === ev.seq) ? prev : [...prev, ev]));
             if (ev.kind !== "log") refetchRun();
           },
-          onEnd: () => {
+          () => {
             if (!alive) return;
             refetchRun();
             refresh();
           },
-        });
+        );
       } catch (e) {
         if (alive) setToast({ tone: "red", text: e.detail ?? String(e) });
       }
     })();
     return () => {
       alive = false;
-      close?.();
+      stop();
     };
   }, [runId, refresh]);
 
   async function act(label, fn) {
     setBusy(true);
+    setConfirming(null);
     try {
       const r = await fn();
       setToast({ tone: "green", text: `${label} started` });
@@ -180,14 +191,13 @@ export default function Migration({ name, initialRun }) {
       }
       await refresh();
     } catch (e) {
-      setToast({ tone: e.status === 409 ? "amber" : "red", text: e.detail ?? String(e) });
+      setToast({ tone: e.status === 409 ? "amber" : e.status === 401 ? "blue" : "red", text: e.detail ?? String(e) });
     } finally {
       setBusy(false);
     }
   }
-  const start = (mode) => act(MODE_LABEL[mode], () => api.start(name, mode, mode === "build" ? {} : { ai }));
+  const start = (mode) => act(MODE_LABEL[mode], () => src.start(mode, mode === "build" ? {} : { ai }));
   const play = (stepId) => act(`Play ${stepId}`, () => api.play(run.id, stepId));
-
   const closeToast = useCallback(() => setToast(null), []);
 
   const stepsById = useMemo(() => Object.fromEntries((mig?.stages ?? []).flatMap((s) => s.steps.map((st) => [st.id, st]))), [mig]);
@@ -210,21 +220,21 @@ export default function Migration({ name, initialRun }) {
     [mig, stateOf],
   );
 
+  // One chain in the runner's execution order (stages left to right, steps as the API orders
+  // them): a step only runs when the one before it finished, and a failure skips the rest.
+  // Explicit `needs` that aren't the immediate predecessor are drawn too.
   const edges = useMemo(() => {
-    const out = [];
-    const stages = mig?.stages ?? [];
-    stages.forEach((stage, i) => {
-      for (const st of stage.steps) {
-        if (st.needs?.length) for (const n of st.needs) out.push({ from: n, to: st.id });
-        else if (i > 0) for (const prev of stages[i - 1].steps) out.push({ from: prev.id, to: st.id });
-      }
+    const order = (mig?.stages ?? []).flatMap((s) => s.steps);
+    const out = order.slice(1).map((st, i) => ({ from: order[i].id, to: st.id }));
+    order.forEach((st, i) => {
+      for (const n of st.needs ?? []) if (i === 0 || n !== order[i - 1].id) out.push({ from: n, to: st.id });
     });
     return out;
   }, [mig]);
 
   if (loadError) {
     return (
-      <EmptyState title={loadError.status === 404 ? `No migration named ${name}` : "Backend unreachable"} body={loadError.detail}>
+      <EmptyState title={loadError.status === 404 ? `Nothing at ${source.id}` : "Backend unreachable"} body={loadError.detail}>
         <p className="muted small">The runner API is at /api/mac. Locally, start it with `mise run dev-local`.</p>
       </EmptyState>
     );
@@ -234,11 +244,12 @@ export default function Migration({ name, initialRun }) {
   const active = Boolean(mig.active_run);
   const canRehearse = mig.latest?.build?.status === "succeeded" && !active;
   const canDeploy = mig.latest?.rehearse?.status === "succeeded" && !active;
-  const rm = run ? runMeta(run.status) : runMeta("none");
+  const rm = run ? runMeta(run.status, run.mode) : runMeta("none");
   const reportRun = run?.mode === "build" ? run : buildRun;
   const step = selected ? stepsById[selected] : null;
   const activity = withLogs ? events : events.filter((e) => e.kind !== "log");
   const openApprovals = mig.approvals.filter((a) => approvalStatus(reportRun, a.id)?.status !== "approved").length;
+  const generated = mig.source === "generated";
 
   return (
     <>
@@ -246,10 +257,19 @@ export default function Migration({ name, initialRun }) {
 
       <div className="run-head">
         <div className="run-head-main">
-          <Pill tone={rm.tone} className="pill-lg">
-            <StatusIcon status={rm.icon} size={16} />
-            {run ? `${MODE_LABEL[run.mode]} · ${rm.label}` : rm.label}
-          </Pill>
+          <div className="pill-row">
+            <Pill tone={rm.tone} className="pill-lg">
+              <StatusIcon status={rm.icon} size={16} />
+              {run ? `${MODE_LABEL[run.mode]} · ${rm.label}` : rm.label}
+            </Pill>
+            {generated ? (
+              <Link to={`/migrate/${mig.plan_run}`} className="pill tone-violet pill-link" title="Open the planning run">
+                <Sparkles size={13} /> Planned by Nemotron
+              </Link>
+            ) : (
+              <Pill tone="grey">reviewed spec</Pill>
+            )}
+          </div>
           <h1>
             {mig.service} <span className="muted">→ {mig.target.provider.toUpperCase()}</span>
           </h1>
@@ -261,6 +281,11 @@ export default function Migration({ name, initialRun }) {
             <span>
               <Cloud size={13} /> {mig.target.account} · {mig.target.region}
             </span>
+            {mig.pr_url && (
+              <a className="link" href={mig.pr_url} target="_blank" rel="noreferrer">
+                pull request <ExternalLink size={11} />
+              </a>
+            )}
             {run && (
               <span className="mono">
                 run {run.id} · {fmtTime(run.created)}
@@ -274,32 +299,42 @@ export default function Migration({ name, initialRun }) {
           </div>
         </div>
         <div className="run-actions">
-          <div className="segmented" title="AI help if a step fails">
-            <Sparkles size={13} className="nemotron seg-icon" />
-            {AI_MODES.map(([id, label]) => (
-              <button key={id} className={cx("seg", { active: ai === id })} onClick={() => setAi(id)}>
-                {label}
+          <div className="actions-row">
+            <div className="segmented" title="If a step fails, AI will">
+              <Sparkles size={13} className="nemotron seg-icon" />
+              {AI_MODES.map(([id, label]) => (
+                <button key={id} className={cx("seg", { active: ai === id })} onClick={() => setAi(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button className={cx("btn btn-primary", { hint: locked })} onClick={() => start("build")} disabled={busy} title="Validate, lock commits, check guardrails, raise approvals, plan">
+              <Hammer size={14} /> Build
+            </button>
+            <button className={cx("btn", { hint: !canRehearse || locked })} onClick={() => setConfirming("rehearse")} disabled={busy} title={canRehearse ? "Run everything in the rehearsal environment, then undo it" : "Needs a passing Build of this exact migration.yaml"}>
+              <FlaskConical size={14} /> Rehearse
+            </button>
+            <button className={cx("btn", { hint: !canDeploy || locked })} onClick={() => setConfirming("deploy")} disabled={busy} title={canDeploy ? "Run in production with the rehearsed commits" : "Needs a passing Rehearse of this exact migration.yaml"}>
+              <Rocket size={14} /> Deploy
+            </button>
+            {run?.status === "waiting" && (
+              <button className={cx("btn", { hint: locked })} onClick={() => act("Check approvals", () => api.resume(run.id))} disabled={busy} title="Check the approvals again">
+                <Play size={14} /> Check approvals
               </button>
-            ))}
+            )}
+            {run && (run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded")) && (
+              <button className={cx("btn", { hint: locked })} onClick={() => act("Undo", () => api.undo(run.id))} disabled={busy}>
+                <Undo2 size={14} /> Undo
+              </button>
+            )}
           </div>
-          <button className="btn btn-primary" onClick={() => start("build")} disabled={busy} title="Validate, lock commits, check guardrails, raise approvals, plan">
-            <Hammer size={14} /> Build
-          </button>
-          <button className={cx("btn", { hint: !canRehearse })} onClick={() => start("rehearse")} disabled={busy} title={canRehearse ? "Run everything in the rehearsal environment, then undo it" : "Needs a passing Build of this exact migration.yaml"}>
-            <FlaskConical size={14} /> Rehearse
-          </button>
-          <button className={cx("btn", { hint: !canDeploy })} onClick={() => start("deploy")} disabled={busy} title={canDeploy ? "Run in production with the rehearsed commits" : "Needs a passing Rehearse of this exact migration.yaml"}>
-            <Rocket size={14} /> Deploy
-          </button>
-          {run?.status === "waiting" && (
-            <button className="btn" onClick={() => act("Resume", () => api.resume(run.id))} disabled={busy} title="Check the approvals again">
-              <Play size={14} /> Resume
-            </button>
-          )}
-          {run && (run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded")) && (
-            <button className="btn" onClick={() => act("Undo", () => api.undo(run.id))} disabled={busy}>
-              <Undo2 size={14} /> Undo
-            </button>
+          {confirming && (
+            <Confirm
+              text={`${MODE_LABEL[confirming]} ${mig.service}? This changes real AWS${confirming === "rehearse" ? " (rehearsal environment, undone at the end)" : " in production"}.`}
+              onYes={() => start(confirming)}
+              onNo={() => setConfirming(null)}
+              busy={busy}
+            />
           )}
         </div>
       </div>
@@ -334,12 +369,12 @@ export default function Migration({ name, initialRun }) {
                 {!runs.length && <option value="">no runs yet</option>}
                 {runs.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {MODE_LABEL[r.mode]} · {runMeta(r.status).label} · {fmtTime(r.created)}
+                    {MODE_LABEL[r.mode]} · {runMeta(r.status, r.mode).label} · {fmtTime(r.created)}
                   </option>
                 ))}
               </select>
             </label>
-            <Toggle label="Show dependencies" checked={showDeps} onChange={setShowDeps} />
+            <Toggle label="Show flow" checked={showDeps} onChange={setShowDeps} />
             <Toggle label="Fit to width" checked={fit} onChange={setFit} />
             {run?.active && (
               <span className="live">
@@ -352,7 +387,7 @@ export default function Migration({ name, initialRun }) {
             <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} showDeps={showDeps} fit={fit} />
           </div>
 
-          {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} onPlay={play} onClose={() => setSelected(null)} busy={busy} />}
+          {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} onPlay={play} onClose={() => setSelected(null)} busy={busy || locked} />}
         </>
       )}
 
@@ -439,7 +474,7 @@ export default function Migration({ name, initialRun }) {
             <div>Updated</div>
           </div>
           {runs.map((r) => {
-            const m = runMeta(r.status);
+            const m = runMeta(r.status, r.mode);
             return (
               <button
                 type="button"
@@ -483,7 +518,7 @@ function BuildReport({ run, mig }) {
   const rep = run.report ?? {};
   const guardrails = rep.guardrails ?? {};
   const approvals = rep.approvals ?? {};
-  const m = runMeta(run.status);
+  const m = runMeta(run.status, run.mode);
   return (
     <div className="report">
       <div className="report-head">
@@ -567,7 +602,15 @@ function BuildReport({ run, mig }) {
                   </td>
                   <td className="mono">{a.id}</td>
                   <td>{a.approver}</td>
-                  <td className="mono">{st.url ? <a href={st.url} target="_blank" rel="noreferrer">{st.ticket}</a> : (st.ticket ?? "—")}</td>
+                  <td className="mono">
+                    {st.url ? (
+                      <a href={st.url} target="_blank" rel="noreferrer">
+                        {st.ticket}
+                      </a>
+                    ) : (
+                      (st.ticket ?? "—")
+                    )}
+                  </td>
                   <td className="muted">{st.detail ?? ""}</td>
                 </tr>
               );

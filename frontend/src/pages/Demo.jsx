@@ -97,13 +97,15 @@ export default function Demo() {
       return { id: s.id, name: s.name, sub: s.sub, status: st, agent: s.type === "agent", aside: aside(s, st) };
     }),
   }));
-  const edges = useMemo(() => STEPS.flatMap((s) => s.needs.map((n) => ({ from: n, to: s.id }))), []);
+  // One chain in the order the steps run: each waits for the one before it, and a failure
+  // stops everything after it (the runner's rule). STEPS is already in execution order.
+  const edges = useMemo(() => STEPS.slice(1).map((s, i) => ({ from: STEPS[i].id, to: s.id })), []);
 
   return (
     <>
       <div className="demo-banner">
         <Sparkles size={14} className="nemotron" />
-        Pitch rehearsal on mock data. The live console is under <strong>Migrations</strong>.
+        Pitch rehearsal on mock data. The live console is under <strong>Build → Pipelines</strong>.
       </div>
 
       <div className="run-head">
@@ -130,13 +132,15 @@ export default function Demo() {
           </div>
         </div>
         <div className="run-actions">
-          <button className="btn">Hold</button>
-          <button className="btn" disabled title="Nothing to roll back: state is clean">
-            Rollback
-          </button>
-          <a className="btn" href="#" onClick={(e) => e.preventDefault()}>
-            Open PR !{RUN.pr} <ExternalLink size={13} />
-          </a>
+          <div className="actions-row">
+            <button className="btn">Hold</button>
+            <button className="btn" disabled title="Nothing to roll back: state is clean">
+              Rollback
+            </button>
+            <a className="btn" href="#" onClick={(e) => e.preventDefault()}>
+              Open PR !{RUN.pr} <ExternalLink size={13} />
+            </a>
+          </div>
         </div>
       </div>
 

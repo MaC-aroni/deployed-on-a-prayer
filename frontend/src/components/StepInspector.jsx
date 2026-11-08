@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, Hand, Play, X } from "lucide-react";
 import StatusIcon, { Pill } from "./StatusIcon.jsx";
-import { fmtTime, repoKey, shortRepo } from "../api.js";
+import { fmtTime, repoKey, shortRepo } from "../mac/api.js";
 import { STATUS } from "../status.js";
 import { cx } from "../lib.js";
 
