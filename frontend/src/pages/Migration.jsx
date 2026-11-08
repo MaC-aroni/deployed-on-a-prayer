@@ -3,6 +3,7 @@ import { Bot, Coins, Download, ExternalLink, FlaskConical, Hammer, Lock, Octagon
 import CostPanel, { costOf, fmtUsd } from "../components/CostPanel.jsx";
 import Menu from "../components/Menu.jsx";
 import Dag from "../components/Dag.jsx";
+import Gauge from "../components/Gauge.jsx";
 import Endpoints from "../components/Endpoints.jsx";
 import FixCard from "../components/FixCard.jsx";
 import Markdown from "../components/Markdown.jsx";
@@ -337,6 +338,7 @@ export default function Migration({ source, initialRun }) {
       <Toast toast={toast} onClose={closeToast} />
 
       <div className="run-head">
+        <Gauge className="run-gauge" size={96} active={Boolean(run?.active)} stages={columns.map((col) => ({ name: col.name, status: col.status }))} title={run ? `${MODE_LABEL[run.mode]} · ${rm.label}` : "no run yet"} />
         <div className="run-head-main">
           <Pill tone={rm.tone} className="pill-lg">
             {run ? `${MODE_LABEL[run.mode]} · ${rm.label}` : rm.label}

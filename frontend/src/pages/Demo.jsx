@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bot, ExternalLink, GitBranch, GitPullRequest, Lock, Pause, Play, RotateCw, Sparkles, Timer } from "lucide-react";
 import Dag from "../components/Dag.jsx";
+import Gauge from "../components/Gauge.jsx";
 import NodeDrawer from "../components/NodeDrawer.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { APPROVALS, NOW, RUN, STAGES, STEPS, STEP_BY_ID, TRACES, durationAt, runStatusAt, stageStatusAt, statusAt } from "../data/mock.js";
@@ -110,6 +111,7 @@ export default function Demo() {
   return (
     <>
       <div className="run-head">
+        <Gauge className="run-gauge" size={96} active={status === "running" || status === "recovering"} stages={columns.map((col) => ({ name: col.name, status: col.status }))} title={rs.label} />
         <div className="run-head-main">
           <Pill tone={rs.tone} className="pill-lg">
             <StatusIcon status={rs.icon} size={16} agent={status === "recovering"} onAgent={() => navigate("/agents/demo?for=diagnose")} />

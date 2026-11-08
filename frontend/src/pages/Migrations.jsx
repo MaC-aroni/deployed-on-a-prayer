@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Cloud, Search, Sparkles, Users, Wand2 } from "lucide-react";
 import { EmptyState, markPipelinesSeen } from "../components/Shell.jsx";
+import Gauge from "../components/Gauge.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { api, fmtAgo } from "../mac/api.js";
 import { SkeletonPage } from "../components/Skeleton.jsx";
@@ -123,6 +124,7 @@ export default function Migrations() {
           return (
             <button type="button" className="tr row-btn" key={m.key} onClick={() => navigate(m.href)}>
               <div className="cell-status">
+                <Gauge size={44} active={Boolean(head && ACTIVE.has(head.status))} stages={(m.stages ?? []).map((name) => ({ name, status: head ? (head.status === "succeeded" ? "succeeded" : head.failed_step ? "failed" : head.status) : "pending" }))} title={head ? `${MODE_LABEL[head.mode]} ${hm.label.toLowerCase()}` : "no runs yet"} />
                 {m.valid === false ? (
                   <Pill tone="red">
                     <StatusIcon status="failed" size={14} /> Invalid spec
