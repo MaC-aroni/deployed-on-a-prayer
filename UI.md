@@ -20,18 +20,36 @@ with GitHub** (you need write access to this repo). Pressing buttons on the live
 
 ## Files
 
+All under `frontend/src/mac/`. GitLab's pipeline pages are the model (Pajamas look: quiet frame,
+one colour per status, light badges, dark job trace with line numbers).
+
 | File | What it is |
 |---|---|
-| `frontend/src/mac/api.js` | **Every** call to the backend: `api.*` and `follow()` (the live stream). Nothing else calls `fetch` |
-| `frontend/src/mac/Console.jsx` | The screens: `Console` (the page), `Pipeline`, `JobCard`, `LogPanel`, `Approvals` |
-| `frontend/src/mac/console.css` | Styles. Colours are CSS variables on `.mac`, with a dark mode in `prefers-color-scheme` |
-| `frontend/src/App.jsx` | Routing: the console at `/`; the old pages at `/hello` and `/excuses` |
+| `api.js` | **Every** call to the backend: `api.*`, `follow()` (the live stream, with a connection status callback), sign-in helpers. Nothing else calls `fetch` |
+| `util.js` | Pure helpers: status labels and colour variants, time/duration formatting, step timings from events, `requestedBy`, `planSummary` (parses Terraform's `Plan:` line), `stageState`, GitHub deep links at the locked commit |
+| `Console.jsx` | The page: state, data loading, URL sync (`?m=&run=&step=&tab=`), the title row and buttons, the tabs, the confirmation modals |
+| `components/TopBar.jsx` | Brand, breadcrumb, the live indicator, Sign in / Sign out |
+| `components/Sidebar.jsx` | Migrations list, the (not yet wired) agents, the target summary |
+| `components/PipelineGraph.jsx` | Stages as columns, steps as job cards, ▶ on manual steps, horizontal scroll with edge fades |
+| `components/JobPanel.jsx` | `JobLog` (the dark trace: line numbers, timestamps, diff colouring, filter, copy, download, stop-autoscroll) and `JobDetails` (the job sidebar: repo at the locked SHA, path, undo, approvals, codegen, plan summary) |
+| `components/JobsTable.jsx` | The Jobs tab: every step as a table row |
+| `components/BuildReport.jsx` | Guardrails per repo, design page, approvals, what will run with plan summaries |
+| `components/ApprovalsTab.jsx` | The approvals timeline with `after` chains, justification, Check approvals |
+| `components/RunsTab.jsx` | Run history with stage mini-graphs, requester, duration |
+| `components/DiagnosisCard.jsx` | The AI's `diagnosis` events after a failure |
+| `components/StatusIcon.jsx`, `Badge.jsx`, `Modal.jsx` | The status icon set (inline SVG), light badges, the confirmation dialog |
+| `console.css` | All styles. Colours are tokens on `.mac`, with a dark theme under `prefers-color-scheme` |
+| `../App.jsx` | Routing: the console at `/`; the old pages at `/hello` and `/excuses` |
 | `docs/api.md` | **The API contract**: every endpoint, field and status. Read this first |
+
+The long-form plan for where the UI goes next (screens, build order, API gaps) is the
+"MaC UI Plan" document ob1-can-obi shared; this file is the short version.
 
 ## How the page works
 
 1. **Load:** `GET /migrations` fills the sidebar. Picking one loads `GET /migrations/{name}`
    (stages, steps, approvals, design page, latest runs) and `GET /runs?migration=` (history).
+   The URL remembers the migration, run, selected step and tab, so links can be shared.
 2. **Which run is shown:** the active run, if there is one; otherwise the newest. Clicking a
    history row switches to it.
 3. **Pipeline:** the stages come from the migration detail, in run order. Each card's state
