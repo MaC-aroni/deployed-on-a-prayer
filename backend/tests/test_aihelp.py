@@ -195,3 +195,27 @@ def test_an_llm_outage_never_changes_the_outcome(env, spec_path):
 
 def test_the_demo_spec_is_what_the_tests_use():
     assert DEMO_SPEC.exists()
+
+
+def test_a_culprit_named_by_its_file_or_repo_still_counts(env, spec_path):
+    for answer in ('{"step": "claims-db-migrate/migrate.py"}', "not json; it is migrate.py in claims-db-migrate"):
+        env.store = env.runner.store
+        llm = ScriptedLLM(EXPLANATION, answer, REPORT, GOOD_FIX)
+        diag, ops = diagnostician(env, llm)
+        env.runner.build(spec_path)
+        env.executor.fail[("smoke_test", "run")] = "time data '01-JAN-24'"
+        run = env.runner.rehearse(spec_path, "autofix")
+        env.runner.play(run.id, "db_migrate")
+        assert ops.pushes and ops.pushes[0][0] == "MaC-aroni/claims-db-migrate", answer
+
+
+def test_ai_can_be_rerun_on_a_failed_run_in_another_mode(env, spec_path):
+    env.runner.build(spec_path)
+    env.executor.fail[("smoke_test", "run")] = "time data '01-JAN-24'"
+    run = env.runner.rehearse(spec_path, "explain")
+    run = env.runner.play(run.id, "db_migrate")
+    llm = ScriptedLLM(EXPLANATION, '{"step": "db_migrate"}', REPORT, GOOD_FIX)
+    _, ops = diagnostician(env, llm)
+    env.runner.request_ai(run.id, "autofix")
+    env.runner.rerun_ai(run.id)
+    assert ops.pushes and ops.pushes[0][2] == f"mac/autofix/{run.id}"

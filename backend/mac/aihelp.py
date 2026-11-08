@@ -59,7 +59,7 @@ Return only JSON:
 
 CULPRIT_SYSTEM = """A check in a migration pipeline failed. Checks only observe; the cause is in the code of
 one of the steps that ran before it. From the log and the list of those steps, pick the step whose
-code most likely caused the failure. Return only JSON: {"step": "<one id from the list>", "why": "<one sentence>"}"""
+code most likely caused the failure. Return only JSON: {"step": "<one id from the list, exactly as written>", "why": "<at most 20 words>"}"""
 
 
 @dataclass
@@ -101,7 +101,7 @@ class LLMDiagnostician:
             return explanation
 
         # A failing check only observes the problem; the code to read (and fix) is the step that caused it.
-        culprit, why = self._culprit(spec, step, failure, facts)
+        culprit, why = self._culprit(spec, step, failure, facts, explanation)
         if culprit is not step:
             facts += (f"\n## Step whose code is suspected\n{culprit.id} ({culprit.type}) in {culprit.run.repo.slug}"
                       f" @ {failure.shas.get(culprit.run.repo.key, '')[:12]}: {why}\n")
@@ -136,24 +136,29 @@ class LLMDiagnostician:
 
     # ---- pieces --------------------------------------------------------------------------------
 
-    def _culprit(self, spec: Spec, step: Step, failure: Failure, facts: str) -> tuple[Step, str]:
+    def _culprit(self, spec: Spec, step: Step, failure: Failure, facts: str, explanation: str = "") -> tuple[Step, str]:
         """The step whose code to read. The failed step itself, unless it's a check: then the model
-        picks from the steps that ran before it, and code accepts only one of those."""
+        picks from the steps that ran before it, and code accepts only one of those. A pick that names
+        the step's file, folder or repo instead of its id still counts; failing that, the step the
+        explanation points at most clearly is used."""
         if step.type != StepType.CHECK:
             return step, ""
         candidates = [s for s in spec.steps if s.id in failure.completed and s.type != StepType.CHECK]
         if not candidates:
             return step, ""
         listing = "\n".join(f"- {s.id}: {s.type} in {s.run.repo.slug}, {s.run.path or s.run.entrypoint}" for s in candidates)
+        why, raw = "", ""
         try:
-            pick = parse_json(self.llm.complete(CULPRIT_SYSTEM, facts + "\n## Steps that ran before the check\n" + listing,
-                                                max_tokens=300))
-            chosen = next((s for s in candidates if s.id == str(pick.get("step"))), None)
+            raw = self.llm.complete(CULPRIT_SYSTEM, facts + "\n## Steps that ran before the check\n" + listing, max_tokens=1000)
+            pick = parse_json(raw)
+            raw, why = str(pick.get("step", "")), str(pick.get("why", "")).strip()
         except (ValueError, AttributeError, TypeError):
-            chosen, pick = None, {}
+            pass
+        chosen = next((s for s in candidates if s.id == raw.strip()), None) \
+            or _best_match(candidates, raw) or _best_match(candidates, explanation + " " + why)
         if chosen is None:
             return step, ""
-        return chosen, str(pick.get("why", "")).strip()
+        return chosen, why or "the explanation points at its code"
 
     def _catalog(self, step: Step) -> Catalog:
         if not self.sections:
@@ -276,6 +281,22 @@ class LLMDiagnostician:
             else:
                 rejected.append(f"{path}: more than {MAX_FILES} files")
         return kept, rejected
+
+
+def _best_match(candidates: list[Step], text: str) -> Step | None:
+    """The candidate whose id, files, folder or repo the text mentions most; None if none is mentioned."""
+    text = (text or "").lower()
+    if not text.strip():
+        return None
+
+    def score(s: Step) -> int:
+        terms = [s.id, s.run.repo.slug.split("/")[-1], s.run.path or "", s.run.entrypoint or "",
+                 *[t for t in _root_files(s)]]
+        hits = sum(text.count(t.lower()) * (3 if t == s.id else 1) for t in terms if t)
+        return hits * 10 + (1 if s.type == StepType.DB_MIGRATION else 0)  # ties: data steps write what checks read
+
+    best = max(candidates, key=score)
+    return best if score(best) >= 10 else None
 
 
 def _root_files(step: Step) -> list[str]:

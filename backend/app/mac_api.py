@@ -480,6 +480,31 @@ def resume(run_id: str, state: State = Depends(get_state),
     return _start(state, lambda: state.runner.request_resume(run_id), user)
 
 
+class AiBody(BaseModel):
+    mode: Literal["explain", "report", "autofix"]
+
+
+@router.post("/runs/{run_id}/ai", status_code=202)
+def rerun_ai(run_id: str, body: AiBody, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
+    """Run AI help again on a failed Rehearse or Deploy, from its stored logs, in any mode:
+    e.g. switch a failed run to Auto-fix without repeating it. Results arrive as `diagnosis` events."""
+    _get_run(state, run_id)
+    try:
+        run = state.runner.request_ai(run_id, body.mode)
+    except GateError as e:
+        raise HTTPException(409, str(e)) from e
+    state.runner.diagnosing.add(run.id)  # busy from now, before the worker starts
+
+    def work():
+        try:
+            state.runner.diagnosing.discard(run.id)
+            state.runner.rerun_ai(run.id)
+        except Exception:  # noqa: BLE001
+            log.exception("AI help for %s crashed", run.id)
+    state.submit(work)
+    return _run_view(run)
+
+
 @router.post("/runs/{run_id}/cancel", status_code=202)
 def cancel(run_id: str, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
     """Stop the run and undo everything it did. A waiting run is undone now; a run mid-step

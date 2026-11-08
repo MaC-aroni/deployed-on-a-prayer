@@ -683,6 +683,27 @@ class Runner:
             self.diagnosing.discard(run.id)
         self._event(run, "diagnosis", summary, step.id)
 
+    def request_ai(self, run_id: str, mode: str) -> RunRecord:
+        """Run AI help again on a finished, failed run (e.g. switch it to Auto-fix) from its stored
+        logs, without repeating the run. The caller executes rerun_ai() in the background."""
+        with self._lock:
+            run, _ = self._existing(run_id)
+            if run.mode not in ("rehearse", "deploy") or run.status.active or not run.failed_step:
+                raise GateError(f"AI help needs a finished Rehearse or Deploy with a failed step ({run.mode} {run.status})")
+            if run.id in self.diagnosing:
+                raise GateError("AI help is already working on this run")
+            if mode == Mode.AUTOFIX and run.mode == "deploy":
+                raise GateError("Auto-fix only acts on rehearsals; use Explain or Report for a Deploy")
+            run.diagnostics_mode = Mode(mode)
+            self.store.save(run)
+            self._event(run, "run", f"AI help ({mode}) requested again")
+            return run
+
+    def rerun_ai(self, run_id: str) -> None:
+        run, spec = self._existing(run_id)
+        step = spec.step(run.failed_step)
+        self._diagnose(run, spec, step, run.reason or "")
+
     def _autofix_passed(self, run: RunRecord, spec: Spec) -> None:
         """An auto-fix branch rehearsed cleanly: the diagnostician opens the PR. People merge it."""
         hook = getattr(self.diagnostician, "autofix_passed", None)
