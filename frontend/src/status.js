@@ -36,10 +36,10 @@ export const RUN_STATUS = {
 };
 
 // Plan and ingest runs have nothing to roll back: a cut-off one is just interrupted.
-export const AGENT_MODES = new Set(["plan", "ingest", "diagnose"]);
+export const AGENT_MODES = new Set(["plan", "ingest", "diagnose", "usage"]);
 
-const AGENT_DONE = { plan: "Plan ready", ingest: "Learned", diagnose: "Fix proposed" };
-const AGENT_BUSY = { plan: "Planning", ingest: "Learning", diagnose: "Investigating" };
+const AGENT_DONE = { plan: "Plan ready", ingest: "Learned", diagnose: "Fix proposed", usage: "Figures read" };
+const AGENT_BUSY = { plan: "Planning", ingest: "Learning", diagnose: "Investigating", usage: "Reading usage" };
 
 export function runMeta(status, mode) {
   if (AGENT_MODES.has(mode)) {
@@ -50,7 +50,7 @@ export function runMeta(status, mode) {
   return RUN_STATUS[status] ?? RUN_STATUS.none;
 }
 
-export const MODE_LABEL = { build: "Build", rehearse: "Rehearse", deploy: "Deploy", plan: "Plan", ingest: "Learn", diagnose: "Investigate" };
+export const MODE_LABEL = { build: "Build", rehearse: "Rehearse", deploy: "Deploy", plan: "Plan", ingest: "Learn", diagnose: "Investigate", usage: "Usage reader" };
 
 // Agent runs are followed on the agents page, not the pipeline.
 export function runHref(run) {

@@ -113,3 +113,11 @@ def test_a_cut_off_reply_is_asked_again(tmp_path):
     usage = run_usage("claims", SERVICE, DEMO_RESOURCES, SECTIONS, OWNERS, llm, tmp_path, None, log=lambda _: None)
     assert llm.read.count(CAPACITY) == 2
     assert any(f["subject"] == "service" for f in usage["facts"])
+
+
+def test_only_raised_tickets_count_as_asked():
+    from mac.usage import asked_note
+    assert asked_note([]) == ""
+    assert asked_note([{"question": {"ticket": "MAC-1"}}]) == " (asked in Jira)"
+    assert asked_note([{"question": {"ticket": None, "status": "not raised"}}]) == " (not raised in Jira)"
+    assert asked_note([{"question": {"ticket": "MAC-1"}}, {"question": None}]) == " (1 asked in Jira, 1 not raised)"

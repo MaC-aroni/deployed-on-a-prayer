@@ -17,7 +17,7 @@ from mac.pricing import PricingError
 from mac.sources import sections_from_pages
 from mac.spec import Spec, SpecError, parse_spec
 from mac.store import RunStatus
-from mac.usage import load_usage, run_usage
+from mac.usage import asked_note, load_usage, run_usage
 
 from . import mac_api, planning_api
 from .auth import signed_in
@@ -59,7 +59,7 @@ def _execute_usage(state: mac_api.State, config: planning_api.Planning, run_id: 
                                "missing": usage["missing"]}
         planning_api._finish(state, run, RunStatus.SUCCEEDED,
                              f"{len(usage['facts'])} figures found, {len(usage['missing'])} missing"
-                             + (" (asked in Jira)" if usage["missing"] else "") + ". Build again to update the estimate.")
+                             + asked_note(usage["missing"]) + ". Build again to update the estimate.")
     except Exception as e:  # noqa: BLE001 - an agent run reports its failure, it never crashes the server
         planning_api._finish(state, run, RunStatus.FAILED, f"usage reader failed: {e}")
 
