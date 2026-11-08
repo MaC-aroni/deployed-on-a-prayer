@@ -1075,3 +1075,21 @@ body::before,
 .node {
   box-sizing: border-box;
 }
+
+/* stacked statement on narrow screens: rules between rows, not beside them */
+@media (max-width: 820px) {
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+  .metric + .metric {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding-left: 0;
+  }
+  .content {
+    padding: 8px 20px 48px;
+  }
+  .page-head h1 {
+    font-size: 32px;
+  }
+}
