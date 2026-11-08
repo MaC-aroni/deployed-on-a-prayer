@@ -1,5 +1,7 @@
+import logging
 import os
 import random
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +13,22 @@ from fastapi.staticfiles import StaticFiles
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from . import auth, mac_api  # noqa: E402 - read env vars, so after load_dotenv
+
+
+
+class RedactSecrets(logging.Filter):
+    """The Jira webhook carries its secret in the URL (Jira can't send custom headers), and
+    uvicorn's access log prints full URLs. Mask it, and GitHub's one-time sign-in codes."""
+
+    PATTERN = re.compile(r"((?:token|code|state)=)[^&\s\"]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.args = tuple(self.PATTERN.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(RedactSecrets())
 
 app = FastAPI(title="deployed-on-a-prayer")
 app.include_router(auth.router)  # before the frontend catch-all below
