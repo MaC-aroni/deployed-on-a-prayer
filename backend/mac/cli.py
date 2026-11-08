@@ -216,6 +216,14 @@ def main(argv: list[str] | None = None) -> int:
         if name in ("plan", "codegen"):
             p.add_argument("--pr", action="store_true", help="open a pull request with the result")
 
+    p = sub.add_parser("prices", help="the AWS prices the cost estimate uses")
+    p.add_argument("--refresh", action="store_true", help="save AWS's current prices as the snapshot")
+    p = sub.add_parser("usage", help="read the usage figures the cost estimate needs from the knowledge base")
+    p.add_argument("spec", type=Path)
+    p.add_argument("--knowledge", type=Path, default=Path("demo-data/confluence"))
+    p = sub.add_parser("cost", help="the cost estimate, from the last Build's plan, the usage figures and AWS's prices")
+    p.add_argument("spec", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "validate":
         return cmd_validate(args)
@@ -223,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
     runner = make_runner(Path(os.environ.get("MAC_DATA_DIR", ".mac")).resolve())
     if args.command == "publish-knowledge":
         return cmd_publish_knowledge(runner, args.directory)
+    if args.command in ("prices", "usage", "cost"):
+        from .cost_cli import run_agent as run_cost  # keeps the runner commands free of agent imports
+        return run_cost(args, runner)
     if args.command in ("ingest", "plan", "guide", "codegen"):
         from .agents_cli import run_agent  # keeps the runner commands free of agent imports
         return run_agent(args, runner)

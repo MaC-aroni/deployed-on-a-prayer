@@ -29,7 +29,7 @@ def everything(pages):
 # ---- The demo knowledge base is well formed -----------------------------------------------------
 
 def test_demo_pages_load_as_one_tree(pages):
-    assert len(pages) == 14 and pages[0].id == "handbook" and pages[0].parent is None
+    assert len(pages) == 16 and pages[0].id == "handbook" and pages[0].parent is None
     assert all(p.parent == "handbook" for p in pages[1:])
 
 
@@ -134,7 +134,7 @@ def test_publish_puts_children_under_their_parents(pages, env):
     assert calls[0][0] == "Prayerwell Health Engineering Handbook" and calls[0][3] is None
     root_id = published["handbook"][0]
     assert all(parent == root_id for _, _, _, parent in calls[1:])
-    assert len(published) == 14
+    assert len(published) == 16
 
 
 def test_cli_records_pages_and_updates_them_in_place(env, capsys):
@@ -144,7 +144,7 @@ def test_cli_records_pages_and_updates_them_in_place(env, capsys):
     env.pages.published.clear()
     assert cmd_publish_knowledge(env.runner, KNOWLEDGE) == 0
     assert all(page_id is not None for _, _, page_id, _ in env.pages.published)  # updates, not new pages
-    assert "published 14 pages" in capsys.readouterr().out
+    assert "published 16 pages" in capsys.readouterr().out
 
 
 def test_cli_without_confluence(env, capsys):

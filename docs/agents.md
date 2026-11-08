@@ -1,7 +1,7 @@
 # MaC agents
 
-Four agents turn the company's Confluence knowledge base into a reviewed pipeline, a guide, and
-code. **Every agent's output is text that a person reviews** (a pull request or a Confluence
+Five agents turn the company's Confluence knowledge base into a reviewed pipeline, a guide,
+code, and the usage figures behind the cost estimate. **Every agent's output is text that a person reviews** (a pull request or a Confluence
 page), and the rules that matter are enforced by code, not by the prompt. None of them is in the
 runner's execution path. All use Nemotron on NVIDIA NIM (`mac/llm.py`, `NVIDIA_API_KEY`).
 
@@ -11,6 +11,7 @@ runner's execution path. All use Nemotron on NVIDIA NIM (`mac/llm.py`, `NVIDIA_A
 | `mise run mac plan "Migrate ClaimsAdjudicationService to AWS" [--pr]` | Planner (`mac/planner.py`) | `migration.yaml`; with `--pr`, a PR into `MaC-aroni/mac-migrations` |
 | `mise run mac guide <spec>` | Guide writer (`mac/guide.py`) | A cited page tree in Confluence |
 | `mise run mac codegen <spec> <step> [--pr]` | Code writer (`mac/codegen.py`) | The step's code; with `--pr`, a PR into the step's repo |
+| `mise run mac usage <spec>` | Usage reader (`mac/usage.py`) | `.mac/usage/<migration>.json`, plus a Jira question per missing figure |
 
 All of them take `--knowledge demo-data/confluence` (the default). Once
 `publish-knowledge` has run, citations link to the Confluence pages.
@@ -63,3 +64,28 @@ refused. Code throws out any file:
 - over 100 KB, or beyond 10 files
 
 The PR lists what was thrown out. The repo's own CI and review rules still apply.
+
+## Usage reader
+
+Finds the figures the cost estimate needs (see "The cost estimate" in `docs/runner.md`). What
+Terraform will create, from the latest Build's plan, decides which figures those are: a Lambda
+function needs how often it runs, for how long and how much it logs; a DynamoDB table how often
+it's read and written, how many items it holds and how big they are; plus the request volume,
+log retention and today's on-prem costs.
+
+The LLM reads each page that states figures and returns each one with its section and the
+sentence it quotes. If the reply isn't valid JSON it's asked once more. **Code checks every
+figure:**
+- the subject and the figure are ones the estimate needs
+- the section is a real section of that page, and the quote is in it
+- the number is one the quote states (no conversions, sums or estimates by the model)
+- the unit is one that figure can have; code converts it (per day to per month, KB to GB)
+
+A figure no page gives is **never guessed**: it becomes one Jira question to the owner of the
+page most about it, raised once, however often the reader runs again. When the owner adds the
+figure to the page, the next read picks it up and closes the question. The figures are saved for
+Build, which never calls a model itself.
+
+Tested against real Nemotron (`nvidia/nemotron-3-ultra-550b-a55b`, 2026-11-08): 20 figures
+found, none rejected, and the one deliberately undocumented figure (the service's billed
+duration on Lambda) raised as a question instead of guessed.

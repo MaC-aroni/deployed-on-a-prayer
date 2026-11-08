@@ -28,6 +28,22 @@ if sys.argv[1] == "output":
                       "url": {"value": "https://abc.lambda-url.us-east-1.on.aws/", "sensitive": False},
                       "password": {"value": "hunter2", "sensitive": True}}))
     sys.exit(0)
+if sys.argv[1] == "show":
+    if os.environ.get("FAKE_TF_SHOW_FAILS"):
+        sys.exit(1)
+    print(json.dumps({"resource_changes": [
+        {"address": "aws_dynamodb_table.claims", "mode": "managed", "type": "aws_dynamodb_table",
+         "change": {"actions": ["create"], "after": {"name": "mac-claims-production-claims", "billing_mode": "PAY_PER_REQUEST",
+                                                     "hash_key": "claim_id"}, "after_sensitive": {}}},
+        {"address": "aws_lambda_function.service", "mode": "managed", "type": "aws_lambda_function",
+         "change": {"actions": ["create"], "after": {"function_name": "mac-claims-production-service", "memory_size": 256,
+                                                     "timeout": 15, "environment": [{"variables": {"SECRET": "x"}}]},
+                    "after_sensitive": {"timeout": True}}},
+        {"address": "aws_iam_role.old", "mode": "managed", "type": "aws_iam_role",
+         "change": {"actions": ["delete"], "after": None}},
+        {"address": "data.aws_caller_identity.current", "mode": "data", "type": "aws_caller_identity",
+         "change": {"actions": ["read"], "after": {}}}]}))
+    sys.exit(0)
 print("terraform says hi")
 sys.exit(int(os.environ.get("FAKE_TF_EXIT", "0")) if sys.argv[1] != "init" else 0)
 """
@@ -147,7 +163,30 @@ def test_production_and_rehearsal_state_never_mix(setup):
 def test_build_plans(setup):
     executor, _, ctx, _, tf_calls = setup
     executor.execute(ctx("provision_storage", mode="build"), "plan")
-    assert tf_calls()[-1]["args"][0] == "plan"
+    plan = next(c["args"] for c in tf_calls() if c["args"][0] == "plan")
+    assert "-out=mac.tfplan" in plan and "-lock=false" in plan
+    assert tf_calls()[-1]["args"] == ["show", "-json", "-no-color", "mac.tfplan"]
+
+
+def test_build_plan_saves_what_it_creates_for_the_cost_estimate(setup, tmp_path):
+    executor, _, ctx, lines, _ = setup
+    executor.execute(ctx("provision_storage", mode="build"), "plan")
+    saved = json.loads((tmp_path / "rundir" / "provision_storage.resources.json").read_text(encoding="utf-8"))
+    assert [r["address"] for r in saved] == ["aws_dynamodb_table.claims", "aws_lambda_function.service"]
+    table, function = saved
+    assert table["attributes"] == {"name": "mac-claims-production-claims", "billing_mode": "PAY_PER_REQUEST"}
+    # Only the attributes the estimate reads, and never a sensitive one.
+    assert function["attributes"] == {"function_name": "mac-claims-production-service", "memory_size": 256}
+    assert function["name"] == "mac-claims-production-service"
+    assert any(line.startswith("plan creates 2 resources") for line in lines)
+
+
+def test_build_plan_without_readable_resources_still_passes(setup, tmp_path, monkeypatch):
+    executor, _, ctx, lines, _ = setup
+    monkeypatch.setenv("FAKE_TF_SHOW_FAILS", "1")
+    assert executor.execute(ctx("provision_storage", mode="build"), "plan") == {}
+    assert not (tmp_path / "rundir" / "provision_storage.resources.json").exists()
+    assert any("couldn't read the plan's resources" in line for line in lines)
 
 
 def test_terraform_failure_raises(setup, monkeypatch):

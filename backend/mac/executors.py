@@ -21,6 +21,40 @@ from .spec import RepoRef, Spec, Step, StepType
 ActionName = Literal["plan", "run", "verify", "rollback"]
 Mode = Literal["build", "rehearse", "deploy"]
 
+PLAN_FILE = "mac.tfplan"  # Build's saved plan, read back with `terraform show -json`
+
+# The attributes the cost estimate reads, per resource type. Nothing else leaves the plan.
+COST_ATTRIBUTES = {
+    "aws_lambda_function": ("function_name", "memory_size", "timeout", "architectures", "runtime",
+                            "ephemeral_storage"),
+    "aws_dynamodb_table": ("name", "billing_mode", "read_capacity", "write_capacity"),
+}
+NAME_ATTRIBUTES = ("function_name", "name", "role", "bucket")
+
+
+def resources_path(run_dir: Path, step_id: str) -> Path:
+    return Path(run_dir) / f"{step_id}.resources.json"
+
+
+def plan_resources(plan: dict) -> list[dict]:
+    """The managed resources a `terraform show -json` plan creates or keeps, with the few
+    attributes the cost estimate needs. Sensitive attributes are never kept."""
+    out = []
+    for rc in plan.get("resource_changes") or []:
+        change = rc.get("change") or {}
+        actions = change.get("actions") or []
+        if rc.get("mode") != "managed" or actions == ["delete"]:
+            continue
+        after = change.get("after") or {}
+        sensitive = change.get("after_sensitive") or {}
+        sensitive = sensitive if isinstance(sensitive, dict) else {}
+        keep = COST_ATTRIBUTES.get(rc.get("type"), ())
+        attributes = {k: after[k] for k in keep if k in after and not sensitive.get(k)}
+        name = next((after[k] for k in NAME_ATTRIBUTES if isinstance(after.get(k), str) and not sensitive.get(k)), None)
+        out.append({"address": rc.get("address", ""), "type": rc.get("type", ""), "name": name,
+                    "actions": actions, "attributes": attributes})
+    return out
+
 
 class StepFailed(Exception):
     """The step's command failed. The message is what people see as the reason."""
@@ -130,6 +164,8 @@ class Executor:
         workdir = self._checkout(ctx, ctx.step.run.repo, command)
         try:
             self._terraform_in(ctx, command, workdir / ctx.step.run.path)
+            if command == "plan":
+                self._save_plan_resources(ctx, workdir / ctx.step.run.path)
             if command == "apply" and ctx.step.outputs:
                 return self._terraform_outputs(ctx, workdir / ctx.step.run.path)
             return {}
@@ -148,6 +184,24 @@ class Executor:
         # Sensitive outputs never leave Terraform.
         return {name: str(item.get("value")) for name, item in raw.items()
                 if isinstance(item, dict) and not item.get("sensitive")}
+
+    def _save_plan_resources(self, ctx: StepContext, tf_dir: Path) -> None:
+        """What the plan will create, for the cost estimate: `<run dir>/<step>.resources.json`.
+        Only a few non-sensitive attributes per resource are kept. Never fails the step."""
+        out = resources_path(ctx.run_dir, ctx.step.id)
+        out.unlink(missing_ok=True)
+        try:
+            result = subprocess.run([*self.terraform, "show", "-json", "-no-color", PLAN_FILE], cwd=tf_dir,
+                                    env=self._env(ctx, "plan"), capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                raise ValueError(result.stderr.strip()[-300:] or f"exit code {result.returncode}")
+            resources = plan_resources(json.loads(result.stdout or "{}"))
+        except (ValueError, OSError, subprocess.TimeoutExpired) as e:
+            ctx.log(f"couldn't read the plan's resources for the cost estimate: {e}")
+            return
+        ctx.run_dir.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(resources, indent=2), encoding="utf-8")
+        ctx.log(f"plan creates {len(resources)} resources: " + ", ".join(r["address"] for r in resources))
 
     def _terraform_in(self, ctx: StepContext, command: str, tf_dir: Path) -> None:
         if not tf_dir.is_dir():
@@ -171,7 +225,7 @@ class Executor:
         self._run([*self.terraform, "init", *flags], tf_dir, ctx, command, label="terraform init")
         # Build's plan is read-only, so it takes no state lock: a run killed mid-plan can't leave a
         # stale lock behind, and a Build never waits on a Rehearse or Deploy that holds one.
-        args = {"plan": ["plan", *flags, "-lock=false"],
+        args = {"plan": ["plan", *flags, "-lock=false", f"-out={PLAN_FILE}"],
                 "apply": ["apply", *flags, "-auto-approve", "-lock-timeout=60s"],
                 "destroy": ["destroy", *flags, "-auto-approve", "-lock-timeout=60s"]}[command]
         self._run([*self.terraform, *args], tf_dir, ctx, command, label=f"terraform {command}")

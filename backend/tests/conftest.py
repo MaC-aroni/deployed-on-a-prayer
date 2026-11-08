@@ -13,6 +13,7 @@ import yaml
 
 from mac.executors import StepFailed
 from mac.integrations import Check, IntegrationError, RaisedTicket
+from mac.pricing import load_prices
 from mac.runner import Runner
 from mac.store import Store
 
@@ -162,8 +163,10 @@ def env(tmp_path):
         writer = FakeDesignWriter()
         pages = FakePages()
         store = Store(":memory:")
+        # Offline: the saved copy of AWS's prices, never the network.
         runner = Runner(store, github, approvals, executor, tmp_path / "data", diagnostician,
-                        design_writer=writer, pages=pages)
+                        design_writer=writer, pages=pages,
+                        price_loader=lambda region: load_prices(region, live=False))
 
     return Env()
 

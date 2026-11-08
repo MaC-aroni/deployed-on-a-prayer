@@ -13,17 +13,21 @@ background: `start_*` / `request_*` check the rules and record what should happe
 (`build`, `rehearse`, `play`, ...) do both, for the CLI and tests.
 """
 
+import json
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
+from .cost import estimate as estimate_cost, summary as cost_summary
 from .design import DesignWriter, facts, page_title, render_page
 from .diagnostics import Diagnostician, Failure, Mode, NotConfigured
-from .executors import Executor, StepContext, StepFailed
+from .executors import Executor, StepContext, StepFailed, resources_path
 from .integrations import Approvals, GitHub, IntegrationError, Pages, TicketRequest
+from .pricing import load_prices
 from .spec import SELF_ROLLBACK_ON_FAILURE, Approval, Spec, SpecError, Step, StepType, load_spec, parse_spec
 from .store import ApprovalRecord, DesignPage, RunRecord, RunStatus, StepState, Store, Ticket
+from .usage import load_usage
 from .validate import execution_order, follows_a_change, validate
 
 
@@ -34,7 +38,8 @@ class GateError(Exception):
 class Runner:
     def __init__(self, store: Store, github: GitHub, approvals: Approvals, executor: Executor,
                  data_dir: Path, diagnostician: Diagnostician | None = None,
-                 design_writer: DesignWriter | None = None, pages: Pages | None = None):
+                 design_writer: DesignWriter | None = None, pages: Pages | None = None,
+                 price_loader: Callable | None = None):
         self.store = store
         self.github = github
         self.approvals = approvals
@@ -44,6 +49,8 @@ class Runner:
         self.diagnosing: set[str] = set()  # runs whose AI help is still working
         self.design_writer = design_writer  # the LLM that writes the design page (text only)
         self.pages = pages  # where the design page is published (Confluence)
+        # (region) -> (prices, notes) for the cost estimate: AWS's Price List, or its saved copy
+        self.price_loader = price_loader or load_prices
         # Rule checks and state changes happen under this lock, so two clicks can't both start
         # a run or both press play. The slow work in execute() runs outside it.
         self._lock = threading.Lock()
@@ -266,6 +273,7 @@ class Runner:
             return self._finish(run, RunStatus.FAILED, str(e))
         except IntegrationError as e:
             return self._finish(run, RunStatus.FAILED, str(e))
+        self._estimate_cost(run, spec)
         return self._finish(run, RunStatus.SUCCEEDED)
 
     # ---- The state machine ----------------------------------------------------------------
@@ -556,6 +564,8 @@ class Runner:
         except Exception as e:  # noqa: BLE001 - the LLM or Confluence failing must never fail the Build
             return self._design_report(run, None, f"not written: {e}")
         self.store.save_design(run.migration, DesignPage(page_id=page_id, url=url, digest=run.spec_digest))
+        self._design_markdown_path(run.migration).parent.mkdir(parents=True, exist_ok=True)
+        self._design_markdown_path(run.migration).write_text(markdown, encoding="utf-8")  # to add the cost later
         self._design_report(run, url, "written")
 
     def _design_report(self, run: RunRecord, url: str | None, status: str) -> None:
@@ -571,7 +581,72 @@ class Runner:
             self._set(run, step, StepState.FAILED)
             run.failed_step = step.id
             raise _BuildStepFailed(f"{step.id} ({'terraform plan' if action == 'plan' else 'check'}): {_reason(e)}") from e
+        if action == "plan":
+            self._record_resources(run, step)
         self._set(run, step, StepState.SUCCEEDED)
+
+    # ---- The cost estimate: code multiplies the plan, the documented usage and AWS's prices ----
+
+    def _record_resources(self, run: RunRecord, step: Step) -> None:
+        path = resources_path(self.data_dir / "runs" / run.id, step.id)
+        if path.exists():
+            try:
+                run.report.setdefault("resources", {})[step.id] = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                pass
+
+    def _estimate_cost(self, run: RunRecord, spec: Spec) -> None:
+        """Never fails the Build: a cost problem only shows in the report."""
+        try:
+            prices, notes = self.price_loader(spec.target.region)
+            view = estimate_cost(run.report.get("resources", {}), load_usage(self.data_dir, run.migration),
+                                 prices, notes)
+        except Exception as e:  # noqa: BLE001
+            view = {"status": "unavailable", "reason": f"couldn't calculate the cost: {e}", "notes": []}
+        run.report["cost"] = view
+        self._event(run, "log", cost_summary(view))
+        self.store.save(run)
+        if view["status"] in ("complete", "partial"):
+            self._share_cost(run, spec, view)
+
+    def _design_markdown_path(self, migration: str) -> Path:
+        return self.data_dir / "designs" / f"{migration}.md"
+
+    def _share_cost(self, run: RunRecord, spec: Spec, view: dict) -> None:
+        """Puts the estimate on the design page and tells the design-page approvers, once per
+        change of the estimate. Code writes both; failures are logged, never fatal."""
+        record_path = self.data_dir / "designs" / f"{run.migration}.cost.json"
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8")) if record_path.exists() else {}
+        except ValueError:
+            record = {}
+        page = self.store.design(run.migration)
+        markdown_path = self._design_markdown_path(run.migration)
+        shared = record.get("digest") == view["digest"] and record.get("spec") == run.spec_digest
+        if not shared and page and page.digest == run.spec_digest and self.pages and markdown_path.exists():
+            try:
+                self.pages.publish(page_title(spec), render_page(spec, run.shas, markdown_path.read_text(encoding="utf-8"),
+                                                                 run.id, cost=view), page.page_id)
+                self._event(run, "log", f"design page: cost estimate added ({page.url})")
+                record["page"] = view["digest"]
+            except Exception as e:  # noqa: BLE001
+                self._event(run, "log", f"design page: couldn't add the cost estimate: {e}")
+        told = set(record.get("told", [])) if record.get("digest") == view["digest"] else set()
+        comment = getattr(self.approvals, "comment", None)
+        for approval in spec.approvals:
+            ticket = self.store.ticket(run.migration, run.spec_digest, approval.id)
+            if not approval.design_doc or ticket is None or ticket.key in told or comment is None:
+                continue
+            try:
+                comment(ticket.key, f"MaC: {cost_summary(view)} Every line, with its formula and sources, is on "
+                                    f"the design page" + (f": {page.url}" if page else "."))
+                told.add(ticket.key)
+                self._event(run, "log", f"cost estimate sent to {ticket.key}")
+            except IntegrationError as e:
+                self._event(run, "log", f"couldn't comment the cost on {ticket.key}: {e}")
+        record.update(digest=view["digest"], spec=run.spec_digest, told=sorted(told))
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        record_path.write_text(json.dumps(record), encoding="utf-8")
 
     # ---- Plumbing -----------------------------------------------------------------------------
 

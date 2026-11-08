@@ -1,0 +1,244 @@
+{
+  "region": "us-east-1",
+  "fetched": "2026-11-08T14:09:32Z",
+  "note": "Written by `mise run mac prices --refresh` from AWS's public Price List. Don't edit by hand.",
+  "prices": {
+    "dynamodb.read_units": {
+      "name": "dynamodb.read_units",
+      "service": "AmazonDynamoDB",
+      "usagetype": "ReadRequestUnits",
+      "unit": "ReadRequestUnits",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": null,
+          "usd": 1.25e-07
+        }
+      ],
+      "sku": "4W4ZMC46EHE8XTTZ",
+      "rate_codes": [
+        "4W4ZMC46EHE8XTTZ.JRTCKXETXF.6YS6EN2CT7"
+      ],
+      "description": "$0.125 per million read request units (N. Virginia)",
+      "effective_date": "2026-11-01T00:00:00Z",
+      "publication_date": "2026-11-05T16:40:16Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDynamoDB/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.125 per 1M ReadRequestUnits"
+    },
+    "dynamodb.storage_gb_month": {
+      "name": "dynamodb.storage_gb_month",
+      "service": "AmazonDynamoDB",
+      "usagetype": "TimedStorage-ByteHrs",
+      "unit": "GB-Mo",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": 25.0,
+          "usd": 0.0
+        },
+        {
+          "begin": 25.0,
+          "end": null,
+          "usd": 0.25
+        }
+      ],
+      "sku": "F3E2EDSYC6ZNW7XP",
+      "rate_codes": [
+        "F3E2EDSYC6ZNW7XP.JRTCKXETXF.G2A93NZ7DT",
+        "F3E2EDSYC6ZNW7XP.JRTCKXETXF.VYAP54KATQ"
+      ],
+      "description": "$0.25 per GB-Month of storage used beyond first 25 free GB-Months",
+      "effective_date": "2026-11-01T00:00:00Z",
+      "publication_date": "2026-11-05T16:40:16Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDynamoDB/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0 per GB-Mo up to 25, then $0.25 per GB-Mo"
+    },
+    "dynamodb.write_units": {
+      "name": "dynamodb.write_units",
+      "service": "AmazonDynamoDB",
+      "usagetype": "WriteRequestUnits",
+      "unit": "WriteRequestUnits",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": null,
+          "usd": 6.25e-07
+        }
+      ],
+      "sku": "FGXVD96DKJMUASY3",
+      "rate_codes": [
+        "FGXVD96DKJMUASY3.JRTCKXETXF.6YS6EN2CT7"
+      ],
+      "description": "$0.625 per million write request units (N. Virginia)",
+      "effective_date": "2026-11-01T00:00:00Z",
+      "publication_date": "2026-11-05T16:40:16Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDynamoDB/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.625 per 1M WriteRequestUnits"
+    },
+    "lambda.gb_seconds": {
+      "name": "lambda.gb_seconds",
+      "service": "AWSLambda",
+      "usagetype": "Lambda-GB-Second",
+      "unit": "Lambda-GB-Second",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": 6000000000.0,
+          "usd": 1.66667e-05
+        },
+        {
+          "begin": 6000000000.0,
+          "end": 15000000000.0,
+          "usd": 1.5e-05
+        },
+        {
+          "begin": 15000000000.0,
+          "end": null,
+          "usd": 1.33334e-05
+        }
+      ],
+      "sku": "TG3M4CAGBA3NYQBH",
+      "rate_codes": [
+        "TG3M4CAGBA3NYQBH.JRTCKXETXF.CUKFZ388N3",
+        "TG3M4CAGBA3NYQBH.JRTCKXETXF.QZE2SB4KVB",
+        "TG3M4CAGBA3NYQBH.JRTCKXETXF.V7R92EXG27"
+      ],
+      "description": "AWS Lambda - Total Compute - US East (Northern Virginia)-Tier-3",
+      "effective_date": "2026-10-01T00:00:00Z",
+      "publication_date": "2026-10-30T23:42:55Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSLambda/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.0000166667 per Lambda-GB-Second up to 6,000,000,000, then $0.000015 per Lambda-GB-Second up to 15,000,000,000, then $0.0000133334 per Lambda-GB-Second"
+    },
+    "lambda.gb_seconds_arm": {
+      "name": "lambda.gb_seconds_arm",
+      "service": "AWSLambda",
+      "usagetype": "Lambda-GB-Second-ARM",
+      "unit": "Lambda-GB-Second",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": 7500000000.0,
+          "usd": 1.33334e-05
+        },
+        {
+          "begin": 7500000000.0,
+          "end": 18750000000.0,
+          "usd": 1.20001e-05
+        },
+        {
+          "begin": 18750000000.0,
+          "end": null,
+          "usd": 1.06667e-05
+        }
+      ],
+      "sku": "72SBSFWPMDTH8S3J",
+      "rate_codes": [
+        "72SBSFWPMDTH8S3J.JRTCKXETXF.6NBUNBXSC3",
+        "72SBSFWPMDTH8S3J.JRTCKXETXF.6JGAYSJBNY",
+        "72SBSFWPMDTH8S3J.JRTCKXETXF.AVR3V96UTF"
+      ],
+      "description": "AWS Lambda - Total Compute for ARM - US East (Northern Virginia)-Tier-3",
+      "effective_date": "2026-10-01T00:00:00Z",
+      "publication_date": "2026-10-30T23:42:55Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSLambda/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.0000133334 per Lambda-GB-Second up to 7,500,000,000, then $0.0000120001 per Lambda-GB-Second up to 18,750,000,000, then $0.0000106667 per Lambda-GB-Second"
+    },
+    "lambda.requests": {
+      "name": "lambda.requests",
+      "service": "AWSLambda",
+      "usagetype": "Request",
+      "unit": "Requests",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": null,
+          "usd": 2e-07
+        }
+      ],
+      "sku": "GU2ZS9HVP6QTQ7KE",
+      "rate_codes": [
+        "GU2ZS9HVP6QTQ7KE.JRTCKXETXF.6YS6EN2CT7"
+      ],
+      "description": "AWS Lambda - Total Requests - US East (Northern Virginia)",
+      "effective_date": "2026-10-01T00:00:00Z",
+      "publication_date": "2026-10-30T23:42:55Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSLambda/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.2 per 1M Requests"
+    },
+    "lambda.requests_arm": {
+      "name": "lambda.requests_arm",
+      "service": "AWSLambda",
+      "usagetype": "Request-ARM",
+      "unit": "Requests",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": null,
+          "usd": 2e-07
+        }
+      ],
+      "sku": "K7BX6567RJ67A2KE",
+      "rate_codes": [
+        "K7BX6567RJ67A2KE.JRTCKXETXF.6YS6EN2CT7"
+      ],
+      "description": "AWS Lambda - Total Requests for ARM - US East (Northern Virginia)",
+      "effective_date": "2026-10-01T00:00:00Z",
+      "publication_date": "2026-10-30T23:42:55Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSLambda/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.2 per 1M Requests"
+    },
+    "logs.ingest_gb": {
+      "name": "logs.ingest_gb",
+      "service": "AmazonCloudWatch",
+      "usagetype": "DataProcessing-Bytes",
+      "unit": "GB",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": null,
+          "usd": 0.5
+        }
+      ],
+      "sku": "96K55R2PV3ZZZ3AM",
+      "rate_codes": [
+        "96K55R2PV3ZZZ3AM.JRTCKXETXF.6YS6EN2CT7"
+      ],
+      "description": "$0.50 per GB custom log data ingested in Standard log class - US East (Northern Virginia)",
+      "effective_date": "2026-11-01T00:00:00Z",
+      "publication_date": "2026-11-04T21:35:32Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.5 per GB"
+    },
+    "logs.storage_gb_month": {
+      "name": "logs.storage_gb_month",
+      "service": "AmazonCloudWatch",
+      "usagetype": "TimedStorage-ByteHrs",
+      "unit": "GB-Mo",
+      "tiers": [
+        {
+          "begin": 0.0,
+          "end": null,
+          "usd": 0.03
+        }
+      ],
+      "sku": "JRHJQ2UMPUB5K73A",
+      "rate_codes": [
+        "JRHJQ2UMPUB5K73A.JRTCKXETXF.6YS6EN2CT7"
+      ],
+      "description": "$0.03 per GB-mo of log storage - US East (Northern Virginia)",
+      "effective_date": "2026-11-01T00:00:00Z",
+      "publication_date": "2026-11-04T21:35:32Z",
+      "offer_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/current/us-east-1/index.json",
+      "source": "aws-price-list",
+      "rate": "$0.03 per GB-Mo"
+    }
+  }
+}

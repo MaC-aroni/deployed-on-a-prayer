@@ -20,17 +20,57 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
 | Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` on GitHub in `MaC-aroni`, protected and reviewed |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
-| Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
+| Knowledge base | 16 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
 | Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
 | UI | `frontend/`: the console at `/` (Build → Migrate · Pipelines, live DAG, step logs, approvals, Build report, runs), mock pitch page at `/demo`; rules in [`UI.md`](UI.md) |
 | Planning API | `/api/mac/services`, `/plan`, `/ingest`, `/plans/...` in `backend/app/planning_api.py`, contract in [`docs/planning-api.md`](docs/planning-api.md) |
+| Cost estimate | Build's `report.cost`: Terraform plan × usage figures from Confluence × AWS Price List, every line sourced. `mac/cost.py`, `mac/usage.py`, `mac/pricing.py`, `backend/app/cost_api.py`; rules in [`docs/runner.md`](docs/runner.md) ("The cost estimate"), JSON in [`docs/api.md`](docs/api.md) ("Cost estimate"). No UI yet |
 | Not built yet | API endpoints for the guide and code writers; the Diagnostician behind Explain · Report · Auto-fix |
 
 ---
 
 ## Entries
 
+### 2026-11-08: Cost estimate with a source for every number (Zafeer-R, with Claude Code)
+
+#### What changed
+- **Build now prices the migration.** At the end of a passing Build, `report.cost` holds the
+  monthly AWS cost, the one-time data-load cost, today's on-prem cost and the saving. Every line
+  has its formula, AWS's price (SKU, rate code, effective date) and its inputs, each sourced:
+  a Confluence section with the quoted sentence, a Terraform plan attribute, or an AWS pricing
+  rule. Nothing is estimated; a figure the docs don't give leaves its line unpriced (`partial`),
+  and no saving is claimed then. A cost problem never fails a Build.
+- **What gets created** comes from Terraform: Build's plan now runs with `-out=mac.tfplan` and
+  then `terraform show -json`; a few non-sensitive attributes per resource go into
+  `report.resources` (`executors.py`, `runner.py`, small and additive).
+- **Usage reader** (`mac/usage.py`), a new Nemotron agent: reads the figures each resource needs
+  from the knowledge base; code checks every quote and number and converts the units. A missing
+  figure becomes **one Jira question** to the page's owner, never a guess. Run it with
+  `mise run mac usage <spec>` or `POST /api/mac/migrations/{name}/usage` (a run with mode
+  `usage`, with `agent` events). Tested on real Nemotron: 20 figures, 0 rejected.
+- **Prices** (`mac/pricing.py`) come from AWS's public Price List (no AWS keys needed), with
+  `backend/mac/prices_snapshot.json` as the fallback; `mise run mac prices --refresh` updates it.
+- When the estimate changes, Build republishes the design page with a code-generated "Cost
+  estimate" section and comments the summary once on the Tech Risk ticket.
+- **Two new knowledge pages:** `53-claims-capacity.md` (measured usage) and
+  `61-finance-onprem-costs.md` (today's costs), plus `finance-team` in the directory. The
+  service's billed duration on Lambda is left out on purpose, so the demo shows MaC asking for it.
+- New: `GET /api/mac/migrations/{name}/cost` recalculates the estimate without a Build.
+  New module `backend/app/cost_api.py`, mounted by one line in `main.py`.
+
+#### How to adapt
+- **Demo order:** Build → `mise run mac usage <spec>` → Build again. Then the design page and the
+  Tech Risk ticket show the cost. Add the missing duration to `53-claims-capacity.md` (and publish)
+  to show the estimate going from partial to complete.
+- Run `mise run mac publish-knowledge demo-data/confluence` once: it's now 16 pages.
+- **Elathius (UI):** `report.cost` and the cost endpoint are ready for a Cost card; the JSON and
+  the display rules (show `savings` only when not partial; link every source) are in
+  `docs/api.md`, "Cost estimate". No frontend was changed.
+- **ob1-can-obi:** Build's plan step now also runs `terraform show -json mac.tfplan`; a failure
+  there is logged, never fatal. Fly needs nothing new (the Price List is public).
+- `test_planning_api.py::test_build_runs_on_a_generated_plan` fails on Windows only (a `\` vs `/`
+  path check); it fails the same way on `main`, and passes on Linux CI.
 ### 2026-11-08: Pitch demo retold, logo, chat polish, Retry AI help (Elathius, with Claude Code)
 
 #### What changed

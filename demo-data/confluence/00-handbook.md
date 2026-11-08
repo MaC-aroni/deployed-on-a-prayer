@@ -20,7 +20,9 @@ protected health information (PHI), so most changes are regulated and need sign-
 - **Risk and access** pages say which changes need approval, from whom, and how to ask.
 - **Data** pages say how claims data may be moved and checked.
 - **Engineering** pages say how code reaches production: repositories, reviews and MaC.
-- **Services** pages describe each system, who owns it and where its code lives.
+- **Services** pages describe each system, who owns it, where its code lives and how much it's
+  used.
+- **Finance** pages say what systems cost to run today.
 - **Directory** pages list the teams and approvers.
 
 ## Modernisation programme

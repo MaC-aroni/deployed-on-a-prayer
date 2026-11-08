@@ -184,6 +184,9 @@ With Grok, an answer takes 20 s to a few minutes.
   - `approvals`: per approval id, `{status, detail, ticket, url}`. `status` is `approved`,
     `pending`, `rejected` or `unknown`; `detail` is the ticket key or why it's waiting
   - `design_page`: `{url, status}`
+  - `resources`: per iac step, what its Terraform plan creates: `[{address, type, name, actions,
+    attributes}]`
+  - `cost`: the cost estimate; see "Cost estimate" below
 - `GET /api/mac/runs?migration=<name>&limit=50` lists run summaries, newest first. Use it
   for a history list.
 
@@ -237,6 +240,54 @@ for (const kind of ["log", "step", "run", "diagnosis"]) {
 }
 es.addEventListener("end", () => { es.close(); refreshRun(); });
 ```
+
+### Cost estimate
+
+Build puts it in `report.cost` (see "The cost estimate" in `docs/runner.md`). The same view,
+recalculated now from the last Build, the usage figures and AWS's prices:
+
+| Request | Answer |
+|---|---|
+| `GET /api/mac/migrations/{name}/cost` | `{migration, build, estimate, usage}`. `409` until a Build has recorded the resources; `503` if there are no prices at all |
+| `POST /api/mac/migrations/{name}/usage` | starts the usage reader, a run with mode `usage` (`202` and the run view; follow it like any run, it emits `agent` events). `409` without a Build or an LLM, or while one is running |
+
+```json
+{"status": "partial", "currency": "USD", "region": "us-east-1",
+ "monthly_usd": 5.04, "yearly_usd": 60.5, "one_time_usd": 18.25,
+ "lines": [{"id": "deploy_mcp_server/aws_lambda_function.mcp#duration",
+            "subject": "deploy_mcp_server/aws_lambda_function.mcp", "resource_type": "aws_lambda_function",
+            "what": "Lambda compute (GB-seconds)", "quantity": 18919.95, "unit": "GB-seconds",
+            "formula": "1,261,330 invocations × 60 ms ÷ 1,000 × 256 MB ÷ 1,024 = 18,919.9 GB-seconds",
+            "usd": 0.3153,
+            "price": {"rate": "$0.0000166667 per Lambda-GB-Second up to 6,000,000,000, ...",
+                      "sku": "TG3M4CAGBA3NYQBH", "effective_date": "2026-10-01T00:00:00Z",
+                      "offer_url": "https://pricing.us-east-1.amazonaws.com/...", "source": "aws-price-list"},
+            "inputs": [{"name": "avg_billed_duration_ms", "value": 60, "unit": "ms", "as_written": "60 ms",
+                        "source": {"kind": "confluence", "section": "service-claims-capacity#lambda-measurements",
+                                   "page": "Services: ClaimsAdjudicationService Capacity and Usage",
+                                   "heading": "Lambda measurements", "url": "https://.../wiki/...",
+                                   "quote": "its average billed duration is 60 ms per invocation"}},
+                       {"name": "memory_size", "value": 256,
+                        "source": {"kind": "terraform", "step": "deploy_mcp_server",
+                                   "address": "aws_lambda_function.mcp", "attribute": "memory_size"}},
+                       {"name": "lambda_gb_seconds", "source": {"kind": "aws-rule", "text": "...", "url": "..."}}]}],
+ "one_time": [{"what": "DynamoDB writes for the one-time data load", "...": "the same shape as lines"}],
+ "free": [{"subject": "provision_iam/aws_iam_role.service", "resource_type": "aws_iam_role",
+           "reason": "IAM is offered at no additional charge", "url": "https://aws.amazon.com/iam/faqs/"}],
+ "unpriced": [{"subject": "deploy_service/aws_lambda_function.service",
+               "missing": "deploy_service/aws_lambda_function.service:avg_billed_duration_ms",
+               "question": {"ticket": "MAC-31", "url": "https://.../browse/MAC-31", "status": "asked"}}],
+ "unknown_resources": [],
+ "onprem": {"monthly_usd": 8640.0, "items": [{"label": "Oracle licence support", "usd_per_month": 4200.0,
+            "formula": "50,400.00 usd per year ÷ 12", "source": {"kind": "confluence", "quote": "..."}}]},
+ "savings": {"monthly_usd": 8634.96, "yearly_usd": 103619.5, "percent": 99.94, "partial": true},
+ "prices_source": ["aws-price-list"], "notes": ["..."], "digest": "3f1c..."}
+```
+- `status`: `complete` · `partial` (some lines in `unpriced` or `unknown_resources`) ·
+  `unavailable` (then only `reason` and `notes`: no usage figures yet, or no prices).
+- Show `savings` only when `savings.partial` is false: against a partial total it isn't a saving.
+- Every `inputs[].source` has a `kind`: `confluence` (link `url`, show `quote`), `terraform` (the
+  plan's attribute) or `aws-rule` (AWS's pricing rule, link `url`). `price.sku` and the dates are AWS's.
 
 ## Not there yet
 
