@@ -1,4 +1,4 @@
-"""The migration.yaml spec (schema mac/v0.2): parsing and shape only.
+"""The migration.yaml spec (schema mac/v0.3): parsing and shape only.
 
 Rules that span several fields (references, cycles, rollbacks) live in validate.py, so
 a spec can be loaded and then report every problem at once instead of the first one.
@@ -14,7 +14,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-API_VERSION = "mac/v0.2"
+API_VERSION = "mac/v0.3"
 
 _REPO = re.compile(r"^github\.com/(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:@(?P<ref>[^\s@]+))?$")
 _ID = r"^[a-z][a-z0-9_]*$"
@@ -126,10 +126,16 @@ class Step(_Model):
 
 
 class Approval(_Model):
-    id: str
+    """A sign-off Deploy waits for. MaC raises the Jira ticket itself, once per version of the
+    spec, so a changed plan always needs fresh approval."""
+
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     type: str
-    jira: str
-    justification: str | None = None
+    approver: str  # who signs off: "manager", "tech-risk", a team name; maps to a Jira assignee
+    summary: str  # the ticket's title
+    justification: str | None = None  # the ticket's body
+    after: tuple[str, ...] = ()  # approvals that must be approved before this ticket is raised
+    design_doc: bool = False  # link the design page; the ticket waits until the page exists
 
 
 class Environment(_Model):
@@ -167,7 +173,7 @@ class Diagnostics(_Model):
 
 
 class Spec(_Model):
-    apiVersion: Literal["mac/v0.2"]
+    apiVersion: Literal["mac/v0.3"]
     kind: Literal["Migration"]
     metadata: Metadata
     target: Target

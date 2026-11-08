@@ -16,11 +16,12 @@ background: `start_*` / `request_*` check the rules and record what should happe
 import threading
 from pathlib import Path
 
+from .design import DesignWriter, facts, page_title, render_page
 from .diagnostics import Diagnostician, Failure, Mode, NotConfigured
 from .executors import Executor, StepContext, StepFailed
-from .integrations import Approvals, GitHub, IntegrationError
-from .spec import SELF_ROLLBACK_ON_FAILURE, Spec, SpecError, Step, StepType, parse_spec
-from .store import RunRecord, RunStatus, StepState, Store
+from .integrations import Approvals, GitHub, IntegrationError, Pages, TicketRequest
+from .spec import SELF_ROLLBACK_ON_FAILURE, Approval, Spec, SpecError, Step, StepType, parse_spec
+from .store import DesignPage, RunRecord, RunStatus, StepState, Store, Ticket
 from .validate import execution_order, follows_a_change, validate
 
 
@@ -30,16 +31,20 @@ class GateError(Exception):
 
 class Runner:
     def __init__(self, store: Store, github: GitHub, approvals: Approvals, executor: Executor,
-                 data_dir: Path, diagnostician: Diagnostician | None = None):
+                 data_dir: Path, diagnostician: Diagnostician | None = None,
+                 design_writer: DesignWriter | None = None, pages: Pages | None = None):
         self.store = store
         self.github = github
         self.approvals = approvals
         self.executor = executor
         self.data_dir = Path(data_dir)
         self.diagnostician = diagnostician or NotConfigured()
+        self.design_writer = design_writer  # the LLM that writes the design page (text only)
+        self.pages = pages  # where the design page is published (Confluence)
         # Rule checks and state changes happen under this lock, so two clicks can't both start
         # a run or both press play. The slow work in execute() runs outside it.
         self._lock = threading.Lock()
+        self._ticket_lock = threading.Lock()  # never raise the same approval ticket twice
 
     # ---- One-call versions (CLI, tests) ----------------------------------------------------
 
@@ -186,6 +191,7 @@ class Runner:
             self._lock_commits(run, spec)
             if not self._check_guardrails(run, spec):
                 return self._finish(run, RunStatus.FAILED, "guardrail checks failed")
+            self._write_design(run, spec)
             self._report_approvals(run, spec)
             for step in execution_order(spec):
                 if step.type == StepType.IAC:
@@ -209,13 +215,13 @@ class Runner:
 
             if run.mode == "deploy" and step.requires_approval:
                 try:
-                    statuses = {a: self.approvals.status(spec.approval(a).jira) for a in step.requires_approval}
+                    states = {a: self._approval_state(run, spec, spec.approval(a)) for a in step.requires_approval}
                 except IntegrationError as e:
                     return self._wait(run, step, StepState.BLOCKED, f"couldn't check approvals: {e}")
-                rejected = [a for a, s in statuses.items() if s == "rejected"]
+                rejected = [f"{a} ({detail})" for a, (status, detail) in states.items() if status == "rejected"]
                 if rejected:
                     return self._fail(run, spec, step, f"approval rejected: {', '.join(rejected)}", ran=False)
-                pending = [f"{a} ({spec.approval(a).jira})" for a, s in statuses.items() if s != "approved"]
+                pending = [f"{a} ({detail})" for a, (status, detail) in states.items() if status != "approved"]
                 if pending:
                     return self._wait(run, step, StepState.BLOCKED, "waiting for approval: " + ", ".join(pending))
 
@@ -302,14 +308,91 @@ class Runner:
         return ok
 
     def _report_approvals(self, run: RunRecord, spec: Spec) -> None:
+        """Raises every ticket whose turn has come, and records each approval's status."""
         run.report["approvals"] = {}
         for approval in spec.approvals:
             try:
-                status = self.approvals.status(approval.jira)
+                status, detail = self._approval_state(run, spec, approval)
             except IntegrationError as e:
-                status = f"unknown ({e})"
-            run.report["approvals"][approval.id] = status
-            self._event(run, "log", f"approval {approval.id} ({approval.jira}): {status}")
+                status, detail = "unknown", str(e)
+            ticket = self.store.ticket(run.migration, run.spec_digest, approval.id)
+            run.report["approvals"][approval.id] = {
+                "status": status, "detail": detail,
+                "ticket": ticket.key if ticket else None, "url": ticket.url if ticket else None}
+            self._event(run, "log", f"approval {approval.id}: {status} ({detail})")
+        self.store.save(run)
+
+    # ---- Approvals: tickets raised by code, one per approval per spec version ---------------
+
+    def _approval_state(self, run: RunRecord, spec: Spec, approval: Approval) -> tuple[str, str]:
+        """(approved | pending | rejected, detail). Raises the ticket if its turn has come:
+        everything in `after` approved, and the design page written if it needs one."""
+        ticket = self.store.ticket(run.migration, run.spec_digest, approval.id)
+        if ticket is None:
+            for dep in approval.after:
+                dep_status, _ = self._approval_state(run, spec, spec.approval(dep))
+                if dep_status == "rejected":
+                    return "rejected", f"{dep} was rejected, so this was never requested"
+                if dep_status != "approved":
+                    return "pending", f"not requested until {dep} is approved"
+            if approval.design_doc:
+                page = self.store.design(run.migration)
+                if page is None or page.digest != run.spec_digest:
+                    return "pending", "not requested until the design page is written (run Build)"
+            ticket = self._raise_ticket(run, spec, approval)
+        return self.approvals.status(ticket.key), ticket.key
+
+    def _raise_ticket(self, run: RunRecord, spec: Spec, approval: Approval) -> Ticket:
+        with self._ticket_lock:
+            existing = self.store.ticket(run.migration, run.spec_digest, approval.id)
+            if existing:
+                return existing
+            unblocks = [s.id for s in execution_order(spec) if approval.id in s.requires_approval]
+            links = []
+            if approval.design_doc:
+                links.append(("Design page", self.store.design(run.migration).url))
+            request = TicketRequest(
+                approval_id=approval.id,
+                summary=approval.summary,
+                paragraphs=[
+                    (approval.justification or "").strip(),
+                    f"Requested by MaC for migration {spec.metadata.name} ({spec.metadata.service}), "
+                    f"plan version {run.spec_digest[:12]}.",
+                    "Deploy waits for this approval before running: " + ", ".join(unblocks) + ".",
+                    "To approve, move this ticket to Approved (or Done). To reject, move it to Rejected.",
+                ],
+                approver=approval.approver,
+                labels=["mac", spec.metadata.name, approval.type, approval.id],
+                links=links,
+            )
+            raised = self.approvals.raise_ticket(request)
+            ticket = Ticket(approval=approval.id, key=raised.key, url=raised.url)
+            self.store.save_ticket(run.migration, run.spec_digest, ticket)
+            self._event(run, "log", f"raised {ticket.key} for approval {approval.id} ({approval.approver})")
+            return ticket
+
+    # ---- The design page: an LLM writes prose; code publishes it ----------------------------
+
+    def _write_design(self, run: RunRecord, spec: Spec) -> None:
+        """Never fails the Build: without a page, only the Tech Risk ticket has to wait."""
+        existing = self.store.design(run.migration)
+        if existing and existing.digest == run.spec_digest:
+            return self._design_report(run, existing.url, "up to date")
+        if self.design_writer is None or self.pages is None:
+            return self._design_report(run, None, "not written: the LLM or Confluence isn't configured")
+        self._event(run, "log", "asking the LLM to write the design page")
+        try:
+            markdown = self.design_writer.write(facts(spec, run.shas))
+            page_id, url = self.pages.publish(page_title(spec), render_page(spec, run.shas, markdown, run.id),
+                                              existing.page_id if existing else None)
+        except IntegrationError as e:
+            return self._design_report(run, None, f"not written: {e}")
+        self.store.save_design(run.migration, DesignPage(page_id=page_id, url=url, digest=run.spec_digest))
+        self._design_report(run, url, "written")
+
+    def _design_report(self, run: RunRecord, url: str | None, status: str) -> None:
+        run.report["design_page"] = {"url": url, "status": status}
+        self._event(run, "log", f"design page: {status}" + (f" ({url})" if url else ""))
         self.store.save(run)
 
     def _build_action(self, run: RunRecord, spec: Spec, step: Step, action: str) -> None:

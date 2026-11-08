@@ -15,15 +15,88 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Repo | https://github.com/MaC-aroni/deployed-on-a-prayer (public, org `MaC-aroni`) |
 | Live app | https://deployed-on-a-prayer.fly.dev (placeholder pages, plus `/excuses`) |
 | Stack | FastAPI backend (`backend/`), React + Vite frontend (`frontend/`), one Fly.io app |
-| MaC runner | `backend/mac/`, spec `mac/v0.2`, rules in [`docs/runner.md`](docs/runner.md) |
+| MaC runner | `backend/mac/`, spec `mac/v0.3`, rules in [`docs/runner.md`](docs/runner.md) |
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
-| Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml) |
+| Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
+| Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` (built and tested; waiting to be created on GitHub) |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
-| Not built yet | AWS account and state bucket, the 3 demo repos, UI, Jira, agents |
+| Not built yet | AWS account and state bucket (Zafeer), Atlassian site, UI, the remaining agents |
 
 ---
 
 ## Entries
+
+### 2026-11-07: MCP tool, MaC-raised approvals, LLM design page, demo repos (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Spec `mac/v0.3`.** Approvals drop `jira:` and gain `approver`, `summary`, `after` and
+  `design_doc`. v0.2 files fail validation; see the example and `docs/runner.md`.
+- **MaC raises the Jira tickets itself**, in plain code from the spec:
+  - once per approval per version of the plan, never duplicated
+  - editing the plan raises fresh ones
+  - `after` chains them: the MCP team's ticket only appears once the manager approves, and
+    a manager rejection fails the run and undoes everything
+- **The design page (the one LLM call).** Build sends the migration's facts to Nemotron
+  (`nvidia/nemotron-3-super-120b-a12b` on NVIDIA NIM), publishes the returned document to
+  Confluence, and the Tech Risk ticket links it.
+  - The model only writes prose: its output is escaped, never executed, and followed by a
+    code-generated appendix of exactly what runs.
+  - If the LLM is down, Build still passes, and only the Tech Risk ticket waits.
+- **The demo pipeline** (`examples/claims-adjudication/migration.yaml`):
+
+  | Stage | Step | What it does |
+  |---|---|---|
+  | check | `preflight` | Right AWS account, AWS reachable |
+  | infrastructure | `provision_storage`, `provision_iam` | Create the claims table (DynamoDB) and the two roles |
+  | data | `db_migrate` | ✋ manual. Copy the Oracle export in and verify the counts |
+  | release | `deploy_mcp_server`, `deploy_service` | Put the Claims MCP tool and the claims service on Lambda (AWS-signed URLs only) |
+  | access | `grant_mcp_access` | Let the service's role call the MCP tool |
+  | verify | `smoke_test` | Adjudicate a real migrated claim through the service and the MCP tool |
+
+  The approvals: **Tech Risk** covers every production change. **Manager, then MCP team**
+  covers the access grant.
+- **The database is DynamoDB, created by the pipeline itself**, not a pre-made Postgres
+  database. That means no networking to break on stage, nothing for Zafeer to pre-build, and
+  undo deletes the table, which proves rollback end to end.
+- **The four demo repos are built and tested** (see "How to adapt" for where they are).
+  - Each has CI: tests, plus `terraform fmt` and `validate` against the real AWS provider v6.
+  - Each resource is named per environment (`mac-claims-<env>-...`) and tagged with the
+    deployment ID (`mac:deployment-id`).
+  - **The planted bug:** `claims-db-migrate` copies Oracle dates like `01-JAN-24` as they are,
+    so the smoke test fails with `time data '01-JAN-24' does not match format '%Y-%m-%d'`.
+    Converting the date in `to_item` fixes it.
+- **Deployment IDs:** every run's ID reaches each script (`MAC_RUN_ID`) and Terraform
+  (`TF_VAR_mac_run_id`), and is on every AWS resource as the `mac:deployment-id` tag.
+- `boto3` is now in the backend dependencies, because pipeline scripts run with the
+  runner's Python.
+- Tests: 123 in MaC, plus 24 across the demo repos. Jira, Confluence, NIM and GitHub are
+  tested against a local HTTP server that checks the exact requests.
+
+#### How to adapt
+1. Pull `main`, then `mise run setup` (boto3 is new).
+2. **Writing or generating specs:** use `mac/v0.3` approvals (`approver`, `summary`, optional
+   `after` and `design_doc`). Don't put Jira keys in specs.
+3. **UI:**
+   - `GET /migrations/{name}` now has `approvals[].ticket` and `design_page`.
+   - Build's `report.approvals` values are objects (`{status, detail, ticket, url}`), not
+     strings, and Build's report has `design_page`. See `docs/api.md`.
+   - Show each approval's `detail` (for example "not requested until APPR-MGR-001 is
+     approved") so people know why it's waiting.
+4. **Demo repos:** they're waiting to be created on GitHub. Until they're on GitHub they're on
+   ob1-can-obi's laptop in `~/Desktop/mac-demo-repos/`. Unlike this repo, their `main`
+   **requires one approving review**, because Build checks that every commit it runs was
+   reviewed. So Elathius or Zafeer-R must approve their first PRs.
+5. **Zafeer (AWS):** the runner's credentials need, in one account and region:
+   - DynamoDB (create, delete, read and write tables)
+   - IAM (create and delete roles and their policies; `iam:PassRole` on `mac-claims-*`)
+   - Lambda (functions, function URLs, permissions, `InvokeFunctionUrl`)
+   - S3 on the state bucket
+   - `sts:GetCallerIdentity`
+
+   Then set `MAC_TF_STATE_BUCKET`, the AWS credentials, and the account ID in the example spec.
+6. **Atlassian (anyone, about 10 minutes):** a free site with a Jira project `MAC` and a
+   Confluence space. Set the `ATLASSIAN_*` and `CONFLUENCE_SPACE_KEY` variables listed in
+   `docs/runner.md`. Add a "Rejected" status to the Jira workflow, or use "Won't Do".
 
 ### 2026-11-07: Runner API for the UI (ob1-can-obi, with Claude Code)
 

@@ -70,6 +70,18 @@ class Event(BaseModel):
     message: str
 
 
+class Ticket(BaseModel):
+    approval: str
+    key: str  # e.g. MAC-12
+    url: str
+
+
+class DesignPage(BaseModel):
+    page_id: str
+    url: str
+    digest: str  # the spec version the page was last written for
+
+
 class Store:
     def __init__(self, path: Path | str):
         if str(path) != ":memory:":
@@ -87,6 +99,16 @@ class Store:
                 CREATE TABLE IF NOT EXISTS events (
                     run_id TEXT NOT NULL, seq INTEGER NOT NULL, ts REAL NOT NULL, step TEXT,
                     kind TEXT NOT NULL, message TEXT NOT NULL, PRIMARY KEY (run_id, seq));
+                -- One Jira ticket per approval per version of the spec: a changed plan needs
+                -- fresh sign-off, and re-running never raises duplicates.
+                CREATE TABLE IF NOT EXISTS tickets (
+                    migration TEXT NOT NULL, digest TEXT NOT NULL, approval TEXT NOT NULL,
+                    key TEXT NOT NULL, url TEXT NOT NULL, created REAL NOT NULL,
+                    PRIMARY KEY (migration, digest, approval));
+                -- One design page per migration, updated in place for each new spec version.
+                CREATE TABLE IF NOT EXISTS designs (
+                    migration TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
+                    digest TEXT NOT NULL, updated REAL NOT NULL);
                 """
             )
 
@@ -119,6 +141,36 @@ class Store:
         with self.lock:
             rows = self.db.execute(query + " ORDER BY created DESC, rowid DESC LIMIT ?", (*params, limit)).fetchall()
         return [RunRecord.model_validate_json(r[0]) for r in rows]
+
+    def ticket(self, migration: str, digest: str, approval: str) -> Ticket | None:
+        with self.lock:
+            row = self.db.execute("SELECT key, url FROM tickets WHERE migration = ? AND digest = ? AND approval = ?",
+                                  (migration, digest, approval)).fetchone()
+        return Ticket(approval=approval, key=row[0], url=row[1]) if row else None
+
+    def save_ticket(self, migration: str, digest: str, ticket: "Ticket") -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?)",
+                            (migration, digest, ticket.approval, ticket.key, ticket.url, time.time()))
+
+    def tickets(self, migration: str, digest: str) -> dict[str, "Ticket"]:
+        with self.lock:
+            rows = self.db.execute("SELECT approval, key, url FROM tickets WHERE migration = ? AND digest = ?",
+                                   (migration, digest)).fetchall()
+        return {r[0]: Ticket(approval=r[0], key=r[1], url=r[2]) for r in rows}
+
+    def design(self, migration: str) -> "DesignPage | None":
+        with self.lock:
+            row = self.db.execute("SELECT page_id, url, digest FROM designs WHERE migration = ?",
+                                  (migration,)).fetchone()
+        return DesignPage(page_id=row[0], url=row[1], digest=row[2]) if row else None
+
+    def save_design(self, migration: str, page: "DesignPage") -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO designs VALUES (?, ?, ?, ?, ?) ON CONFLICT (migration) DO UPDATE SET "
+                            "page_id = excluded.page_id, url = excluded.url, digest = excluded.digest, "
+                            "updated = excluded.updated",
+                            (migration, page.page_id, page.url, page.digest, time.time()))
 
     def add_event(self, run_id: str, kind: str, message: str, step: str | None = None) -> Event:
         with self.lock, self.db:
