@@ -176,3 +176,13 @@ def test_every_repo_is_listed_once():
     assert sorted(demo_spec().repos()) == sorted([
         "github.com/MaC-aroni/claims-db-migrate", "github.com/MaC-aroni/claims-mcp-server",
         "github.com/MaC-aroni/claims-service-iac", "github.com/MaC-aroni/claims-smoke-tests"])
+
+
+def test_codegen_says_who_writes_each_steps_code():
+    spec = demo_spec()
+    assert spec.step("provision_storage").codegen == "llm"
+    assert {s.codegen for s in spec.steps if s.id != "provision_storage"} == {"engineer"}  # the default
+    data = demo_data()
+    step(data, "provision_iam")["codegen"] = "robot"
+    with pytest.raises(SpecError, match="codegen"):
+        parse_spec(yaml.safe_dump(data))

@@ -70,9 +70,10 @@ class Approvals(Protocol):
 
 
 class Pages(Protocol):
-    def publish(self, title: str, storage_html: str, page_id: str | None) -> tuple[str, str]:
-        """Creates the page, or updates it if page_id (or a page with this title) exists.
-        Returns (page_id, url)."""
+    def publish(self, title: str, storage_html: str, page_id: str | None,
+                parent_id: str | None = None) -> tuple[str, str]:
+        """Creates the page (under parent_id, if given), or updates it if page_id (or a page with
+        this title) exists. Returns (page_id, url)."""
 
 
 def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None):
@@ -239,8 +240,10 @@ class ConfluencePages(_Atlassian):
             self._space_id = found[0]["id"]
         return self._space_id
 
-    def publish(self, title: str, storage_html: str, page_id: str | None) -> tuple[str, str]:
+    def publish(self, title: str, storage_html: str, page_id: str | None,
+                parent_id: str | None = None) -> tuple[str, str]:
         body = {"representation": "storage", "value": storage_html}
+        parent = {"parentId": parent_id} if parent_id else {}
         if page_id is None:
             # Our record may be gone (a restart without the volume): reuse a page with this title.
             query = urllib.parse.urlencode({"space-id": self.space_id(), "title": title})
@@ -248,11 +251,11 @@ class ConfluencePages(_Atlassian):
             page_id = existing[0]["id"] if existing else None
         if page_id is None:
             page = self.call("/wiki/api/v2/pages", method="POST", body={
-                "spaceId": self.space_id(), "status": "current", "title": title, "body": body})
+                "spaceId": self.space_id(), "status": "current", "title": title, "body": body, **parent})
         else:
             current = self.call(f"/wiki/api/v2/pages/{page_id}")
             page = self.call(f"/wiki/api/v2/pages/{page_id}", method="PUT", body={
-                "id": page_id, "status": "current", "title": title, "body": body,
+                "id": page_id, "status": "current", "title": title, "body": body, **parent,
                 "version": {"number": current["version"]["number"] + 1, "message": "Updated by MaC"}})
         return page["id"], f"{self.site}/wiki{page['_links']['webui']}"
 

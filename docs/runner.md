@@ -102,6 +102,7 @@ steps:
     needs: []
     requires_approval: [APPR-TR-001]
     when: manual # auto (default) | manual
+    codegen: engineer # engineer (default) | llm: who writes this step's code from the migration guide
     run: { repo: github.com/MaC-aroni/claims-db-migrate, entrypoint: migrate.py }
     verify: { entrypoint: verify.py } # optional repo:, defaults to run.repo
     rollback: { entrypoint: rollback.py }
@@ -118,7 +119,9 @@ Rules `mac validate` enforces:
 - No duplicate ids, no unknown references, no loops.
 
 Changes in v0.3: approvals lost `jira:` (MaC raises the tickets) and gained `approver`,
-`summary`, `after` and `design_doc`.
+`summary`, `after` and `design_doc`. Steps gained `codegen`: the engineers decide, step by step
+and in review, which parts of the pipeline the LLM may write code for. LLM-written code always
+arrives as a pull request a person reviews.
 
 Changes from the design doc's v0.1: `stages` and `when` are new; `approvals[].blocks` is gone
 (use `requires_approval` on steps); repos follow `main` instead of pinned SHAs (Build locks
@@ -186,7 +189,7 @@ Configuration comes from environment variables:
 | Variable | Purpose |
 |---|---|
 | `GITHUB_TOKEN` | read access to the pipeline's repos |
-| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | one Atlassian site for Jira and Confluence, e.g. `https://mac-aroni.atlassian.net`. Without them, approval steps wait |
+| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | one Atlassian site for Jira and Confluence, e.g. `https://<your-site>.atlassian.net`. Without them, approval steps wait |
 | `JIRA_PROJECT` (default `MAC`), `JIRA_ISSUE_TYPE` (default `Task`) | where tickets go |
 | `MAC_JIRA_ASSIGNEES` | optional JSON, approver name → Jira accountId, e.g. `{"manager": "712020:…"}` |
 | `CONFLUENCE_SPACE_KEY` | the space for design pages. Without it, no page (Build still passes) |

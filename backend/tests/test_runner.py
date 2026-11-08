@@ -66,7 +66,7 @@ def test_build_writes_the_design_page_from_the_spec_facts(env, spec_path):
     run = env.runner.build(spec_path)
     [facts] = env.writer.calls
     assert "grant_mcp_access" in facts and "aaaaaaa" in facts  # every step, with locked commits
-    [(title, page_html, page_id)] = env.pages.published
+    [(title, page_html, page_id, _)] = env.pages.published
     assert title == "MaC design: ClaimsAdjudicationService (claims-adjudication-onprem-to-aws)"
     assert page_id is None and "<h2>Overview</h2>" in page_html and "Appendix" in page_html
     assert run.report["design_page"]["status"] == "written"

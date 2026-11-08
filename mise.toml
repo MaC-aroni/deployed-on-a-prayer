@@ -23,10 +23,6 @@ run = "python scripts/dev.py --local"
 description = "The MaC runner CLI, e.g. `mise run mac validate examples/claims-adjudication/migration.yaml`"
 run = "python scripts/in_venv.py -m mac"
 
-[tasks.load-confluence]
-description = "Load the demo Confluence pages into the CLAIMS space (needs JIRA_* in backend/.env)"
-run = "python scripts/load_confluence.py"
-
 [tasks.test]
 description = "Run the backend tests"
 run = "python scripts/in_venv.py -m pytest backend"

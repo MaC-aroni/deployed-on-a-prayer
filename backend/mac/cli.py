@@ -20,6 +20,7 @@ from pathlib import Path
 from .design import NIMDesignWriter
 from .executors import Executor, TerraformState
 from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
+from .knowledge import KnowledgeError, load_pages, publish
 from .runner import GateError, Runner
 from .spec import SpecError, load_spec
 from .store import Event, RunRecord, RunStatus, Store
@@ -111,6 +112,28 @@ def cmd_validate(args) -> int:
     return 0
 
 
+def cmd_publish_knowledge(runner: Runner, directory: Path) -> int:
+    try:
+        pages = load_pages(directory)
+    except KnowledgeError as e:
+        print("\n".join(e.problems), file=sys.stderr)
+        return 1
+    if runner.pages is None:
+        print("Confluence isn't configured (ATLASSIAN_* and CONFLUENCE_SPACE_KEY)", file=sys.stderr)
+        return 2
+    known = {page: ids[0] for page, ids in runner.store.knowledge_pages().items()}
+    try:
+        published = publish(pages, runner.pages, known)
+    except IntegrationError as e:
+        print(f"Publishing failed: {e}", file=sys.stderr)
+        return 1
+    by_id = {page.id: page for page in pages}
+    for page, (page_id, url) in published.items():
+        runner.store.save_knowledge_page(page, page_id, url, by_id[page].title)
+    print(f"published {len(published)} pages")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mac", description="Migration as Code runner")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -143,12 +166,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--step")
     p = sub.add_parser("runs", help="list recent runs")
     p.add_argument("--migration")
+    p = sub.add_parser("publish-knowledge", help="publish a folder of knowledge-base pages to Confluence")
+    p.add_argument("directory", type=Path)
 
     args = parser.parse_args(argv)
     if args.command == "validate":
         return cmd_validate(args)
 
     runner = make_runner(Path(os.environ.get("MAC_DATA_DIR", ".mac")).resolve())
+    if args.command == "publish-knowledge":
+        return cmd_publish_knowledge(runner, args.directory)
     if args.command in ("build", "rehearse", "deploy", "play", "resume", "undo"):
         runner.store.listeners.append(_print_event)
     try:

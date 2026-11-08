@@ -20,11 +20,60 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
 | Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` (built and tested; waiting to be created on GitHub) |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
-| Not built yet | AWS account and state bucket (Zafeer), Atlassian site, UI, the remaining agents |
+| Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
+| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review (set up locally, waiting to be created) |
+| Not built yet | AWS account and state bucket (Zafeer), Atlassian site (Zafeer), UI, the agents (graph, planner, guide writer, code writer) |
 
 ---
 
 ## Entries
+
+### 2026-11-07: Company knowledge base, codegen setting, migrations repo (ob1-can-obi, with Claude Code)
+
+**Where this is going:**
+1. The agents read the company's Confluence docs and build a knowledge graph, with the source
+   page of every fact.
+2. They generate the `migration.yaml`, with approvals and citations, as a PR into
+   `mac-migrations`.
+3. An LLM writes a migration guide page tree in Confluence: every step, how to write and run
+   its code, citations on everything.
+4. For steps marked `codegen: llm`, an LLM writes the code from the guide, as a reviewed PR.
+
+This entry is the groundwork for that.
+
+#### What changed
+- **Knowledge base:** 14 Confluence pages for the *fictional* **Prayerwell Health** in
+  `demo-data/confluence/`:
+  - Platform: landing zone, Terraform, naming and tagging, Lambda, MCP tools
+  - Access: requesting MCP access (manager, then owner)
+  - Tech Risk: migration policy (needs a design doc)
+  - Data: claims migration, which says Oracle `DD-MON-YY` dates must become ISO 8601, so the
+    planted bug breaks a documented rule
+  - Engineering: change management and MaC
+  - Services: the claims service and the Claims MCP tool
+  - QA: smoke testing
+  - The teams and approvers directory
+
+  They match what's built. **`test_knowledge.py` fails if the docs and the demo pipeline
+  disagree** (repos, approvers, approval types, stage order, paths, the date rule).
+- **`mise run mac publish-knowledge <dir>`** publishes them as one Confluence page tree and
+  records each page's URL for citations. Re-running updates the same pages in place.
+- **Spec: per-step `codegen: engineer | llm`** (default `engineer`) says who writes that step's
+  code. The demo trusts the LLM with `provision_storage`.
+- **The `mac-migrations` repo** (set up locally, waiting to be created on GitHub):
+  - CI runs MaC's own validator, checked out from this repo, so the rules never drift.
+  - `main` will need one approving review.
+- The four demo repos' first PRs are merged, and **Build's GitHub guardrails pass for real on
+  all four** (CI green, protected branch, approved PR).
+
+#### How to adapt
+1. **Changing the pipeline or a demo repo?** Update `demo-data/confluence/` to match. The
+   tests will tell you if you forgot.
+2. **Atlassian (Zafeer):** once the site and space exist, set `ATLASSIAN_SITE`,
+   `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` and `CONFLUENCE_SPACE_KEY`, then run
+   `mise run mac publish-knowledge demo-data/confluence`.
+3. **UI:** steps now have `codegen` in `GET /migrations/{name}`. Show it on the card (for
+   example a small "AI writes this" badge).
 
 ### 2026-11-07: MCP tool, MaC-raised approvals, LLM design page, demo repos (ob1-can-obi, with Claude Code)
 
@@ -98,17 +147,38 @@ differently**. Keep it short; link to the docs instead of repeating them.
    Confluence space. Set the `ATLASSIAN_*` and `CONFLUENCE_SPACE_KEY` variables listed in
    `docs/runner.md`. Add a "Rejected" status to the Jira workflow, or use "Won't Do".
 
-### 2026-11-07: Cloud setup guide for AWS, Jira and Confluence (Zafeer-R, with Claude Code)
+### 2026-11-07: Cloud setup, corrected for what's built (ob1-can-obi, with Claude Code)
+
+This replaces Zafeer-R's earlier cloud-setup entry and its Confluence pages, which were written
+against the morning's plan (VPC/ECS/RDS, DBA and Security approvals, hand-made Jira tickets).
 
 #### What changed
-- New [`docs/cloud-setup.md`](docs/cloud-setup.md): the AWS layout (one organization, management,
-  rehearsal and production accounts, teammates through Identity Center), the Jira project
-  `MAC` and the statuses the runner reads, the Confluence space, and every variable.
-- `backend/.env.example` lists the runner's variable names.
+- **[`docs/cloud-setup.md`](docs/cloud-setup.md) rewritten:**
+  - **one AWS account**, because of the budget. Rehearsal and production are separated by
+    name and state
+  - the runner's **exact IAM policy**, scoped to `mac-claims-*` and the state bucket
+  - the Jira `MAC` project with `Approved`/`Rejected` statuses, and **no hand-made
+    tickets**, since MaC raises them
+  - the Confluence space **`CLAIMS`**
+  - the NVIDIA key
+  - every variable, and the checks in order
+- **Removed** `examples/claims-adjudication/confluence/` (the 10 pages from the design doc's
+  first list), `scripts/load_confluence.py` and the `load-confluence` task. **The one
+  knowledge base is `demo-data/confluence/`,** published with `mise run mac publish-knowledge
+  demo-data/confluence`, which builds the page tree and records page URLs for citations.
 
 #### How to adapt
-- Nothing changes in code yet. Zafeer-R is creating the accounts; send AWS, Jira and
-  state-bucket values to ob1-can-obi privately for the Fly secrets.
+- **Zafeer:** follow the new `docs/cloud-setup.md`:
+  - one account
+  - the policy as written
+  - space key `CLAIMS`
+  - don't create tickets by hand; if `MAC-1` to `MAC-3` already exist, close them as
+    "Won't Do"
+
+  Send the account ID, state bucket, runner keys, the Atlassian site URL, email, API token
+  and the NVIDIA key to ob1-can-obi privately.
+- If you loaded the old 10 pages into Confluence already, delete them from the `CLAIMS` space
+  so the agents only read the current knowledge base.
 
 ### 2026-11-07: Runner API for the UI (ob1-can-obi, with Claude Code)
 
