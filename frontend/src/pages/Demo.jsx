@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, GitBranch, GitPullRequest, Hand, Lock, Pause, Play, RotateCw, Sparkles, Timer } from "lucide-react";
+import { Bot, ExternalLink, GitBranch, GitPullRequest, Lock, Pause, Play, RotateCw, Sparkles, Timer } from "lucide-react";
 import Dag from "../components/Dag.jsx";
 import NodeDrawer from "../components/NodeDrawer.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
@@ -25,11 +25,20 @@ function useReplay() {
     let raf;
     let last = performance.now();
     const perMs = 1 / 16000;
+    const segs = keys.length - 1;
+    // Time runs a quarter speed while an agent is working, so the working-agent icon can be
+    // clicked and its hierarchy watched; scripts and Terraform fly by.
+    const agentBusy = (progress) => {
+      const pos = Math.min(Math.max(progress, 0), 1) * segs;
+      const i = Math.min(Math.floor(pos), segs - 1);
+      const time = keys[i] + (keys[i + 1] - keys[i]) * (pos - i);
+      return STEPS.some((st) => st.type === "agent" && statusAt(st, time) === "running");
+    };
     const tick = (now) => {
       const dt = now - last;
       last = now;
       setP((prev) => {
-        const next = prev + dt * perMs;
+        const next = prev + dt * perMs * (agentBusy(prev) ? 0.25 : 1);
         if (next >= 1) {
           setPlaying(false);
           return 1;
@@ -40,7 +49,7 @@ function useReplay() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing]);
+  }, [playing, keys]);
 
   const t = useMemo(() => {
     const segs = keys.length - 1;
@@ -57,12 +66,19 @@ function useReplay() {
   return { t, p, setP, playing, toggle };
 }
 
+// Two marks at most: the state (lock, breakpoint, undo) and the green robot where AI did more
+// than run a script. The robot's tooltip says what it did.
 function aside(step, status) {
-  if (step.type === "agent") return <Sparkles size={14} className="nemotron" />;
-  if (step.type === "approval") return <Lock size={14} />;
-  if (step.gate === "manual") return <Hand size={14} />;
-  if (status === "failed" || status === "rolled_back") return <RotateCw size={14} />;
-  return null;
+  let mark = null;
+  if (step.type === "approval") mark = <Lock size={14} />;
+  else if (step.gate === "manual") mark = <Pause size={14} className="breakpoint-mark" title="Breakpoint: waits for a person" />;
+  else if (status === "failed" || status === "rolled_back") mark = <RotateCw size={14} />;
+  return (
+    <>
+      {mark}
+      {step.ai && <Bot size={15} className="ai-mark" title={`AI: ${step.aiWhy}`} />}
+    </>
+  );
 }
 
 export default function Demo() {
@@ -82,7 +98,7 @@ export default function Demo() {
     status: stageStatusAt(stage.id, t),
     steps: STEPS.filter((s) => s.stage === stage.id).map((s) => {
       const st = statusAt(s, t);
-      return { id: s.id, name: s.name, sub: s.sub, status: st, agent: s.type === "agent", aside: aside(s, st) };
+      return { id: s.id, name: s.name, sub: s.sub, status: st, agent: s.type === "agent", breakpoint: s.gate === "manual", aside: aside(s, st) };
     }),
   }));
   // Connectors are the real dependencies: a step runs only once everything it needs has
@@ -100,7 +116,7 @@ export default function Demo() {
       <div className="run-head">
         <div className="run-head-main">
           <Pill tone={rs.tone} className="pill-lg">
-            <StatusIcon status={rs.icon} size={16} agent={status === "recovering"} onAgent={() => navigate("/agents/demo")} />
+            <StatusIcon status={rs.icon} size={16} agent={status === "recovering"} onAgent={() => navigate("/agents/demo?for=diagnose")} />
             {rs.label}
           </Pill>
           <h1>{RUN.title}</h1>
@@ -110,7 +126,7 @@ export default function Demo() {
               <GitBranch size={13} /> {RUN.branch}
             </span>
             <span>
-              <GitPullRequest size={13} /> !{RUN.pr}
+              <GitPullRequest size={13} /> PR #{RUN.pr}
             </span>
             <span>
               <Sparkles size={13} className="nemotron" /> {RUN.generatedBy}
@@ -122,10 +138,12 @@ export default function Demo() {
         </div>
         <div className="run-actions">
           <div className="actions-row">
-            <a className="btn btn-primary" href="#" onClick={(e) => e.preventDefault()}>
-              Open PR !{RUN.pr} <ExternalLink size={13} />
+            <button className="btn btn-primary" onClick={() => setTab("approvals")} title="The approvals MaC raised in Jira for this plan">
+              <Lock size={13} /> Jira · {RUN.jira} <ExternalLink size={13} />
+            </button>
+            <a className="btn" href="#" onClick={(e) => e.preventDefault()} title="The migration.yaml this run executes">
+              <GitPullRequest size={13} /> PR #{RUN.pr}
             </a>
-            <button className="btn">Hold</button>
           </div>
         </div>
       </div>
@@ -158,7 +176,7 @@ export default function Demo() {
           </div>
 
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} minScale={0.66} onAgent={() => navigate("/agents/demo")} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} minScale={0.7} onAgent={(id) => navigate(`/agents/demo?for=${id}`)} />
           </div>
 
           {step && <NodeDrawer step={step} t={t} onClose={() => setSelected(null)} />}

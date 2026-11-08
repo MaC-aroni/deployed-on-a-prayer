@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, Check, ChevronDown, ChevronRight, Cog, MessageSquare, Plus, Search, Send, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpen, Check, ChevronDown, ChevronRight, Cog, MessageSquare, Plus, Search, Send, Trash2, X } from "lucide-react";
+import logo from "../assets/maclogo.png";
 import Markdown from "../components/Markdown.jsx";
 import { useAuth } from "../components/Shell.jsx";
 import { api, chatStream, fmtAgo } from "../mac/api.js";
@@ -98,6 +99,11 @@ export default function Chat({ chatId }) {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns.length, busy, live.length]);
 
+  // The composer is disabled while the agent works; give it the cursor back once it's enabled again.
+  useEffect(() => {
+    if (!busy) boxRef.current?.focus();
+  }, [busy, chatId]);
+
   async function persist(nextTurns, nextTitle) {
     if (!idRef.current) {
       idRef.current = newId();
@@ -145,7 +151,6 @@ export default function Chat({ chatId }) {
     setTurns(done);
     setLive([]);
     setBusy(false);
-    boxRef.current?.focus();
     persist(done, nextTitle);
   }
 
@@ -193,8 +198,8 @@ export default function Chat({ chatId }) {
           <div className="chat-column">
             {turns.length === 0 && !busy && (
               <div className="chat-empty">
-                <span className="chat-empty-mark">
-                  <Sparkles size={22} />
+                <span className="chat-empty-mark chat-logo">
+                  <img src={logo} alt="MaC" width={56} height={56} />
                 </span>
                 <h1>Ask MaC</h1>
                 <p className="muted">
@@ -213,8 +218,8 @@ export default function Chat({ chatId }) {
             {turns.map((t, i) => (
               <div key={i} className={cx("chat-turn", `role-${t.role}`)}>
                 {t.role !== "user" && (
-                  <span className={cx("chat-avatar", { bad: t.role === "error" })}>
-                    <Sparkles size={14} />
+                  <span className={cx("chat-avatar chat-logo", { bad: t.role === "error" })}>
+                    <img src={logo} alt="" width={28} height={28} />
                   </span>
                 )}
                 <div className="chat-bubble">
@@ -229,9 +234,12 @@ export default function Chat({ chatId }) {
                   <Cog size={16} className="spin" />
                 </span>
                 <div className="chat-bubble chat-thinking-block">
-                  <div className="chat-thinking">
-                    <Cog size={14} className="spin" /> {live.length ? "working through the lookups…" : "spinning up an agent…"}
-                    {health?.model && <span className="mono muted"> · {health.model}</span>}
+                  <div className="chat-thinking" aria-label="Thinking">
+                    <span className="chat-dots">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
                   </div>
                   {live.length > 0 && (
                     <ol className="chat-tools live">
@@ -242,7 +250,7 @@ export default function Chat({ chatId }) {
                       ))}
                     </ol>
                   )}
-                  <p className="faint small">Answers can take a while: the agent reads pages and tickets before it writes.</p>
+
                 </div>
               </div>
             )}

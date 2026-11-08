@@ -379,6 +379,12 @@ export default function Migration({ source, initialRun }) {
                 ...(mig.approvals.length ? [{ label: "Sync with Jira", detail: mig.approvals_live ? "the server follows Jira already; ask it now" : "ask Jira about every open approval", icon: <RefreshCw size={14} />, onClick: () => act("Jira sync", () => api.approvalsSync(mig.name).then(() => null)) }] : []),
                 ...(broke ? [{ label: investigation ? "Investigate again" : "Investigate", detail: noLlm ? "no LLM configured here" : `Diagnostician on ${run.failed_step}`, hint: noLlm, icon: <Stethoscope size={14} />, onClick: investigate }] : []),
                 ...(run?.ai_report ? [{ label: "Download AI report", detail: "report.md for a coding agent", icon: <Download size={14} />, onClick: () => window.open(reportUrl(run.id), "_blank") }] : []),
+                ...(broke && run.mode !== "build"
+                  ? [
+                      { heading: "Retry AI help on this run" },
+                      ...AI_MODES.map(([id, label]) => ({ label: `${label} again`, detail: id === "autofix" ? "fix on a branch, re-run Build + Rehearse" : id === "report" ? "report.md for a coding agent" : "a grounded diagnosis on the run", hint: noLlm, icon: <Bot size={14} />, onClick: () => act(`AI help (${label})`, () => api.retryAi(run.id, id).then(() => null)) })),
+                    ]
+                  : []),
                 ...(runActive ? [{ label: "Cancel this run", detail: "stop, then undo everything it did", danger: true, icon: <OctagonX size={14} />, onClick: () => setConfirming("cancel") }] : []),
                 ...(canUndo ? [{ label: run.status === "rollback_failed" ? "Retry undo" : "Undo this run", detail: run.status === "rollback_failed" ? "only what wasn't undone" : "undo everything it did", danger: true, icon: <Undo2 size={14} />, onClick: () => act("Undo", () => api.undo(run.id)) }] : []),
               ]}

@@ -5,7 +5,7 @@ import FixCard from "../components/FixCard.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { api, fmtTime, follow, parseAgent } from "../mac/api.js";
-import { DEMO_AGENT_EVENTS, DEMO_AGENT_RUN } from "../data/mock.js";
+import { DEMO_AGENT_SETS } from "../data/mock.js";
 import { Link, navigate } from "../router.jsx";
 import { MODE_LABEL, runMeta } from "../status.js";
 import { cx } from "../lib.js";
@@ -60,8 +60,8 @@ function aggregate(statuses) {
 
 function titleOf(run) {
   if (!run) return "";
-  if (run.mode === "plan") return (run.migration ?? "").replace(/^plan\//, "").replaceAll("-", " ");
-  if (run.mode === "diagnose") return `Investigate ${run.failed_step ?? run.report?.step ?? "the failure"}`;
+  if (run.mode === "plan") return (run.migration ?? "").replace(/^plan\//, "").replaceAll("-", " ").replace(/^approvals$/, "raise approvals in Jira");
+  if (run.mode === "diagnose") return `Diagnose ${run.failed_step ?? run.report?.step ?? "the failure"}`;
   if ((run.migration ?? "").startsWith("knowledge/")) return `Learn ${run.migration.slice("knowledge/".length)}`;
   if ((run.migration ?? "").startsWith("repo/")) return `Licence check · ${run.migration.slice("repo/".length)}`;
   return "Learn the knowledge base";
@@ -70,30 +70,41 @@ function titleOf(run) {
 function backLink(run) {
   if (!run) return { to: "/migrate", label: "Migration" };
   if (run.mode === "plan") return { to: `/migrate/${run.id}`, label: "planning run" };
+  if (run.id === "demo") return { to: "/demo", label: "pitch demo" };
   if (run.mode === "diagnose") return { to: `/migrations/${encodeURIComponent(run.migration)}?run=${run.based_on ?? ""}`, label: "pipeline" };
   return { to: "/migrate", label: "Migration" };
 }
 
-function useDemoReplay() {
+// Which mock hierarchy to replay: /agents/demo?for=<step id of the pitch pipeline>.
+function demoSet() {
+  const key = new URLSearchParams(window.location.search).get("for");
+  return DEMO_AGENT_SETS[key] ?? DEMO_AGENT_SETS.learn_kb;
+}
+
+function useDemoReplay(events) {
   const [n, setN] = useState(0);
   useEffect(() => {
-    if (n >= DEMO_AGENT_EVENTS.length) return;
+    setN(0);
+  }, [events]);
+  useEffect(() => {
+    if (n >= events.length) return;
     const id = setTimeout(() => setN((v) => v + 1), n === 0 ? 300 : 650);
     return () => clearTimeout(id);
-  }, [n]);
-  return { events: DEMO_AGENT_EVENTS.slice(0, n), done: n >= DEMO_AGENT_EVENTS.length, restart: () => setN(0) };
+  }, [n, events]);
+  return { events: events.slice(0, n), done: n >= events.length, restart: () => setN(0) };
 }
 
 export default function Agents({ runId }) {
   const { locked } = useAuth();
   const demo = runId === "demo";
-  const [run, setRun] = useState(demo ? DEMO_AGENT_RUN : null);
+  const set = useMemo(() => (demo ? demoSet() : null), [demo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [run, setRun] = useState(demo ? set.run : null);
   const [events, setEvents] = useState([]);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
-  const replay = useDemoReplay();
+  const replay = useDemoReplay(set?.events ?? []);
 
   useEffect(() => {
     if (demo) return;
@@ -127,7 +138,7 @@ export default function Agents({ runId }) {
   }, [runId, demo]);
 
   const shownEvents = demo ? replay.events : events;
-  const shownRun = demo ? { ...DEMO_AGENT_RUN, active: !replay.done, status: replay.done ? "succeeded" : "running" } : run;
+  const shownRun = demo ? { ...set.run, active: !replay.done, status: replay.done ? "succeeded" : "running" } : run;
   const agents = useMemo(() => buildAgents(shownEvents, shownRun), [shownEvents, shownRun]);
 
   const { columns, edges, groups } = useMemo(() => {
@@ -192,7 +203,7 @@ export default function Agents({ runId }) {
       {demo && (
         <div className="demo-banner">
           <Sparkles size={14} className="nemotron" />
-          Pitch rehearsal: a mock Learn run. Live agent runs open here from any working-agent icon.
+          Pitch rehearsal: a mock agent run. Live agent runs open here from any working-agent icon.
           <button className="link-btn" onClick={replay.restart} style={{ marginLeft: "auto" }}>
             Replay
           </button>
