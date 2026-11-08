@@ -443,3 +443,16 @@ def test_recover_fails_agent_jobs_without_trying_to_undo_them(env, spec_path):
     assert env.runner.recover() == []
     after = env.store.get(job.id)
     assert after.status == RunStatus.FAILED and "restarted" in after.reason
+
+
+def test_rerun_ai_endpoint(api):
+    client, env, _ = api
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    run = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()
+    assert client.post(f"/api/mac/runs/{run['id']}/ai", json={"mode": "autofix"}).status_code == 409  # still waiting
+    env.executor.fail[("smoke_test", "run")] = "boom"
+    client.post(f"/api/mac/runs/{run['id']}/steps/db_migrate/play")
+    resp = client.post(f"/api/mac/runs/{run['id']}/ai", json={"mode": "report"})
+    assert resp.status_code == 202 and resp.json()["diagnostics_mode"] == "report"
+    diagnoses = [e for e in client.get(f"/api/mac/runs/{run['id']}/events").json() if e["kind"] == "diagnosis"]
+    assert len(diagnoses) == 2  # the original, and the rerun

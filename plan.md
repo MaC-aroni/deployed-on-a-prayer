@@ -31,6 +31,19 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Retry AI help on a failed run; sturdier culprit matching (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `POST /api/mac/runs/{id}/ai {"mode": …}` runs AI help again on a failed Rehearse/Deploy from
+  its stored logs, e.g. switch it to Auto-fix without repeating a 30-minute Rehearse.
+- When a check fails, the culprit step is accepted by id, file, folder or repo name, and
+  failing that is taken from what the explanation names (the first real Auto-fix run refused
+  because Grok named the file instead of the step id).
+
+#### What you need to do
+- **Elathius (UI):** on a failed Rehearse/Deploy, a "Retry AI help" menu (Explain · Report ·
+  Auto-fix) that calls this endpoint.
+
 ### 2026-11-08: Jira approvals show up live in the console (Zafeer-R)
 
 #### What changed
