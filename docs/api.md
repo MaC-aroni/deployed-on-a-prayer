@@ -243,7 +243,7 @@ was undone). `active` is true for the first three.
 | `POST /api/mac/runs/{id}/resume` | the run is `waiting` on an approval (checks Jira again). Rarely needed now: the server does this itself when Jira changes |
 | `POST /api/mac/runs/{id}/undo` | the run is `waiting`, a Deploy that `succeeded`, or any run that ended `rollback_failed` (retries only what wasn't undone) |
 | `POST /api/mac/runs/{id}/ai` `{"mode": "explain"\|"report"\|"autofix"}` | a failed Rehearse or Deploy: run AI help again from its stored logs, e.g. switch it to Auto-fix without repeating the run (Auto-fix: Rehearse only). Results arrive as `diagnosis` events |
-| `POST /api/mac/runs/{id}/cancel` | the run is `running` or `waiting`: stop it and undo everything it did. Mid-step, the current step finishes first (a script is killed; Terraform completes). 409 while a run is already undoing itself |
+| `POST /api/mac/runs/{id}/cancel` | the run is `running` or `waiting`: stop it and undo everything it did. Mid-step, the current step finishes first (a script is killed; Terraform completes). 409 while a run is already undoing itself. Agent runs (plan, learn, describe, investigate) stop before their next model call and end `cancelled`, nothing to undo |
 | `GET /api/mac/runs/{id}/report.md` | the AI's Markdown report (Report and Auto-fix modes); 404 when there is none. The run view's `ai_report` says whether one exists |
 
 ### Logs and the live stream

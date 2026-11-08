@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Activity, ChevronRight, Github, Hammer, MessageSquare, Moon, PanelLeft, Presentation, Radio, Search, Sun, Workflow, Wand2 } from "lucide-react";
+import { Activity, ChevronRight, Github, Hammer, MessageSquare, Moon, PanelLeft, Presentation, Radio, Search, Sparkles, Sun, Workflow, Wand2 } from "lucide-react";
 import logo from "../assets/maclogo.png";
 import { SIGN_IN_URL, api, signOut } from "../mac/api.js";
 import { Link, usePath } from "../router.jsx";
@@ -154,6 +154,17 @@ export default function Shell({ crumbs = [], actions, children }) {
 
   // What this deployment has configured (GET /api/mac/health): pages grey out what can't work.
   const [health, setHealth] = useState(null);
+  const [switching, setSwitching] = useState(false);
+  async function switchLlm(provider) {
+    setSwitching(true);
+    try {
+      setHealth(await api.setLlm(provider));
+    } catch (e) {
+      if (e.status === 401) window.location.assign(SIGN_IN_URL);
+    } finally {
+      setSwitching(false);
+    }
+  }
   useEffect(() => {
     let alive = true;
     const load = () => api.health().then((h) => alive && setHealth(h)).catch(() => {});
@@ -256,6 +267,20 @@ export default function Shell({ crumbs = [], actions, children }) {
           ))}
 
           <div className="sidebar-foot">
+            {health?.llm_providers?.length > 0 && (
+              <div className="model-switch" title={locked ? "Sign in to switch the model" : "Which model the agents, AI help and Chat use. Takes effect on the next call."}>
+                <span className="model-switch-label">
+                  <Sparkles size={13} /> Model
+                </span>
+                <div className="segmented">
+                  {health.llm_providers.map((p) => (
+                    <button key={p.id} className={cx("seg", { active: p.active, hint: locked })} onClick={() => switchLlm(p.id)} disabled={switching} title={p.model}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <button className="theme-toggle" onClick={toggleTheme} title={theme === "light" ? "Switch to the dark theme" : "Switch to the light theme"}>
               {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
               <span>{theme === "light" ? "Dark theme" : "Light theme"}</span>

@@ -3644,3 +3644,34 @@ a.row-title:hover {
 .migration-card.invalid {
   box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--bad) 40%, transparent);
 }
+
+/* ---------- the model switch (sidebar footer) ---------- */
+.model-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.model-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.model-switch .segmented {
+  display: flex;
+  width: 100%;
+}
+.model-switch .seg {
+  flex: 1;
+  justify-content: center;
+}
+.shell.collapsed .model-switch {
+  display: none;
+}

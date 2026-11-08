@@ -392,6 +392,11 @@ export default function Migration({ source, initialRun }) {
                 {primary.icon} {primary.label}
               </button>
             )}
+            {runActive && run.status !== "rolling_back" && (
+              <button className={cx("btn btn-danger", { hint: locked })} onClick={() => setConfirming("cancel")} disabled={busy} title="Stop this run, then undo everything it did">
+                <OctagonX size={14} /> Cancel
+              </button>
+            )}
             <Menu
               items={[
                 { heading: "Actions" },

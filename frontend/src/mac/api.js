@@ -87,8 +87,10 @@ export const api = {
   investigate: (runId, mode) => call("POST", `/runs/${enc(runId)}/investigate`, mode ? { mode } : {}),
   approveFix: (runId) => call("POST", `/runs/${enc(runId)}/approve-fix`),
 
-  // What this deployment has configured (names only): { llm, model, github, jira, confluence, aws, approvals_live }
+  // What this deployment has configured (names only): { llm, model, llm_provider, llm_providers, github, jira, confluence, aws, approvals_live }
   health: () => call("GET", "/health"),
+  // The model switch (Nemotron / Grok): every agent uses the chosen one from its next call; returns health
+  setLlm: (provider) => call("POST", "/settings/llm", { provider }),
   // Every deployed endpoint across every pipeline, for the Services tab
   activeServices: () => call("GET", "/services/active"),
   // Repositories added by URL (an agent checks the licence) and the Confluence door's "create page"
