@@ -29,6 +29,8 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 # Migrations the API lists (MAC_MIGRATIONS_DIR). Later this will be the mac-migrations repo.
 COPY examples/ examples/
+# The company knowledge base: the AI help cites it when explaining a failure.
+COPY demo-data/ demo-data/
 COPY --from=frontend /app/frontend/dist frontend/dist
 WORKDIR /app/backend
 EXPOSE 8080
