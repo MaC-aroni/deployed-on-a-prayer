@@ -60,6 +60,12 @@ export const api = {
   plans: () => call("GET", "/plans"),
   planDetail: (runId) => call("GET", `/plans/${enc(runId)}`),
   startOnPlan: (runId, mode, body = {}) => call("POST", `/plans/${enc(runId)}/${mode}`, body),
+  // Learn a repository nobody documented: writes a knowledge page, merges the graph, raises a review ticket
+  learn: (repo) => call("POST", "/learn", { repo }),
+  knowledge: (page) => call("GET", `/knowledge/${enc(page)}`),
+  // The Diagnostician on a failed run, and the person's approval that turns its fix into a PR
+  investigate: (runId, mode) => call("POST", `/runs/${enc(runId)}/investigate`, mode ? { mode } : {}),
+  approveFix: (runId) => call("POST", `/runs/${enc(runId)}/approve-fix`),
 
   // Sign-in: { login, required, available, repo }
   me: () => call("GET", "/auth/me"),
@@ -87,7 +93,7 @@ export function follow(runId, after, onEvent, onEnd, onStatus = () => {}) {
   const source = new EventSource(`/api/mac/runs/${enc(runId)}/stream?${query}`);
   source.onopen = () => onStatus("on");
   source.onerror = () => onStatus(source.readyState === EventSource.CLOSED ? "off" : "retry");
-  for (const kind of ["log", "step", "run", "diagnosis"]) {
+  for (const kind of ["log", "step", "run", "diagnosis", "agent", "approval", "failure"]) {
     source.addEventListener(kind, (e) => onEvent(JSON.parse(e.data)));
   }
   source.addEventListener("end", () => {
@@ -137,4 +143,14 @@ export function githubUrl(repo, shas, path) {
 export function shortSha(repo, shas) {
   const sha = shas?.[repoKey(repo)];
   return sha ? sha.slice(0, 7) : null;
+}
+
+// An `agent` event's message is JSON: { agent, parent?, role?, model?, phase, text, status? }.
+export function parseAgent(ev) {
+  if (ev?.kind !== "agent") return null;
+  try {
+    return { ...JSON.parse(ev.message), seq: ev.seq, ts: ev.ts, step: ev.step };
+  } catch {
+    return null;
+  }
 }

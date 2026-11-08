@@ -293,3 +293,43 @@ export const MIGRATIONS = [
     stages: ["succeeded", "succeeded", "succeeded", "approved", "succeeded", "rolled_back", "succeeded"],
   },
 ];
+
+// ---- The agent view's pitch replay: a mock Learn run (/agents/demo) ----------------------------
+// Shaped like the API's events (kind "agent", message JSON; docs/planning-api.md).
+
+const T0 = Math.floor(Date.now() / 1000) - 90;
+const agentEvent = (seq, step, data) => ({ run_id: "demo", seq, ts: T0 + seq * 4, step, kind: "agent", message: JSON.stringify(data) });
+
+export const DEMO_AGENT_RUN = {
+  id: "demo",
+  mode: "ingest",
+  migration: "knowledge/eligibility-sync",
+  status: "running",
+  active: true,
+  created: T0,
+  updated: T0,
+  report: { page: null, ticket: "MAC-21", ticket_url: "#" },
+};
+
+const PAGES = ["00-handbook", "10-landing-zone", "11-terraform", "12-naming", "13-lambda", "20-mcp-access", "30-data-migration", "50-claims-service"];
+
+export const DEMO_AGENT_EVENTS = [
+  agentEvent(1, "knowledge", { agent: "director", role: "Director", model: SUPER, phase: "observation", status: "running", text: "MaC-aroni/eligibility-sync has no page in the 15-page knowledge base; nothing in the graph names it" }),
+  agentEvent(2, "knowledge", { agent: "director", phase: "reasoning", text: "a Reader compresses the repository; one Reader per Confluence page re-reads the standards it must follow; References cross-checks names; the Compiler writes the page and raises a review ticket, because a generated page is a draft until a person signs it off" }),
+  agentEvent(3, "knowledge", { agent: "director", phase: "action", text: "dispatching Reader, 8 page Readers and References" }),
+  agentEvent(4, "knowledge", { agent: "reader", role: "Repository reader", parent: "director", model: NANO, phase: "action", status: "running", text: "reading eligibility-sync: README, 41 files, Python" }),
+  ...PAGES.map((p, i) => agentEvent(5 + i, "knowledge", { agent: `reader:${p}`, role: "Reader", parent: "director", model: NANO, phase: "observation", status: "pending", text: `will read “${p}”` })),
+  agentEvent(13, "knowledge", { agent: "reader", parent: "director", phase: "observation", text: "README 2.1k chars · nightly cron · writes CLAIMS_DB.ELIGIBILITY (PHI)" }),
+  agentEvent(14, "knowledge", { agent: "reader", parent: "director", phase: "outcome", status: "succeeded", text: "it is EligibilitySyncService: syncs member eligibility from MemberDB into CLAIMS_DB nightly" }),
+  ...PAGES.flatMap((p, i) => [
+    agentEvent(15 + i * 2, "knowledge", { agent: `reader:${p}`, parent: "director", phase: "action", status: "running", text: `compressing ${p} into cited facts` }),
+    agentEvent(16 + i * 2, "knowledge", { agent: `reader:${p}`, parent: "director", phase: "outcome", status: "succeeded", text: "facts extracted, every one cited to a section" }),
+  ]),
+  agentEvent(31, "knowledge", { agent: "references", role: "References", parent: "director", phase: "action", status: "running", text: "searching 15 pages and the graph for eligibility-sync" }),
+  agentEvent(32, "knowledge", { agent: "references", parent: "director", phase: "observation", text: "“Data migration standard” names CLAIMS_DB.ELIGIBILITY; the DBA sign-off policy applies to it" }),
+  agentEvent(33, "knowledge", { agent: "references", parent: "director", phase: "outcome", status: "succeeded", text: "2 pages mention it; the graph has no node yet; approvals: dba_db_migration applies" }),
+  agentEvent(34, "knowledge", { agent: "compiler", role: "Compiler", parent: "director", model: SUPER, phase: "action", status: "running", text: "writing “Services: EligibilitySyncService” and merging 9 facts into the graph" }),
+  agentEvent(35, "knowledge", { agent: "compiler", parent: "director", phase: "reasoning", text: "a new page needs a reviewer: raising MAC-21 for claims-platform with the unknowns listed" }),
+  agentEvent(36, "knowledge", { agent: "compiler", parent: "director", phase: "outcome", status: "succeeded", text: "page generated-eligibility-sync written, 9 facts merged, review ticket MAC-21" }),
+  agentEvent(37, "knowledge", { agent: "director", phase: "outcome", status: "succeeded", text: "EligibilitySyncService learned from MaC-aroni/eligibility-sync; a person reviews the page next" }),
+];

@@ -618,9 +618,12 @@ a.pill-link:hover {
 }
 
 /* ---------- status icon (ring glyph), and its dot form in compact places ---------- */
-.status {
+/* defaults at zero specificity, so the .tone-* classes always win */
+:where(.status) {
   --tone: var(--faint);
   --tone-soft: var(--grey-soft);
+}
+.status {
   position: relative;
   width: var(--s);
   height: var(--s);
@@ -2089,4 +2092,230 @@ a.row-title:hover {
   stroke: var(--bad);
   stroke-dasharray: 4 4;
   opacity: 0.8;
+}
+
+
+/* ---------- prominent Build items ---------- */
+.nav-item.primary {
+  height: 56px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 2px 0;
+}
+.nav-item.primary:hover {
+  background: #30323f;
+}
+.nav-item.primary.active {
+  background: #33314a;
+}
+.nav-item.primary.active::before {
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+}
+.nav-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+  flex: 1;
+}
+.nav-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-count {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+}
+.nav-count.zero {
+  background: var(--surface);
+  color: var(--faint);
+}
+.shell.collapsed .nav-hint,
+.shell.collapsed .nav-count {
+  display: none;
+}
+
+/* ---------- the working-agent icon ---------- */
+.agent-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--s);
+  height: var(--s);
+  flex: none;
+  border-radius: 50%;
+  background: transparent;
+}
+.agent-icon img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+}
+.agent-icon.clickable {
+  cursor: pointer;
+  transition: transform var(--t), box-shadow var(--t);
+}
+.agent-icon.clickable:hover,
+.agent-icon.clickable:focus-visible {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 3px rgba(46, 230, 197, 0.25);
+  outline: 0;
+}
+.node .agent-icon {
+  --s: 26px !important;
+  margin: -2px 0;
+}
+.pill .agent-icon {
+  --s: 16px !important;
+}
+
+/* ---------- breakpoints ---------- */
+.node.breakpoint {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+.node.breakpoint.selected {
+  box-shadow: inset 3px 0 0 var(--warn), inset 0 0 0 1.5px var(--accent);
+}
+.breakpoint-mark {
+  color: var(--warn);
+}
+
+/* ---------- two doors: Confluence · GitHub ---------- */
+.doors {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+.doors .door {
+  height: 36px;
+  padding: 0 12px;
+  background: var(--surface-2);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.doors .door:hover {
+  background: #363848;
+}
+.doors .door[aria-disabled] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.doors .door-learn {
+  color: var(--accent-2);
+}
+.doors.lg {
+  width: 100%;
+  margin-top: 4px;
+}
+.doors.lg .door {
+  flex: 1;
+  height: 40px;
+  justify-content: center;
+}
+.repo-row .doors .door {
+  pointer-events: auto;
+}
+.repos-table .tr {
+  grid-template-columns: minmax(0, 1.5fr) 140px minmax(0, 1fr) auto;
+}
+.repos-table .cell-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.repos-table .row-action {
+  width: 150px;
+}
+.chip-link {
+  color: var(--muted);
+}
+.chip-link:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+/* ---------- empty pipelines ---------- */
+.empty-pipelines {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 40px 28px !important;
+}
+.empty-pipelines strong {
+  font-size: 15px;
+}
+
+/* ---------- agent view ---------- */
+.agent-trace {
+  padding: 20px 24px;
+}
+.agent-trace .trace-line {
+  grid-template-columns: 90px 1fr auto;
+}
+.trace-time {
+  padding-top: 2px;
+}
+.fix-card {
+  margin-top: 20px;
+}
+.fix-card .card-body strong {
+  color: var(--fg);
+}
+.investigation {
+  margin-top: 4px;
+}
+
+/* ---------- knowledge page ---------- */
+.knowledge-page {
+  max-width: 900px;
+  padding: 28px 32px;
+  line-height: 1.65;
+  font-size: 14px;
+}
+.knowledge-page h2 {
+  font-size: 16px;
+  margin: 24px 0 8px;
+}
+.knowledge-page h2:first-child {
+  margin-top: 0;
+}
+.knowledge-page h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 20px 0 6px;
+}
+.knowledge-page ul {
+  padding-left: 20px;
+  margin: 6px 0 12px;
+}
+.knowledge-page p {
+  margin: 0 0 10px;
+}
+.knowledge-page code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
 }

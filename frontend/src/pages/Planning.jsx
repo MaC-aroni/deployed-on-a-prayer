@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ExternalLink, RotateCw, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, ExternalLink, RotateCw, Sparkles } from "lucide-react";
 import Dag from "../components/Dag.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
@@ -14,6 +14,7 @@ import { cx } from "../lib.js";
 function stateOf(step, evs, active) {
   const mine = evs.filter((e) => e.step === step && e.kind === "step");
   const last = mine.at(-1)?.message ?? "";
+  if (step === "detect") return mine.length ? "succeeded" : active ? "running" : "skipped";
   if (step === "knowledge") {
     if (/failed/.test(last)) return "failed";
     if (/graph loaded|facts/.test(last)) return "succeeded";
@@ -40,6 +41,7 @@ function subOf(step, evs) {
     if (problems) return `${problems} problem${problems === 1 ? "" : "s"} sent back to the model`;
     return text || "waiting";
   }
+  if (step === "detect") return text || "looking for a migration.yaml";
   return text || (step === "knowledge" ? "Confluence pages → graph" : "migration.yaml");
 }
 
@@ -104,18 +106,26 @@ export default function Planning({ runId }) {
       aside: <Sparkles size={14} className="nemotron" />,
     }));
     const k = stateOf("knowledge", events, active);
+    const d = stateOf("detect", events, active);
     const p = stateOf("plan", events, active);
-    return [
-      { id: "knowledge", name: "Knowledge", status: k, steps: [{ id: "knowledge", name: "Knowledge graph", sub: subOf("knowledge", events), status: k, agent: true, aside: <Sparkles size={14} className="nemotron" /> }] },
-      { id: "planner", name: "Nemotron planner", status: attemptSteps.at(-1)?.status ?? "pending", steps: attemptSteps },
-      { id: "plan", name: "Plan", status: p, steps: [{ id: "plan", name: "migration.yaml", sub: subOf("plan", events), status: p }] },
+    const detected = Boolean(run?.report?.detected) || /found reviewed/.test(subOf("detect", events));
+    const cols = [
+      { id: "detect", name: "Detect", status: d, steps: [{ id: "detect", name: "migration.yaml?", sub: subOf("detect", events), status: d, agent: true, aside: <Sparkles size={14} className="nemotron" /> }] },
     ];
-  }, [attempts, events, active]);
+    if (!detected) {
+      cols.push(
+        { id: "knowledge", name: "Knowledge", status: k, steps: [{ id: "knowledge", name: "Knowledge graph", sub: subOf("knowledge", events), status: k, agent: true, aside: <Sparkles size={14} className="nemotron" /> }] },
+        { id: "planner", name: "Nemotron planner", status: attemptSteps.at(-1)?.status ?? "pending", steps: attemptSteps },
+      );
+    }
+    cols.push({ id: "plan", name: "Pipeline", status: p, steps: [{ id: "plan", name: detected ? "reviewed migration.yaml" : "migration.yaml", sub: subOf("plan", events), status: p }] });
+    return cols;
+  }, [attempts, events, active, run?.report?.detected]);
 
   const edges = useMemo(() => {
-    const chain = ["knowledge", ...(attempts.length ? attempts : ["attempt-1"]), "plan"];
-    return chain.slice(1).map((to, i) => ({ from: chain[i], to }));
-  }, [attempts]);
+    const ids = columns.flatMap((c) => c.steps.map((s) => s.id));
+    return ids.slice(1).map((to, i) => ({ from: ids[i], to }));
+  }, [columns]);
 
   const selectedLines = events.filter((e) => e.step === selected);
   useEffect(() => {
@@ -140,6 +150,8 @@ export default function Planning({ runId }) {
   const meta = runMeta(run.status, run.mode);
   const goal = (run.migration ?? "").replace(/^plan\//, "").replaceAll("-", " ");
   const report = run.report ?? {};
+  const pipeline = report.detected ? `/migrations/${encodeURIComponent(report.detected)}` : `/plans/${run.id}`;
+  const pipelineHref = report.build_run ? `${pipeline}?run=${report.build_run}` : pipeline;
 
   return (
     <>
@@ -153,7 +165,9 @@ export default function Planning({ runId }) {
           <div className="run-meta">
             <span className="mono">run {run.id}</span>
             <span>{fmtTime(run.created)}</span>
-            {report.iterations && <span>{report.iterations} attempt{report.iterations === 1 ? "" : "s"}</span>}
+            {report.iterations > 0 && <span>{report.iterations} attempt{report.iterations === 1 ? "" : "s"}</span>}
+            {report.detected && <span>reviewed migration.yaml found</span>}
+            {report.build_run && <span className="mono">Build {report.build_run} started</span>}
             {run.reason && (
               <span className="run-reason" title={run.reason}>
                 {run.reason}
@@ -162,6 +176,9 @@ export default function Planning({ runId }) {
           </div>
         </div>
         <div className="run-actions">
+          <Link to={`/agents/${run.id}`} className="btn" title="Every agent this run launched">
+            <Bot size={14} /> Agents
+          </Link>
           {report.pr_url && (
             <a className="btn" href={report.pr_url} target="_blank" rel="noreferrer">
               Pull request <ExternalLink size={13} />
@@ -173,15 +190,15 @@ export default function Planning({ runId }) {
             </button>
           )}
           {run.status === "succeeded" && (
-            <Link to={`/plans/${run.id}`} className="btn btn-primary">
-              Open pipeline <ArrowRight size={14} />
+            <Link to={pipelineHref} className="btn btn-primary">
+              {report.build_run ? "Open pipeline · Build running" : "Open pipeline"} <ArrowRight size={14} />
             </Link>
           )}
         </div>
       </div>
 
       <div className="dag-frame">
-        <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} />
+        <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} onAgent={() => navigate(`/agents/${runId}`)} />
       </div>
 
       {selected && (

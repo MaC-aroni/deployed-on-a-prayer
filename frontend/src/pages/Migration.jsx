@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ExternalLink, FlaskConical, Hammer, Hand, Lock, Play, Rocket, RotateCw, Sparkles, Undo2 } from "lucide-react";
+import { Bot, ExternalLink, FlaskConical, Hammer, Lock, Pause, Play, Rocket, RotateCw, Sparkles, Stethoscope, Undo2 } from "lucide-react";
 import Menu from "../components/Menu.jsx";
 import Dag from "../components/Dag.jsx";
+import FixCard from "../components/FixCard.jsx";
 import { Confirm, EmptyState, useAuth } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import StepInspector from "../components/StepInspector.jsx";
 import { api, fmtAgo, fmtTime, follow, shortRepo, sourceApi } from "../mac/api.js";
-import { Link } from "../router.jsx";
+import { Link, navigate } from "../router.jsx";
 import { MODE_LABEL, STATUS, runMeta } from "../status.js";
 import { cx } from "../lib.js";
 
@@ -29,10 +30,10 @@ function aggregate(states) {
 }
 
 function Aside({ step, state }) {
-  if (state === "waiting") return <Play size={14} className="nemotron" />;
+  if (state === "waiting") return <Play size={14} className="breakpoint-mark" title="Breakpoint: waiting for you to continue" />;
   if (step.codegen === "llm") return <Bot size={14} className="nemotron" title="AI writes this step" />;
   if (state === "blocked" || (step.requires_approval?.length && state === "pending")) return <Lock size={14} />;
-  if (step.when === "manual") return <Hand size={14} />;
+  if (step.when === "manual") return <Pause size={14} className="breakpoint-mark" title="Breakpoint: the pipeline pauses here until someone continues" />;
   if (state === "failed" || state === "rolled_back") return <RotateCw size={14} />;
   return null;
 }
@@ -202,6 +203,8 @@ export default function Migration({ source, initialRun }) {
           name: st.id,
           sub: `${st.type} · ${st.entrypoint ?? st.path ?? shortRepo(st.repo)}`,
           status: stateOf(st.id),
+          breakpoint: st.when === "manual",
+          agent: st.codegen === "llm",
           aside: <Aside step={st} state={stateOf(st.id)} />,
         })),
       })),
@@ -239,9 +242,19 @@ export default function Migration({ source, initialRun }) {
   const openApprovals = mig.approvals.filter((a) => approvalStatus(reportRun, a.id)?.status !== "approved").length;
   const generated = mig.source === "generated";
   const waitingStep = run?.status === "waiting" ? Object.entries(run.steps ?? {}).find(([, st]) => st === "waiting")?.[0] : null;
+  const broke = run && !run.active && (run.status === "failed" || run.status === "rollback_failed") && run.failed_step;
+  const investigation = broke ? runs.find((r) => r.mode === "diagnose" && r.based_on === run.id) : null;
+  const investigate = () =>
+    act("Investigation", async () => {
+      const r = await api.investigate(run.id, ai);
+      navigate(`/agents/${r.id}`);
+      return null;
+    });
   const primary = waitingStep
-    ? { label: `Run ${waitingStep}`, icon: <Play size={14} />, onClick: () => play(waitingStep), title: "Press play on the manual step" }
-    : canDeploy
+    ? { label: `Continue · ${waitingStep}`, icon: <Play size={14} />, onClick: () => play(waitingStep), title: "Breakpoint: the pipeline waits here until you continue" }
+    : broke && !investigation
+      ? { label: "Investigate", icon: <Stethoscope size={14} />, onClick: investigate, title: "Launch the Diagnostician: root cause, proposed fix, approval ticket" }
+      : canDeploy
       ? { label: "Deploy", icon: <Rocket size={14} />, onClick: () => setConfirming("deploy"), title: "Run in production with the rehearsed commits" }
       : canRehearse
         ? { label: "Rehearse", icon: <FlaskConical size={14} />, onClick: () => setConfirming("rehearse"), title: "Run everything in the rehearsal environment, then undo it" }
@@ -310,6 +323,7 @@ export default function Migration({ source, initialRun }) {
                 { label: "Rehearse", detail: canRehearse ? "rehearsal env, undone after" : "needs a passing Build", hint: !canRehearse, icon: <FlaskConical size={14} />, onClick: () => setConfirming("rehearse") },
                 { label: "Deploy", detail: canDeploy ? "production" : "needs a passing Rehearse", hint: !canDeploy, icon: <Rocket size={14} />, onClick: () => setConfirming("deploy") },
                 ...(run?.status === "waiting" ? [{ label: "Check approvals", detail: "ask Jira again", icon: <Play size={14} />, onClick: () => act("Check approvals", () => api.resume(run.id)) }] : []),
+                ...(broke ? [{ label: investigation ? "Investigate again" : "Investigate", detail: `Diagnostician on ${run.failed_step}`, icon: <Stethoscope size={14} />, onClick: investigate }] : []),
                 ...(run && (run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded")) ? [{ label: "Undo this run", danger: true, icon: <Undo2 size={14} />, onClick: () => act("Undo", () => api.undo(run.id)) }] : []),
               ]}
               footer={
@@ -357,8 +371,10 @@ export default function Migration({ source, initialRun }) {
       {tab === "pipeline" && (
         <>
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} failedId={run?.failed_step ?? null} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} failedId={run?.failed_step ?? null} onAgent={() => run && navigate(`/agents/${run.id}`)} />
           </div>
+
+          {investigation && <InvestigationCard id={investigation.id} onChanged={refresh} locked={locked} />}
 
           {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} approvals={mig.approvals} report={reportRun?.report} onPlay={play} onClose={() => setSelected(null)} busy={busy || locked} />}
         </>
@@ -459,6 +475,7 @@ export default function Migration({ source, initialRun }) {
                 key={r.id}
                 className={cx("tr row-btn", { selected: r.id === runId })}
                 onClick={() => {
+                  if (r.mode === "diagnose") return navigate(`/agents/${r.id}`);
                   chosen.current = true;
                   setRunId(r.id);
                   setTab("pipeline");
@@ -488,6 +505,53 @@ export default function Migration({ source, initialRun }) {
         </div>
       )}
     </>
+  );
+}
+
+// The Diagnostician's result for the shown failed run, with the approval button. Follows the
+// investigation while it runs.
+function InvestigationCard({ id, onChanged, locked }) {
+  const [diag, setDiag] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    let stop = () => {};
+    api
+      .run(id)
+      .then((r) => {
+        if (!alive) return;
+        setDiag(r);
+        if (r.active) stop = follow(id, 0, () => {}, () => alive && api.run(id).then((nr) => alive && (setDiag(nr), onChanged())).catch(() => {}));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [id, onChanged]);
+  if (!diag) return null;
+  async function approve() {
+    setBusy(true);
+    setErr(null);
+    try {
+      setDiag(await api.approveFix(id));
+    } catch (e) {
+      setErr(e.detail ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="investigation">
+      <FixCard run={diag} onApprove={approve} busy={busy} locked={locked} />
+      <div className="toolbar" style={{ marginTop: 8 }}>
+        <Link to={`/agents/${id}`} className="link">
+          <Bot size={13} /> Open the agent view
+        </Link>
+        {err && <span className="small" style={{ color: "var(--bad)" }}>{err}</span>}
+      </div>
+    </div>
   );
 }
 

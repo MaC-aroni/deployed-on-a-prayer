@@ -6,6 +6,7 @@ import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { APPROVALS, NOW, RUN, STAGES, STEPS, STEP_BY_ID, TRACES, durationAt, runStatusAt, stageStatusAt, statusAt } from "../data/mock.js";
 import { RUN_STATUS, STATUS } from "../status.js";
 import { cx, fmtClock, fmtDuration } from "../lib.js";
+import { navigate } from "../router.jsx";
 
 // Pitch rehearsal page: the brief's frozen snapshot (smoke test failed → rollback → Diagnostician
 // mid-fix) on mock data, with Nemotron reasoning traces. The live console is under Migrations.
@@ -99,7 +100,7 @@ export default function Demo() {
       <div className="run-head">
         <div className="run-head-main">
           <Pill tone={rs.tone} className="pill-lg">
-            <StatusIcon status={rs.icon} size={16} agent={status === "recovering"} />
+            <StatusIcon status={rs.icon} size={16} agent={status === "recovering"} onAgent={() => navigate("/agents/demo")} />
             {rs.label}
           </Pill>
           <h1>{RUN.title}</h1>
@@ -157,7 +158,7 @@ export default function Demo() {
           </div>
 
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} failedId={failedId} onAgent={() => navigate("/agents/demo")} />
           </div>
 
           {step && <NodeDrawer step={step} t={t} onClose={() => setSelected(null)} />}

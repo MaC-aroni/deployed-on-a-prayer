@@ -35,7 +35,7 @@ function edgePath(a, b, sameColumn) {
   return `M${x},${y1} C${bulge},${y1} ${bulge},${y2} ${x},${y2}`;
 }
 
-export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, emptyHint, failedId = null }) {
+export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, emptyHint, failedId = null, onAgent }) {
   const outerRef = useRef(null);
   const canvasRef = useRef(null);
   const nodeEls = useRef(new Map());
@@ -74,7 +74,8 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
     nodeEls.current.forEach((el, id) => {
       if (el) boxes[id] = { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
     });
-    setGeo({ w: canvas.scrollWidth, h: canvas.scrollHeight, boxes });
+    // offset*, not scroll*: the absolutely positioned edge layer keeps the old size until this runs
+    setGeo({ w: canvas.offsetWidth, h: canvas.offsetHeight, boxes });
     if (outerRef.current) setAvail(outerRef.current.clientWidth);
   }, []);
 
@@ -124,12 +125,12 @@ export default function Dag({ columns, edges, selectedId, onSelect, showDeps = t
                     key={step.id}
                     type="button"
                     ref={(el) => nodeEls.current.set(step.id, el)}
-                    className={cx("node", `is-${step.status}`, { selected: step.id === selectedId, dim, agent: step.agent, broke: step.id === failedId, after: broken.has(step.id) && step.id !== failedId && (step.status === "pending" || step.status === "skipped") })}
+                    className={cx("node", `is-${step.status}`, { selected: step.id === selectedId, dim, agent: step.agent, breakpoint: step.breakpoint, broke: step.id === failedId, after: broken.has(step.id) && step.id !== failedId && (step.status === "pending" || step.status === "skipped") })}
                     onClick={() => onSelect?.(step.id)}
                     onMouseEnter={() => setHover(step.id)}
                     onMouseLeave={() => setHover(null)}
                   >
-                    <StatusIcon status={step.status} size={26} agent={step.agent} />
+                    <StatusIcon status={step.status} size={26} agent={step.agent} onAgent={onAgent && (() => onAgent(step.id))} />
                     <span className="node-text">
                       <span className="node-name">{step.name}</span>
                       {step.sub && <span className="node-sub">{step.sub}</span>}

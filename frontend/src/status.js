@@ -35,15 +35,25 @@ export const RUN_STATUS = {
 };
 
 // Plan and ingest runs have nothing to roll back: a cut-off one is just interrupted.
-const AGENT_MODES = new Set(["plan", "ingest"]);
+export const AGENT_MODES = new Set(["plan", "ingest", "diagnose"]);
+
+const AGENT_DONE = { plan: "Plan ready", ingest: "Learned", diagnose: "Fix proposed" };
+const AGENT_BUSY = { plan: "Planning", ingest: "Learning", diagnose: "Investigating" };
 
 export function runMeta(status, mode) {
   if (AGENT_MODES.has(mode)) {
     if (status === "rollback_failed") return { label: "Interrupted", tone: "red", icon: "failed" };
-    if (status === "succeeded") return { label: mode === "plan" ? "Plan ready" : "Ingested", tone: "green", icon: "succeeded" };
-    if (status === "running") return { label: mode === "plan" ? "Planning" : "Ingesting", tone: "violet", icon: "running" };
+    if (status === "succeeded") return { label: AGENT_DONE[mode], tone: "green", icon: "succeeded" };
+    if (status === "running") return { label: AGENT_BUSY[mode], tone: "violet", icon: "running" };
   }
   return RUN_STATUS[status] ?? RUN_STATUS.none;
 }
 
-export const MODE_LABEL = { build: "Build", rehearse: "Rehearse", deploy: "Deploy", plan: "Plan", ingest: "Ingest" };
+export const MODE_LABEL = { build: "Build", rehearse: "Rehearse", deploy: "Deploy", plan: "Plan", ingest: "Learn", diagnose: "Investigate" };
+
+// Agent runs are followed on the agents page, not the pipeline.
+export function runHref(run) {
+  if (!run) return "/runs";
+  if (AGENT_MODES.has(run.mode)) return run.mode === "plan" ? `/migrate/${run.id}` : `/agents/${run.id}`;
+  return `/migrations/${encodeURIComponent(run.migration)}?run=${run.id}`;
+}

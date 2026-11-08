@@ -1,6 +1,8 @@
 import "./styles.css";
 import Shell, { EmptyState } from "./components/Shell.jsx";
+import Agents from "./pages/Agents.jsx";
 import Demo from "./pages/Demo.jsx";
+import Knowledge from "./pages/Knowledge.jsx";
 import Migrate from "./pages/Migrate.jsx";
 import Migration from "./pages/Migration.jsx";
 import Migrations from "./pages/Migrations.jsx";
@@ -45,8 +47,22 @@ function Routes() {
   }
   if (path === "/migrate") {
     return (
-      <Shell crumbs={[ORG, { label: "Migrate" }]}>
+      <Shell crumbs={[ORG, { label: "Migration" }]}>
         <Migrate />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/agents/:runId", path))) {
+    return (
+      <Shell crumbs={[ORG, { label: m.runId === "demo" ? "Agents · demo" : `agents ${m.runId}` }]}>
+        <Agents key={m.runId} runId={m.runId} />
+      </Shell>
+    );
+  }
+  if ((m = matchPath("/knowledge/:pageId", path))) {
+    return (
+      <Shell crumbs={[ORG, { label: "Knowledge", to: "/migrate" }, { label: m.pageId }]}>
+        <Knowledge key={m.pageId} pageId={m.pageId} />
       </Shell>
     );
   }
@@ -81,7 +97,7 @@ function Routes() {
   }
   return (
     <Shell crumbs={[ORG, { label: "Not found" }]}>
-      <EmptyState title="Not found" body="Try Build → Migrate, or Pipelines." />
+      <EmptyState title="Not found" body="Try Build → Migration, or Pipelines." />
     </Shell>
   );
 }

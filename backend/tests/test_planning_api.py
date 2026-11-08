@@ -108,7 +108,7 @@ def test_plan_shows_each_attempt_writes_the_file_and_lists_it(api):
     bad = DEMO_TEXT.replace("github.com/MaC-aroni/claims-service-iac", "github.com/someone/random-repo")
     holder["llm"] = ScriptedLLM(f"```yaml\n{bad}\n```", f"```yaml\n{DEMO_TEXT}\n```")
 
-    res = client.post("/api/mac/plan", json={"service": SERVICE})
+    res = client.post("/api/mac/plan", json={"service": SERVICE, "reuse": False})
     assert res.status_code == 202, res.text
     run_id = res.json()["id"]
     run = client.get(f"/api/mac/runs/{run_id}").json()
@@ -166,7 +166,7 @@ def test_build_runs_on_a_generated_plan(api):
     client, env, holder = api
     demo_graph().save(env.runner.data_dir / "graph.json")
     holder["llm"] = ScriptedLLM(f"```yaml\n{DEMO_TEXT}\n```")
-    plan_id = client.post("/api/mac/plan", json={"service": SERVICE}).json()["id"]
+    plan_id = client.post("/api/mac/plan", json={"service": SERVICE, "reuse": False}).json()["id"]
 
     res = client.post(f"/api/mac/plans/{plan_id}/build", json={})
     assert res.status_code == 202, res.text
@@ -179,3 +179,127 @@ def test_build_runs_on_a_generated_plan(api):
     env.runner.store  # noqa: B018 - the same store the runner API uses
     second = client.post(f"/api/mac/plans/{plan_id}/deploy", json={})
     assert second.status_code == 409
+
+
+NAME = "claims-adjudication-onprem-to-aws"
+FAKE_REPO = {"description": "Nightly eligibility sync from the member system", "language": "Python",
+             "url": "https://github.com/MaC-aroni/eligibility-sync", "default_branch": "main",
+             "readme": "# eligibility-sync\nPulls member eligibility from MemberDB nightly and writes CLAIMS_DB.ELIGIBILITY.",
+             "files": ["sync.py", "requirements.txt", "deploy/cron.yaml"]}
+LEARNED = json.dumps({"name": "EligibilitySyncService", "summary": "Syncs member eligibility into CLAIMS_DB nightly.",
+                      "what_it_does": ["reads MemberDB", "writes CLAIMS_DB.ELIGIBILITY"], "runtime": ["Python 3 cron job"],
+                      "data": ["CLAIMS_DB.ELIGIBILITY (PHI)"], "dependencies": ["MemberDB", "ClaimsAdjudicationService"],
+                      "owner": "claims-platform", "unknowns": ["who owns MemberDB"]})
+
+
+def agent_events(client, run_id):
+    return [json.loads(e["message"]) | {"step": e["step"]} for e in events(client, run_id) if e["kind"] == "agent"]
+
+
+def test_learn_writes_a_reviewed_page_merges_the_graph_and_raises_a_ticket(api):
+    client, env, holder = api
+    extracted = json.dumps({"nodes": [{"type": "service", "name": "EligibilitySyncService", "description": "Syncs eligibility", "sources": ["S1"]},
+                                      {"type": "repo", "name": "MaC-aroni/eligibility-sync", "sources": ["S1"]}],
+                            "edges": [{"from": "EligibilitySyncService", "to": "MaC-aroni/eligibility-sync", "type": "has_repo", "sources": ["S1"]}]})
+    holder["llm"] = ScriptedLLM(LEARNED, extracted)  # Reader, then the Compiler's extract
+    planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: FAKE_REPOS + [{"name": "eligibility-sync", "full_name": "MaC-aroni/eligibility-sync", "url": FAKE_REPO["url"], "description": FAKE_REPO["description"], "pushed_at": 1.0, "archived": False}],
+                                                 repo_reader=lambda slug: FAKE_REPO))
+    res = client.post("/api/mac/learn", json={"repo": "eligibility-sync"})
+    assert res.status_code == 202, res.text
+    run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert run["mode"] == "ingest" and run["migration"] == "knowledge/eligibility-sync"
+    assert run["status"] == "succeeded", run["reason"]
+    rep = run["report"]
+    assert rep["service"] == "EligibilitySyncService" and rep["page"] == "generated-eligibility-sync"
+    assert rep["ticket"] == "MAC-1" and rep["ticket_url"].endswith("MAC-1")
+    [ticket] = env.approvals.raised
+    assert ticket.summary == "Review generated knowledge page: EligibilitySyncService" and "knowledge-review" in ticket.labels
+    page = (env.runner.data_dir / "knowledge" / "generated-eligibility-sync.md").read_text(encoding="utf-8")
+    assert "labels:\n- service\n- generated\n- needs-review" in page and "MaC-aroni/eligibility-sync" in page
+    assert "who owns MemberDB" in page
+
+    # The hierarchy: a Director, its Reader, References and Compiler, each with an outcome.
+    agents = agent_events(client, run["id"])
+    assert {a["agent"] for a in agents} == {"director", "reader", "references", "compiler"}
+    assert all(a.get("parent") == "director" for a in agents if a["agent"] != "director")
+    assert [a["phase"] for a in agents if a["agent"] == "reader"][-1] == "outcome"
+    assert any(a["agent"] == "compiler" and a["status"] == "succeeded" and "MAC-1" in a["text"] for a in agents)
+
+    # The Migrate page now lists the service as generated, under review, with its repo matched.
+    data = client.get("/api/mac/services").json()
+    svc = by_name(data["services"], "EligibilitySyncService")
+    assert svc["generated"] is True and svc["review"]["ticket"] == "MAC-1" and svc["learned"] is True
+    assert svc["repos"] == ["MaC-aroni/eligibility-sync"] and svc["team"] == "claims-platform"
+    assert data["knowledge"]["generated"] == 1
+    repo = next(r for r in data["repos"] if r["name"] == "eligibility-sync")
+    assert repo["service"] == "EligibilitySyncService" and repo["page"] == "generated-eligibility-sync"
+    page_view = client.get("/api/mac/knowledge/generated-eligibility-sync").json()
+    assert page_view["generated"] is True and page_view["review"]["ticket"] == "MAC-1" and "## Unknowns to review" in page_view["body"]
+    assert client.get("/api/mac/knowledge/nope").status_code == 404
+    assert client.post("/api/mac/learn", json={"repo": "not a repo!"}).status_code == 422
+
+
+def test_plan_detects_a_reviewed_yaml_and_can_start_build(api):
+    client, env, holder = api
+    holder["llm"] = ScriptedLLM()  # never asked
+    res = client.post("/api/mac/plan", json={"service": SERVICE, "build": True})
+    assert res.status_code == 202, res.text
+    run = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert run["status"] == "succeeded" and run["report"]["detected"] == NAME
+    assert run["report"]["iterations"] == 0 and holder["llm"].prompts == []
+    assert any(e["message"].startswith("detect: found reviewed migration.yaml") for e in events(client, run["id"], "detect"))
+    assert run["stages"] and run["stages"][0]["name"] == "check"  # the reviewed spec renders on the run
+    build = client.get(f"/api/mac/runs/{run['report']['build_run']}").json()
+    assert build["mode"] == "build" and build["migration"] == NAME and build["status"] == "succeeded", build["reason"]
+    agents = agent_events(client, run["id"])
+    assert any(a["agent"] == "detect" and a["status"] == "succeeded" for a in agents)
+    assert client.get("/api/mac/plans").json() == []  # nothing generated
+    assert by_name(client.get("/api/mac/services").json()["services"], SERVICE)["migration"] == NAME
+
+
+def test_investigate_then_approve_fix_opens_a_pull_request(api):
+    client, env, holder = api
+    env.executor.fail[("smoke_test", "run")] = "time data '01-JAN-24' does not match format"
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    failed_id = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()["id"]
+    client.post(f"/api/mac/runs/{failed_id}/steps/db_migrate/play")
+    assert client.get(f"/api/mac/runs/{failed_id}").json()["status"] == "failed"
+
+    fix = json.dumps({"root_cause": "smoke.py parses the Oracle date with the wrong format",
+                      "fix": "accept DD-MON-YY", "confidence": "high",
+                      "files": {"checks/smoke.py": "import datetime\n# fixed\n"}})
+    holder["llm"] = ScriptedLLM(fix)
+    opened = []
+    planning_api.configure(planning_api.Planning(
+        llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE, repo_lister=lambda: FAKE_REPOS,
+        code_reader=lambda slug, sha, prefix: {"checks/smoke.py": "import datetime\n", "checks/preflight.py": "ok\n"},
+        pr_opener=lambda *args: opened.append(args) or "https://github.com/MaC-aroni/claims-smoke-tests/pull/13"))
+
+    assert client.post(f"/api/mac/runs/{failed_id}/approve-fix").status_code == 409  # not an investigation
+    res = client.post(f"/api/mac/runs/{failed_id}/investigate", json={"mode": "autofix"})
+    assert res.status_code == 202, res.text
+    diag = client.get(f"/api/mac/runs/{res.json()['id']}").json()
+    assert diag["mode"] == "diagnose" and diag["based_on"] == failed_id and diag["status"] == "succeeded", diag["reason"]
+    rep = diag["report"]
+    assert rep["step"] == "smoke_test" and rep["repo"] == "MaC-aroni/claims-smoke-tests" and rep["files"] == ["checks/smoke.py"]
+    assert rep["root_cause"].startswith("smoke.py parses") and rep["ticket"] == "MAC-4" and rep["approved"] is False
+    assert diag["stages"]  # drawn on the same pipeline as the failed run
+    system, user = holder["llm"].prompts[0]
+    assert "Diagnostician" in system and "time data '01-JAN-24'" in user and "### checks/smoke.py" in user
+    agents = agent_events(client, diag["id"])
+    assert {a["agent"] for a in agents} == {"director", "logs", "code", "fixer", "compiler"}
+    assert any(e["kind"] == "diagnosis" and e["message"].startswith("root cause:") for e in events(client, diag["id"]))
+    # It shows up in the migration's run history beside the failed run.
+    assert diag["id"] in [r["id"] for r in client.get(f"/api/mac/runs?migration={NAME}").json()]
+
+    res = client.post(f"/api/mac/runs/{diag['id']}/approve-fix")
+    assert res.status_code == 202, res.text
+    assert res.json()["report"]["pr_url"].endswith("/pull/13") and res.json()["report"]["approved"] is True
+    [(slug, base, branch, files, title, body, message)] = opened
+    assert slug == "MaC-aroni/claims-smoke-tests" and base == "main" and branch == f"mac/autofix/{failed_id}"
+    assert files == {"checks/smoke.py": "import datetime\n# fixed\n"} and "Root cause" in body
+    assert client.post(f"/api/mac/runs/{diag['id']}/approve-fix").status_code == 409  # once
+    # A run that passed has nothing to investigate.
+    ok_build = client.get(f"/api/mac/runs?migration={NAME}").json()[-1]
+    assert client.post(f"/api/mac/runs/{ok_build['id']}/investigate").status_code == 409
