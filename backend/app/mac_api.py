@@ -314,6 +314,7 @@ def _execute(state: State, run_id: str) -> None:
         if run.status.active:
             # A Build only reads and plans, so there's nothing to undo; anything else may have left changes.
             status = RunStatus.FAILED if run.mode == "build" else RunStatus.ROLLBACK_FAILED
+            state.runner.settle(run, status)
             run.status, run.reason, run.next_action = status, f"runner crashed: {e}", None
             store.save(run)
             store.add_event(run_id, "run", f"{run.mode} {run.status}: {run.reason}")

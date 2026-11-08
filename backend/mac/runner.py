@@ -176,11 +176,31 @@ class Runner:
             if run.next_action is not None and run.status.active:
                 queued.append(run.id)
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK) and run.mode == "build":
+                self.settle(run)
                 self._finish(run, RunStatus.FAILED, "the runner restarted in the middle of this Build; run it again")
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK):
+                self.settle(run, RunStatus.ROLLBACK_FAILED)
                 self._finish(run, RunStatus.ROLLBACK_FAILED,
                              "the runner restarted in the middle of this run; check what it left behind")
+            elif not run.status.active and self._unsettled(run):
+                self.settle(run, run.status)  # a finished run from before this repair existed
         return queued
+
+    def _unsettled(self, run: RunRecord) -> bool:
+        return any(s in (StepState.RUNNING, StepState.PENDING, StepState.BLOCKED, StepState.WAITING)
+                   for s in run.steps.values())
+
+    def settle(self, run: RunRecord, status: RunStatus = RunStatus.FAILED) -> None:
+        """A run that died mid-work can't leave steps running or pending: the step that was running
+        is failed (or rollback_failed, if the run was undoing), and the rest were never reached."""
+        for step_id, state in run.steps.items():
+            if state == StepState.RUNNING:
+                run.steps[step_id] = StepState.ROLLBACK_FAILED if status == RunStatus.ROLLBACK_FAILED else StepState.FAILED
+                run.failed_step = run.failed_step or step_id
+                self._event(run, "step", f"{step_id}: {run.steps[step_id]}", step_id)
+            elif state in (StepState.PENDING, StepState.BLOCKED, StepState.WAITING):
+                run.steps[step_id] = StepState.SKIPPED
+        self.store.save(run)
 
     def _do_build(self, run: RunRecord, spec: Spec) -> RunRecord:
         issues = validate(spec)
