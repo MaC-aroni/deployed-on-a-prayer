@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { STEP_TYPE, absTime, approvalView, fmtDuration, githubUrl, planSummary, repoName, shortSha } from "../util.js";
+import { STEP_TYPE, absTime, fmtDuration, githubUrl, planSummary, repoName, shortSha } from "../util.js";
 import Badge from "./Badge.jsx";
 import StatusIcon from "./StatusIcon.jsx";
 
@@ -111,12 +111,9 @@ export function JobDetails({ step, run, detail, timing, events, report, onPlay, 
         {approvals.length > 0 && (
           <Row label="Waits for">
             <ul className="plain">
-              {approvals.map(({ id, a, r }) => {
-                const v = approvalView(a, r);
-                return (
-                  <li key={id}><Badge status={v.status} kind="approval" /> {id}{a && <span className="muted"> · {a.approver}</span>}{v.url && <> · <a href={v.url} target="_blank" rel="noreferrer">{v.ticket}</a></>}</li>
-                );
-              })}
+              {approvals.map(({ id, a, r }) => (
+                <li key={id}><Badge status={r?.ticket || r?.url || a?.ticket ? (r?.status || "pending") : "not_requested"} kind="approval" /> {id}{a && <span className="muted"> · {a.approver}</span>}{a?.ticket && <> · <a href={a.ticket.url} target="_blank" rel="noreferrer">{a.ticket.key}</a></>}</li>
+              ))}
             </ul>
             <div className="muted small">Only Deploy waits for approvals; Rehearse doesn't.</div>
           </Row>

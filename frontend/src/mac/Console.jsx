@@ -12,8 +12,7 @@ import RunsTab from "./components/RunsTab.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import StatusIcon from "./components/StatusIcon.jsx";
 import TopBar from "./components/TopBar.jsx";
-import { useLiveApprovals } from "./useLiveApprovals.js";
-import { MODE_LABEL, absTime, approvalView, fmtDuration, maskAccount, requestedBy, runDuration, shortSha, stepTimings, timeAgo } from "./util.js";
+import { MODE_LABEL, absTime, fmtDuration, maskAccount, requestedBy, runDuration, shortSha, stepTimings, timeAgo } from "./util.js";
 import "./console.css";
 
 const AI_MODES = [["explain", "Explain"], ["report", "Report"], ["autofix", "Auto-fix"]];
@@ -120,8 +119,6 @@ export default function Console() {
         setEvents((prev) => (prev.some((p) => p.seq === ev.seq) ? prev : [...prev, ev]));
         if (ev.kind !== "log") api.run(runId).then((full) => { setRun(full); setRunDetails((prev) => ({ ...prev, [runId]: full })); }).catch(() => {});
         if (ev.kind === "run") refresh(name, runId);
-        // An approval moved in Jira: the migration's approvals are what changed, so fetch just those.
-        if (ev.kind === "approval") api.migration(name).then(setDetail).catch(() => {});
       }, () => { setLive("off"); refresh(name, runId); }, setLive);
     }).catch(fail);
     return () => { cancelled = true; stop(); };
@@ -153,11 +150,6 @@ export default function Console() {
     const timer = live === "on" ? null : setInterval(sync, 30000);
     return () => { window.removeEventListener("focus", sync); document.removeEventListener("visibilitychange", sync); if (timer) clearInterval(timer); };
   }, [name, runId, live, refresh]);
-
-  // Approvals given in Jira show up within seconds even when no run is streaming (a finished Build's
-  // stream is closed, so it can't announce them): re-read the migration while any is outstanding.
-  const reloadApprovals = useCallback(() => { if (name) api.migration(name).then(setDetail).catch(() => {}); }, [name]);
-  useLiveApprovals(detail?.approvals, reloadApprovals);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape" && !modal) setSelected(null); };
@@ -205,7 +197,7 @@ export default function Console() {
     }
     if (modal === "deploy") {
       const reh = latest.rehearse?.id ? runDetails[latest.rehearse.id] : null;
-      const pending = detail.approvals.filter((a) => approvalView(a, build?.report?.approvals?.[a.id]).status !== "approved").map((a) => a.id);
+      const pending = detail.approvals.filter((a) => build?.report?.approvals?.[a.id]?.status !== "approved").map((a) => a.id);
       return (
         <>
           <p>Runs all <b>{count} steps</b> in <b>production</b> (AWS {detail.target.region}, account {maskAccount(detail.target.account)}), with exactly the commits the passing Rehearse used{reh ? ` (#${reh.id})` : ""}:</p>
@@ -366,7 +358,7 @@ export default function Console() {
 
               {tab === "Approvals" && (
                 <section className="panel">
-                  <ApprovalsTab detail={detail} build={build} locked={locked} onCheck={() => act(() => api.approvalsSync(name))} />
+                  <ApprovalsTab detail={detail} build={build} run={run} locked={locked} onCheck={() => act(() => api.resume(run.id))} />
                 </section>
               )}
 

@@ -16,25 +16,6 @@ export const APPROVAL_LABEL = {
   not_requested: "Not requested",
 };
 
-// One approval as the UI shows it. The live state on the approval itself (status, detail, checked,
-// from GET /migrations/{name}: the poller, the Jira webhook and Build all keep it current) wins over
-// the snapshot in a Build report, which is only as fresh as that Build. `reportEntry` is optional.
-export function approvalView(approval, reportEntry) {
-  const r = typeof reportEntry === "string" ? { status: reportEntry } : reportEntry;
-  const hasTicket = Boolean(approval?.ticket || r?.ticket || r?.url);
-  const known = approval?.status ?? r?.status;
-  let status = known;
-  if (hasTicket) status = known || "pending";
-  else if (!known || known === "pending") status = "not_requested";
-  return {
-    status,
-    detail: approval?.detail ?? r?.detail ?? null,
-    checked: approval?.checked ?? null,
-    ticket: approval?.ticket?.key ?? r?.ticket ?? null,
-    url: approval?.ticket?.url ?? r?.url ?? null,
-  };
-}
-
 // An approval still moving: not yet approved or rejected. Without a status (mock data) it isn't live.
 export function approvalOutstanding(approval) {
   return typeof approval?.status === "string" && approval.status !== "approved" && approval.status !== "rejected";
