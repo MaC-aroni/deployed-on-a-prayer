@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { Bot, Hand, Play, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot, Copy, Download, ExternalLink, Play, X } from "lucide-react";
 import StatusIcon, { Pill } from "./StatusIcon.jsx";
-import { fmtTime, repoKey, shortRepo } from "../mac/api.js";
+import { fmtTime, githubUrl, shortRepo, shortSha } from "../mac/api.js";
 import { STATUS } from "../status.js";
 import { cx } from "../lib.js";
+
+// Detail panel for a step of the live pipeline, docked under the graph: the step's output on
+// the left, and on the right everything the step points at (repo at the locked commit, files,
+// undo, approvals it waits for, sources), with links into GitHub and Jira.
+
+const STEP_TYPE = { check: "Check", script: "Script", iac: "Terraform", db_migration: "Data migration" };
 
 function specText(step) {
   const lines = [`- id: ${step.id}`, `  stage: ${step.stage}`, `  type: ${step.type}`];
@@ -17,15 +23,44 @@ function specText(step) {
   if (step.verify) lines.push("  verify:", `    entrypoint: ${step.verify}`);
   if (step.rollback) lines.push(`  rollback: ${step.rollback.startsWith("terraform") ? step.rollback : `{ entrypoint: ${step.rollback} }`}`);
   else lines.push("  rollback: none");
+  if (step.sources?.length) lines.push(`  sources: [${step.sources.join(", ")}]`);
   return lines.join("\n");
 }
 
-// Detail panel for a step of the live pipeline, docked under the DAG.
-export default function StepInspector({ step, state, run, events, onPlay, onClose, busy }) {
+// Colour Terraform plan output the way a diff reads.
+function lineClass(e) {
+  if (e.kind !== "log") return `ln-${e.kind}`;
+  const t = e.message.trimStart();
+  if (t.startsWith("+")) return "ln-add";
+  if (t.startsWith("-") && !t.startsWith("--")) return "ln-del";
+  if (t.startsWith("~")) return "ln-chg";
+  if (t.startsWith("$ ")) return "ln-cmd";
+  if (/\b(error|failed|traceback)\b/i.test(t)) return "ln-err";
+  return "";
+}
+
+function Row({ label, children }) {
+  if (children == null || children === "" || children === false) return null;
+  return (
+    <div className="job-row">
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+export default function StepInspector({ step, state, run, events, approvals = [], report, onPlay, onClose, busy }) {
   const [tab, setTab] = useState("logs");
+  const [query, setQuery] = useState("");
   const logRef = useRef(null);
-  const mine = events.filter((e) => e.step === step.id);
-  const sha = run?.shas?.[repoKey(step.repo)];
+  const mine = useMemo(
+    () => events.filter((e) => e.step === step.id && e.kind !== "step" && (!query || e.message.toLowerCase().includes(query.toLowerCase()))),
+    [events, step.id, query],
+  );
+  const shas = run?.shas;
+  const sha = shortSha(step.repo, shas);
+  const env = run?.mode === "deploy" ? "production" : run?.mode === "rehearse" ? "rehearsal" : null;
+  const waits = (step.requires_approval ?? []).map((id) => ({ id, a: approvals.find((x) => x.id === id), r: report?.approvals?.[id] }));
 
   useEffect(() => {
     const el = logRef.current;
@@ -38,92 +73,172 @@ export default function StepInspector({ step, state, run, events, onPlay, onClos
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const text = () => mine.map((e) => `${fmtTime(e.ts)}  ${e.message}`).join("\n");
+  const download = () => {
+    const blob = new Blob([text()], { type: "text/plain" });
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${run?.mode ?? "step"}-${run?.id ?? ""}-${step.id}.log` });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <section className="inspector" aria-label={step.id}>
-      <header className="inspector-head">
-        <StatusIcon status={state} size={28} />
-        <div className="inspector-title">
-          <h2 className="mono">{step.id}</h2>
-          <span className="muted small">
-            {step.type} · {shortRepo(step.repo)}
-          </span>
-        </div>
-        <div className="inspector-meta">
-          <Pill tone={STATUS[state]?.tone ?? "grey"}>{STATUS[state]?.label ?? state}</Pill>
-          {step.when === "manual" && (
-            <span className="meta-chip">
-              <Hand size={12} /> manual
-            </span>
-          )}
-          {step.codegen === "llm" && (
-            <span className="meta-chip ai-badge">
-              <Bot size={12} /> AI writes this step
-            </span>
-          )}
-          <span className="meta-chip">
-            <span className="muted">repo</span>{" "}
-            <span className="mono">
-              {shortRepo(step.repo)}
-              {sha ? `@${sha.slice(0, 7)}` : `@${step.repo.split("@")[1] ?? "main"}`}
-            </span>
-          </span>
-          {step.entrypoint && (
-            <span className="meta-chip">
-              <span className="muted">run</span> <span className="mono">{step.entrypoint}</span>
-            </span>
-          )}
-          {step.path && (
-            <span className="meta-chip">
-              <span className="muted">path</span> <span className="mono">{step.path}</span>
-            </span>
-          )}
-          {step.verify && (
-            <span className="meta-chip">
-              <span className="muted">verify</span> <span className="mono">{step.verify}</span>
-            </span>
-          )}
-          <span className="meta-chip">
-            <span className="muted">undo</span> <span className="mono">{step.rollback ?? "none"}</span>
-          </span>
-          {step.requires_approval?.length > 0 && (
-            <span className="meta-chip">
-              <span className="muted">needs approval</span> <span className="mono">{step.requires_approval.join(", ")}</span>
-            </span>
-          )}
-        </div>
-        {state === "waiting" && (
-          <button className="btn btn-primary" onClick={() => onPlay(step.id)} disabled={busy}>
-            <Play size={14} /> Play
-          </button>
-        )}
-        <button className="icon-btn" onClick={onClose} aria-label="Close">
-          <X size={16} />
-        </button>
-      </header>
-
-      <div className="inspector-split">
-        <nav className="tabs tabs-vertical">
-          {[
-            ["logs", `Logs${mine.length ? ` (${mine.length})` : ""}`],
-            ["spec", "Spec"],
-          ].map(([id, label]) => (
-            <button key={id} className={cx("tab", { active: tab === id })} onClick={() => setTab(id)}>
-              {label}
-            </button>
-          ))}
-        </nav>
-        <div className="inspector-body">
-          {tab === "logs" && (
-            <pre className="log" ref={logRef}>
+      <div className="inspector-grid">
+        <div className="inspector-main">
+          <header className="inspector-bar">
+            <nav className="tabs tabs-small tabs-inline">
+              {[
+                ["logs", `Output${mine.length ? ` · ${mine.length}` : ""}`],
+                ["spec", "Spec"],
+              ].map(([id, label]) => (
+                <button key={id} className={cx("tab", { active: tab === id })} onClick={() => setTab(id)}>
+                  {label}
+                </button>
+              ))}
+            </nav>
+            {tab === "logs" && (
+              <>
+                <input className="filter-input" placeholder="Filter output…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter output" />
+                <button className="icon-btn" title="Copy" onClick={() => navigator.clipboard?.writeText(text())}>
+                  <Copy size={14} />
+                </button>
+                <button className="icon-btn" title="Download" onClick={download}>
+                  <Download size={14} />
+                </button>
+              </>
+            )}
+          </header>
+          {tab === "logs" ? (
+            <pre className="log trace" ref={logRef}>
               {mine.length === 0
                 ? run
-                  ? `no output from ${step.id} in this ${run.mode} yet`
+                  ? `no output from ${step.id} in this ${run.mode}`
                   : "no run selected"
-                : mine.map((e) => `${fmtTime(e.ts)}  ${e.kind === "log" ? "" : `[${e.kind}] `}${e.message}`).join("\n")}
+                : mine.map((e, i) => (
+                    <div key={e.seq} className={cx("ln", lineClass(e))}>
+                      <span className="ln-num">{i + 1}</span>
+                      <span className="ln-ts">{fmtTime(e.ts)}</span>
+                      <span className="ln-text">
+                        {e.kind !== "log" && <span className="ln-kind">{e.kind}</span>}
+                        {e.message || " "}
+                      </span>
+                    </div>
+                  ))}
             </pre>
+          ) : (
+            <pre className="log yaml">{specText(step)}</pre>
           )}
-          {tab === "spec" && <pre className="log yaml">{specText(step)}</pre>}
         </div>
+
+        <aside className="job-side">
+          <header className="job-side-head">
+            <StatusIcon status={state} size={26} />
+            <div className="inspector-title">
+              <h2 className="mono">{step.id}</h2>
+              <span className="muted small">
+                {STEP_TYPE[step.type] ?? step.type} · stage {step.stage}
+              </span>
+            </div>
+            <button className="icon-btn" onClick={onClose} aria-label="Close">
+              <X size={16} />
+            </button>
+          </header>
+
+          {state === "waiting" && (
+            <div className="job-manual">
+              <div>
+                <strong>Manual step.</strong> {step.type === "db_migration" ? "Copying PHI data needs a person to start it, per the knowledge base." : "Waiting for someone to press play."}
+              </div>
+              <button className="btn btn-primary" onClick={() => onPlay(step.id)} disabled={busy}>
+                <Play size={14} /> Run this step
+              </button>
+            </div>
+          )}
+
+          <dl className="job-rows">
+            <Row label="Status">
+              <Pill tone={STATUS[state]?.tone ?? "grey"}>{STATUS[state]?.label ?? state}</Pill>
+            </Row>
+            <Row label="Repository">
+              <a className="mono link" href={githubUrl(step.repo, shas)} target="_blank" rel="noreferrer">
+                {shortRepo(step.repo)} @ {sha ?? step.repo.split("@")[1] ?? "main"} <ExternalLink size={11} />
+              </a>
+              {!sha && <span className="muted small"> locked at Build</span>}
+            </Row>
+            {step.path && (
+              <Row label="Terraform">
+                <a className="mono link" href={githubUrl(step.repo, shas, step.path)} target="_blank" rel="noreferrer">
+                  {step.path}/ <ExternalLink size={11} />
+                </a>
+              </Row>
+            )}
+            {step.entrypoint && (
+              <Row label="Entrypoint">
+                <a className="mono link" href={githubUrl(step.repo, shas, step.entrypoint)} target="_blank" rel="noreferrer">
+                  {step.entrypoint} <ExternalLink size={11} />
+                </a>
+              </Row>
+            )}
+            {step.verify && (
+              <Row label="Verified by">
+                <a className="mono link" href={githubUrl(step.repo, shas, step.verify)} target="_blank" rel="noreferrer">
+                  {step.verify} <ExternalLink size={11} />
+                </a>
+              </Row>
+            )}
+            <Row label="Undo">{step.rollback ? <span className="mono">{step.rollback}</span> : <span className="muted">nothing to undo (read-only)</span>}</Row>
+            {step.needs?.length > 0 && <Row label="Needs">{step.needs.join(", ")}</Row>}
+            {step.when === "manual" && <Row label="Trigger">Manual: press ▶ in Rehearse and Deploy</Row>}
+            <Row label="Code written by">
+              {step.codegen === "llm" ? (
+                <span className="ai-badge">
+                  <Bot size={12} /> the LLM, as a reviewed PR
+                </span>
+              ) : (
+                "engineers"
+              )}
+            </Row>
+            {env && (
+              <Row label="Environment">
+                {env} · resources named <span className="mono">mac-claims-{env}-…</span>
+              </Row>
+            )}
+            {waits.length > 0 && (
+              <Row label="Waits for">
+                <ul className="plain approvals-list">
+                  {waits.map(({ id, a, r }) => {
+                    const st = r?.status ?? (a?.ticket ? "pending" : "unknown");
+                    return (
+                      <li key={id}>
+                        <Pill tone={STATUS[st]?.tone ?? "grey"}>{st === "pending" ? "Pending" : STATUS[st]?.label ?? st}</Pill> <span className="mono">{id}</span>
+                        {a && <span className="muted"> · {a.approver}</span>}
+                        {(a?.ticket?.url || r?.url) && (
+                          <>
+                            {" · "}
+                            <a className="link mono" href={a?.ticket?.url ?? r.url} target="_blank" rel="noreferrer">
+                              {a?.ticket?.key ?? r.ticket}
+                            </a>
+                          </>
+                        )}
+                        {r?.detail && !a?.ticket && <div className="muted small">{r.detail}</div>}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="muted small">Only Deploy waits for approvals; Rehearse doesn't.</div>
+              </Row>
+            )}
+            {step.sources?.length > 0 && (
+              <Row label="Sources">
+                <ul className="plain sources">
+                  {step.sources.map((s) => (
+                    <li key={s.id ?? s}>{s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title ?? s.id}</a> : <span className="mono small">{s.id ?? s}</span>}</li>
+                  ))}
+                </ul>
+              </Row>
+            )}
+          </dl>
+        </aside>
       </div>
     </section>
   );

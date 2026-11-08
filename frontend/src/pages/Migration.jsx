@@ -387,7 +387,7 @@ export default function Migration({ source, initialRun }) {
             <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} showDeps={showDeps} fit={fit} />
           </div>
 
-          {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} onPlay={play} onClose={() => setSelected(null)} busy={busy || locked} />}
+          {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} approvals={mig.approvals} report={reportRun?.report} onPlay={play} onClose={() => setSelected(null)} busy={busy || locked} />}
         </>
       )}
 
