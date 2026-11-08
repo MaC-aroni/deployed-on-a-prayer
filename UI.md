@@ -9,14 +9,14 @@ starting point. Build on it freely, but keep the rules at the end of this file.
 mise run dev-local      # backend (with the runner) on :8000 + frontend on http://localhost:5173
 ```
 
-The local API needs no token. For real GitHub calls, run it with your GitHub login:
+Locally nothing needs a sign-in. For real GitHub calls, run it with your GitHub login:
 `GITHUB_TOKEN=$(gh auth token) mise run dev-local`. The other secrets come from
 `backend/.env`; see `docs/cloud-setup.md`. Run history is in `.mac/` at the repo root, shared
 with `mise run mac ...`.
 
-Live: https://deployed-on-a-prayer.fly.dev. Paste the MaC API token in the box top right; ask
-ob1-can-obi for it. Pressing buttons on the live site makes **real** AWS, Jira and Confluence
-changes, so use your local copy while developing.
+Live: https://deployed-on-a-prayer.fly.dev. Anyone can watch; to press buttons, click **Sign in
+with GitHub** (you need write access to this repo). Pressing buttons on the live site makes
+**real** AWS, Jira and Confluence changes, so use your local copy while developing.
 
 ## Files
 
@@ -80,6 +80,6 @@ Run statuses: `running`, `waiting`, `rolling_back`, `succeeded`, `failed`, `roll
   `latest.*.status`), but never re-implement runner rules in the UI. The `409` is the truth.
 - **All backend calls go through `api.js`.** A new endpoint goes in `backend/app/mac_api.py`,
   with a test in `backend/tests/test_api.py` and a line in `docs/api.md`.
-- **No secrets in the frontend.** The only one is the user's own MaC API token, kept in
-  `localStorage`.
+- **No secrets in the frontend.** Sign-in is a cookie the server sets; the UI only reads
+  `GET /api/auth/me` to show who's signed in and to grey out buttons.
 - Branch → PR → CI → merge (`AGENTS.md`). Add a `plan.md` entry if your change affects others.

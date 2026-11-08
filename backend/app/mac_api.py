@@ -5,16 +5,14 @@ runner refused, e.g. "Run Build first"). The slow work happens on a worker threa
 with GET /runs/{id}/stream (server-sent events) or poll GET /runs/{id}. Full contract:
 docs/api.md.
 
-Access: with MAC_API_TOKEN set, every endpoint needs it, as `Authorization: Bearer <token>`
-or `?token=<token>` (EventSource can't send headers). In production (APP_ENV=production) the
-API refuses to run without one, because the app is public and Deploy changes real AWS.
+Access: reading is open. Every POST (they start or change runs, so real AWS) needs a signed-in
+member of the GitHub org when APP_ENV=production; see app/auth.py. Locally nothing is required.
 """
 
 import asyncio
 import json
 import logging
 import os
-import secrets
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -31,6 +29,8 @@ from mac.spec import Spec, SpecError, Step, load_spec, parse_spec
 from mac.store import RunRecord, RunStatus
 from mac.validate import execution_order, validate
 
+from .auth import signed_in
+
 ROOT = Path(__file__).resolve().parents[2]
 log = logging.getLogger("mac.api")
 
@@ -40,8 +40,6 @@ class State:
     runner: Runner
     migrations_dir: Path
     submit: Callable[[Callable[[], None]], None]  # runs work in the background
-    token: str | None
-    require_token: bool
 
 
 _state: State | None = None
@@ -56,13 +54,10 @@ def configure(state: State) -> None:
 def _default_state() -> State:
     data_dir = Path(os.environ.get("MAC_DATA_DIR", ROOT / ".mac"))  # the same history as `mise run mac`
     pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mac-run")
-    token = os.environ.get("MAC_API_TOKEN") or None
     return State(
         runner=make_runner(data_dir),
         migrations_dir=Path(os.environ.get("MAC_MIGRATIONS_DIR", ROOT / "examples")),
         submit=pool.submit,
-        token=token,
-        require_token=token is not None or os.environ.get("APP_ENV") == "production",
     )
 
 
@@ -76,18 +71,7 @@ def get_state() -> State:
     return _state
 
 
-def authorized(state: State = Depends(get_state), authorization: str | None = Header(default=None),
-               token: str | None = Query(default=None)) -> None:
-    if not state.require_token:
-        return
-    if state.token is None:
-        raise HTTPException(503, "The MaC API is off here until MAC_API_TOKEN is set")
-    given = authorization.removeprefix("Bearer ").strip() if authorization else token
-    if not given or not secrets.compare_digest(given, state.token):
-        raise HTTPException(401, "Missing or wrong MaC API token")
-
-
-router = APIRouter(prefix="/api/mac", tags=["mac"], dependencies=[Depends(authorized)])
+router = APIRouter(prefix="/api/mac", tags=["mac"])
 
 # ---- Shapes --------------------------------------------------------------------------------
 
@@ -198,35 +182,40 @@ def get_migration(name: str, state: State = Depends(get_state)):
     }
 
 
-def _start(state: State, starter: Callable[[], RunRecord]) -> dict:
+def _start(state: State, starter: Callable[[], RunRecord], user: str | None) -> dict:
     try:
         run = starter()
     except GateError as e:
         raise HTTPException(409, str(e)) from e
+    if user:
+        state.runner.store.add_event(run.id, "log", f"requested by @{user}")
     state.submit(lambda: _execute(state, run.id))
     return _run_view(run)
 
 
 @router.post("/migrations/{name}/build", status_code=202)
-def build(name: str, body: StartBody | None = None, state: State = Depends(get_state)):
+def build(name: str, body: StartBody | None = None, state: State = Depends(get_state),
+          user: str | None = Depends(signed_in)):
     path, _, _ = _migration(state, name)
-    return _start(state, lambda: state.runner.start_build(path, (body or StartBody()).branches))
+    return _start(state, lambda: state.runner.start_build(path, (body or StartBody()).branches), user)
 
 
 @router.post("/migrations/{name}/rehearse", status_code=202)
-def rehearse(name: str, body: StartBody | None = None, state: State = Depends(get_state)):
+def rehearse(name: str, body: StartBody | None = None, state: State = Depends(get_state),
+             user: str | None = Depends(signed_in)):
     path, _, _ = _migration(state, name)
     body = body or StartBody()
-    return _start(state, lambda: state.runner.start_rehearse(path, body.ai, body.branches))
+    return _start(state, lambda: state.runner.start_rehearse(path, body.ai, body.branches), user)
 
 
 @router.post("/migrations/{name}/deploy", status_code=202)
-def deploy(name: str, body: StartBody | None = None, state: State = Depends(get_state)):
+def deploy(name: str, body: StartBody | None = None, state: State = Depends(get_state),
+           user: str | None = Depends(signed_in)):
     path, _, _ = _migration(state, name)
     body = body or StartBody()
     if body.branches:
         raise HTTPException(409, "Deploy always runs main; branches are only for Build and Rehearse")
-    return _start(state, lambda: state.runner.start_deploy(path, body.ai))
+    return _start(state, lambda: state.runner.start_deploy(path, body.ai), user)
 
 
 # ---- Runs ------------------------------------------------------------------------------------
@@ -251,21 +240,24 @@ def get_run(run_id: str, state: State = Depends(get_state)):
 
 
 @router.post("/runs/{run_id}/steps/{step_id}/play", status_code=202)
-def play(run_id: str, step_id: str, state: State = Depends(get_state)):
+def play(run_id: str, step_id: str, state: State = Depends(get_state),
+         user: str | None = Depends(signed_in)):
     _get_run(state, run_id)
-    return _start(state, lambda: state.runner.request_play(run_id, step_id))
+    return _start(state, lambda: state.runner.request_play(run_id, step_id), user)
 
 
 @router.post("/runs/{run_id}/resume", status_code=202)
-def resume(run_id: str, state: State = Depends(get_state)):
+def resume(run_id: str, state: State = Depends(get_state),
+           user: str | None = Depends(signed_in)):
     _get_run(state, run_id)
-    return _start(state, lambda: state.runner.request_resume(run_id))
+    return _start(state, lambda: state.runner.request_resume(run_id), user)
 
 
 @router.post("/runs/{run_id}/undo", status_code=202)
-def undo(run_id: str, state: State = Depends(get_state)):
+def undo(run_id: str, state: State = Depends(get_state),
+         user: str | None = Depends(signed_in)):
     _get_run(state, run_id)
-    return _start(state, lambda: state.runner.request_undo(run_id))
+    return _start(state, lambda: state.runner.request_undo(run_id), user)
 
 
 @router.get("/runs/{run_id}/events")

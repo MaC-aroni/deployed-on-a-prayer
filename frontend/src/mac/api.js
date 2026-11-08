@@ -1,24 +1,5 @@
-// Talks to the runner's /api/mac (docs/api.md). Locally no token is needed; on Fly, the MaC API
-// token is kept in this browser's localStorage and sent with every call.
-
-const TOKEN_KEY = "mac-api-token";
-
-export function getToken() {
-  try {
-    return localStorage.getItem(TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-export function setToken(value) {
-  try {
-    if (value) localStorage.setItem(TOKEN_KEY, value);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // Private mode: the token just won't be remembered.
-  }
-}
+// Talks to the runner's /api/mac (docs/api.md). On Fly, the buttons need a GitHub sign-in: the
+// server sets a session cookie, which the browser sends by itself. Locally nothing is needed.
 
 export class ApiError extends Error {
   constructor(status, detail) {
@@ -29,10 +10,8 @@ export class ApiError extends Error {
 
 async function call(method, path, body) {
   const headers = { Accept: "application/json" };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(`/api/mac${path}`, {
+  const res = await fetch(path.startsWith("/auth/") ? `/api${path}` : `/api/mac${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -52,13 +31,19 @@ export const api = {
   play: (id, step) => call("POST", `/runs/${id}/steps/${step}/play`),
   resume: (id) => call("POST", `/runs/${id}/resume`),
   undo: (id) => call("POST", `/runs/${id}/undo`),
+  me: () => call("GET", "/auth/me"), // { login, required, available, repo }
 };
+
+// Full-page navigations: GitHub's sign-in page, and back.
+export const SIGN_IN_URL = "/api/auth/login";
+export async function signOut() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.assign("/");
+}
 
 // Live events for a run (server-sent events). Returns a function that stops listening.
 export function follow(runId, after, onEvent, onEnd) {
-  const token = getToken();
   const query = new URLSearchParams({ after: String(after) });
-  if (token) query.set("token", token);
   const source = new EventSource(`/api/mac/runs/${runId}/stream?${query}`);
   for (const kind of ["log", "step", "run", "diagnosis"]) {
     source.addEventListener(kind, (e) => onEvent(JSON.parse(e.data)));
