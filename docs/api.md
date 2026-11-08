@@ -127,6 +127,24 @@ A probe answer:
   then **200** with the real result once deployed. `error` is set when nothing answered at all.
 - `curl` is the same request for anyone with AWS keys in their shell (no keys are in it).
 
+### The assistant (chat)
+
+`POST /api/mac/chat` with `{"messages": [{"role": "user" | "assistant", "content": "…"}]}` (the
+conversation so far, oldest first, ending with the user's question). Needs sign-in on Fly; 503
+when no LLM key is set. The reply is a **server-sent event stream** (read it with `fetch()` and a
+stream reader, since `EventSource` can't POST):
+- `tool`: `{name, args, ok, summary}` per lookup, e.g. `search_jira` / `project = MAC` / "3 result(s)".
+  Show them as "Searching Jira…" lines while it works.
+- `answer`: `{content}`, Markdown with links to the pages and tickets it used. Render it.
+- `error`: `{message}` if the LLM didn't answer.
+- `end`.
+
+Tools, all read-only: `search_confluence`, `read_confluence_page`, `search_jira` (JQL),
+`read_jira_issue` (with comments), `mac_status` (latest runs, approvals, service URLs). It can't
+change anything; asked to, it explains how a person does it. Up to 6 tool rounds per question.
+Keep the history on the client and send it with each question (the server stores nothing).
+With Grok, an answer takes 20 s to a few minutes.
+
 ### Starting runs (the top-bar buttons)
 
 | Request | Body (optional) |
