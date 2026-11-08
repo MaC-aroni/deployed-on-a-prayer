@@ -1,68 +1,39 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Sparkles } from "lucide-react";
-import { EmptyState } from "../components/Shell.jsx";
+import { ArrowLeft, Check, ExternalLink, Sparkles, X } from "lucide-react";
+import { EmptyState, useAuth } from "../components/Shell.jsx";
+import { fmtAgo } from "../mac/api.js";
+import { cx } from "../lib.js";
 import { Pill } from "../components/StatusIcon.jsx";
 import { api } from "../mac/api.js";
+import Markdown from "../components/Markdown.jsx";
 import { Link } from "../router.jsx";
 
 // One knowledge-base page, shown in the console when there's no Confluence to link to (or
 // before it's published). Pages MaC wrote itself say so, with their review ticket.
 
-function render(md) {
-  const out = [];
-  let list = null;
-  let code = null;
-  const flush = () => {
-    if (list) out.push(<ul key={out.length}>{list}</ul>);
-    list = null;
-  };
-  md.split("\n").forEach((raw, i) => {
-    const line = raw.replace(/\r$/, "");
-    if (code !== null) {
-      if (line.startsWith("```")) {
-        out.push(<pre key={i} className="log yaml">{code.join("\n")}</pre>);
-        code = null;
-      } else code.push(line);
-      return;
-    }
-    if (line.startsWith("```")) return void (flush(), (code = []));
-    const h = /^(#{1,4})\s+(.*)$/.exec(line);
-    if (h) return void (flush(), out.push(h[1].length <= 2 ? <h2 key={i}>{h[2]}</h2> : <h3 key={i}>{h[2]}</h3>));
-    const li = /^\s*[-*]\s+(.*)$/.exec(line);
-    if (li) return void (list ??= []).push(<li key={i}>{inline(li[1])}</li>);
-    if (!line.trim()) return flush();
-    if (line.startsWith("|")) return void (flush(), out.push(<p key={i} className="mono small">{line}</p>));
-    flush();
-    out.push(<p key={i}>{inline(line)}</p>);
-  });
-  flush();
-  return out;
-}
-
-function inline(text) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|_[^_]+_|https?:\/\/\S+)/g);
-  return parts.map((p, i) => {
-    if (p.startsWith("`")) return <code key={i}>{p.slice(1, -1)}</code>;
-    if (p.startsWith("**")) return <strong key={i}>{p.slice(2, -2)}</strong>;
-    if (p.startsWith("_") && p.endsWith("_") && p.length > 2) return <em key={i}>{p.slice(1, -1)}</em>;
-    if (/^https?:\/\//.test(p)) {
-      const clean = p.replace(/[).,]+$/, "");
-      return (
-        <a key={i} href={clean} target="_blank" rel="noreferrer" className="link">
-          {clean}
-        </a>
-      );
-    }
-    return p;
-  });
-}
-
 export default function Knowledge({ pageId }) {
+  const { locked } = useAuth();
   const [page, setPage] = useState(null);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(null); // "approved" | "rejected"
+  const [err, setErr] = useState(null);
   useEffect(() => {
     api.knowledge(pageId).then(setPage).catch(setError);
   }, [pageId]);
+
+  async function review(status) {
+    setBusy(true);
+    setErr(null);
+    try {
+      setPage(await api.reviewKnowledge(pageId, status));
+      setConfirm(null);
+    } catch (e) {
+      setErr(e.detail ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (error) return <EmptyState title="No such page" body={error.detail ?? String(error)} />;
   if (!page) return <EmptyState title="Loading…" />;
@@ -110,7 +81,59 @@ export default function Knowledge({ pageId }) {
           </div>
         </div>
       </div>
-      <article className="card knowledge-page">{render(page.body)}</article>
+      {page.generated && page.review && (
+        <section className={cx("review-bar", `is-${page.review.status}`)}>
+          <div className="review-text">
+            <strong>
+              {page.review.status === "approved" ? "Reviewed" : page.review.status === "rejected" ? "Rejected" : "Review needed"}
+            </strong>
+            <span className="muted">
+              {page.review.status === "pending"
+                ? `MaC wrote this page from ${page.review.repo ?? "the repository"}. It counts as documentation once a person signs it off`
+                : `${page.review.status} by ${page.review.reviewed_by === "jira" ? "Jira" : `@${page.review.reviewed_by ?? "someone"}`}${page.review.reviewed_at ? ` · ${fmtAgo(page.review.reviewed_at)}` : ""}${page.review.note ? ` · ${page.review.note}` : ""}`}
+              {page.review.ticket ? (
+                <>
+                  {" · ticket "}
+                  <a className="link mono" href={page.review.ticket_url ?? "#"} target="_blank" rel="noreferrer">
+                    {page.review.ticket}
+                  </a>
+                  {page.review.status === "pending" && " (approving it in Jira works too)"}
+                </>
+              ) : (
+                page.review.status === "pending" && " · no Jira ticket was raised, so the review happens here"
+              )}
+            </span>
+            {err && <span className="small" style={{ color: "var(--bad)" }}>{err}</span>}
+          </div>
+          <div className="review-actions">
+            {confirm ? (
+              <>
+                <span className="small">{confirm === "approved" ? "Approve this page as documentation?" : "Reject it? It stays a draft until Learn rewrites it."}</span>
+                <button className={cx("btn", confirm === "approved" ? "btn-primary" : "btn-danger")} onClick={() => review(confirm)} disabled={busy}>
+                  Yes, {confirm === "approved" ? "approve" : "reject"}
+                </button>
+                <button className="btn" onClick={() => setConfirm(null)}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                {page.review.status !== "approved" && (
+                  <button className={cx("btn btn-primary", { hint: locked })} onClick={() => setConfirm("approved")} disabled={busy}>
+                    <Check size={14} /> Approve
+                  </button>
+                )}
+                {page.review.status !== "rejected" && (
+                  <button className={cx("btn", { hint: locked })} onClick={() => setConfirm("rejected")} disabled={busy}>
+                    <X size={14} /> Reject
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+      )}
+      <article className="card knowledge-page"><Markdown text={page.body} className="" /></article>
     </>
   );
 }

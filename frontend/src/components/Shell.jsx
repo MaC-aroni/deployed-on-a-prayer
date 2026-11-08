@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Activity, ChevronRight, Github, Hammer, PanelLeft, Presentation, Search, Sparkles, Workflow, Wand2 } from "lucide-react";
+import { Activity, ChevronRight, Github, Hammer, MessageSquare, PanelLeft, Presentation, Radio, Search, Sparkles, Workflow, Wand2 } from "lucide-react";
 import { SIGN_IN_URL, api, signOut } from "../mac/api.js";
 import { Link, usePath } from "../router.jsx";
 import { cx } from "../lib.js";
@@ -13,8 +13,13 @@ const NAV = [
     ],
   },
   {
+    section: "Ask",
+    items: [{ to: "/chat", label: "Chat", Icon: MessageSquare, hint: "a fresh agent over the knowledge base", match: (p) => p.startsWith("/chat") }],
+  },
+  {
     section: "Observe",
     items: [
+      { to: "/services", label: "Services", Icon: Radio, hint: "live endpoints", match: (p) => p.startsWith("/services") },
       { to: "/runs", label: "Runs", Icon: Activity, match: (p) => p.startsWith("/runs") || p.startsWith("/agents") },
       { to: "/demo", label: "Pitch demo", Icon: Presentation, match: (p) => p.startsWith("/demo") },
     ],
@@ -22,6 +27,28 @@ const NAV = [
 ];
 
 const COLLAPSE_KEY = "mac.sidebar.collapsed";
+const SEEN_KEY = "mac.pipelines.seen";
+export const SEEN_EVENT = "mac:pipelines-seen";
+
+export function readSeenPipelines() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+// The Pipelines page calls this with every key it showed; the sidebar badge stops glowing.
+export function markPipelinesSeen(keys) {
+  try {
+    const seen = readSeenPipelines();
+    for (const k of keys) seen.add(k);
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  } catch {
+    /* per-viewer convenience only */
+  }
+  window.dispatchEvent(new Event(SEEN_EVENT));
+}
 
 function readCollapsed() {
   try {
@@ -33,7 +60,7 @@ function readCollapsed() {
 
 // Who is signed in (GET /api/auth/me). `locked` means the server will refuse POSTs until the
 // person signs in; the UI only greys buttons as a hint, the server decides.
-const AuthContext = createContext({ me: null, locked: false });
+const AuthContext = createContext({ me: null, locked: false, health: null });
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -93,22 +120,43 @@ export default function Shell({ crumbs = [], actions, children }) {
 
   const locked = Boolean(me?.required && !me.login);
 
-  // Pipelines exist only once a migration has been started; the count says how many there are.
-  const [counts, setCounts] = useState({ pipelines: null });
+  // What this deployment has configured (GET /api/mac/health): pages grey out what can't work.
+  const [health, setHealth] = useState(null);
   useEffect(() => {
     let alive = true;
-    const load = () =>
-      Promise.all([api.migrations().catch(() => []), api.plans().catch(() => [])]).then(([m, p]) => alive && setCounts({ pipelines: m.length + p.length }));
+    const load = () => api.health().then((h) => alive && setHealth(h)).catch(() => {});
     load();
-    const id = setInterval(load, 10000);
+    const id = setInterval(load, 60000);
     return () => {
       alive = false;
       clearInterval(id);
     };
+  }, []);
+
+  // Pipelines exist only once a migration has been started. The badge glows with the number of
+  // pipelines this viewer hasn't opened the list for yet; otherwise it's the plain total.
+  const [counts, setCounts] = useState({ pipelines: null, fresh: 0 });
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      Promise.all([api.migrations().catch(() => []), api.plans().catch(() => [])]).then(([m, p]) => {
+        if (!alive) return;
+        const keys = [...m.map((x) => `m:${x.name}`), ...p.map((x) => `p:${x.run_id}`)];
+        const seen = readSeenPipelines();
+        setCounts({ pipelines: keys.length, fresh: keys.filter((k) => !seen.has(k)).length });
+      });
+    load();
+    const id = setInterval(load, 30000);
+    window.addEventListener(SEEN_EVENT, load);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      window.removeEventListener(SEEN_EVENT, load);
+    };
   }, [path]);
 
   return (
-    <AuthContext.Provider value={{ me, locked }}>
+    <AuthContext.Provider value={{ me, locked, health }}>
       <div className={cx("shell", { collapsed })}>
         <aside className="sidebar">
           <Link to="/" className="brand" title="MaC · Migration as Code">
@@ -138,9 +186,13 @@ export default function Shell({ crumbs = [], actions, children }) {
                     <Icon size={primary ? 20 : 18} />
                     <span className="nav-label">
                       {label}
-                      {primary && hint && <span className="nav-hint">{hint}</span>}
+                      {hint && <span className="nav-hint">{hint}</span>}
                     </span>
-                    {count && counts[count] != null && <span className={cx("nav-count", { zero: counts[count] === 0 })}>{counts[count]}</span>}
+                    {count && counts[count] != null && (
+                      <span className={cx("nav-count", { zero: counts[count] === 0, new: counts.fresh > 0 })} title={counts.fresh > 0 ? `${counts.fresh} new pipeline${counts.fresh === 1 ? "" : "s"} since you last looked` : `${counts[count]} pipelines`}>
+                        {counts.fresh > 0 ? counts.fresh : counts[count]}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </nav>

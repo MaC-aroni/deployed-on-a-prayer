@@ -63,6 +63,7 @@ function titleOf(run) {
   if (run.mode === "plan") return (run.migration ?? "").replace(/^plan\//, "").replaceAll("-", " ");
   if (run.mode === "diagnose") return `Investigate ${run.failed_step ?? run.report?.step ?? "the failure"}`;
   if ((run.migration ?? "").startsWith("knowledge/")) return `Learn ${run.migration.slice("knowledge/".length)}`;
+  if ((run.migration ?? "").startsWith("repo/")) return `Licence check · ${run.migration.slice("repo/".length)}`;
   return "Learn the knowledge base";
 }
 

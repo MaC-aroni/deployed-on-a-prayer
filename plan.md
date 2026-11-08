@@ -98,6 +98,75 @@ differently**. Keep it short; link to the docs instead of repeating them.
 #### What you need to do
 - Nothing.
 
+### 2026-11-08: ui_v2 round 2: review loop for generated pages, Chat, wording (Elathius, with Claude Code)
+
+#### What changed
+- **Why "under review" never went away:** a page MaC writes from a repository is a draft
+  (`needs-review`) until a person signs it off, but nothing read the review back. Now the
+  state follows the Jira ticket when Learn raised one, and otherwise a person approves or
+  rejects on the page itself (`/knowledge/<page>`, `POST /api/mac/knowledge/{page}/review`).
+  Approved pages lose `needs-review`; cards and rows show "review needed · MAC-n" → "written
+  by MaC" → "page rejected", with a **Review page** door while pending.
+- **Chat** (`/chat`, sidebar "Ask"): a Claude-style chat on ob1-can-obi's assistant
+  (`POST /api/mac/chat`, #30): the whole conversation is posted each time, the stream's `tool`
+  events show as lookup lines under a spinning cog, the `answer` renders as Markdown, and a
+  collapsible "how I answered" lists the lookups. Transcripts are kept per chat by the planning
+  API (`PUT/GET/DELETE /api/mac/chats[/id]`) so they survive reloads and list in the rail.
+- Wording: the service primary is **Build Migration Pipeline**; the "Also open a PR" toggle and
+  the toolbar "Learn knowledge base" moved into each card's ··· menu.
+- Licence check: no licence file now asks the person to **Confirm use** (no ticket, no block);
+  copyleft still raises a review ticket, and "Proceed anyway" is recorded
+  (`POST /api/mac/repos/{owner}/{name}/accept`).
+- Confluence doors: when a page has no publish record but Confluence is configured, the planning
+  API finds the page by title and remembers its URL; without Confluence the door searches the
+  site when `ATLASSIAN_SITE` is known, else opens the console's copy.
+- Sidebar Pipelines badge glows only with the number of pipelines this viewer hasn't listed yet;
+  otherwise it's the plain total.
+
+#### How to adapt
+- Chat transcripts live in `<MAC_DATA_DIR>/chats/`; review decisions in the page's sidecar
+  under `<MAC_DATA_DIR>/knowledge/`. The Pipelines list polls every 10 s and the sidebar count
+  every 30 s now.
+- On Fly: approving the `KB-*` ticket in Jira resolves the review within 30 s; so does Approve
+  in the console.
+
+### 2026-11-08: ui_v2: Cancel, endpoints, Services tab, AI marks, repos by URL, bigger console (Elathius, with Claude Code)
+
+#### What changed
+- **Pipeline page catches up with main:** Cancel (with confirmation) on active runs, `cancelled`
+  and `undone` in purple, Retry undo on `rollback_failed`, live approval status from the
+  migration detail with "Sync with Jira", `diagnosis` events rendered as Markdown, Download
+  report when `ai_report`, an auto-fix strip (branch, attempt, PR), one failure card for the
+  runner's AI help and Investigate together, an **Endpoints** tab (outputs, probe buttons with
+  status · request id · elapsed · body · copyable curl, probe history).
+- **Services** page (`/services`, Observe): every deployed endpoint across pipelines with
+  on / off / not probed, last probe, and Ping per probe. Backed by `GET /api/mac/services/active`.
+- **AI marks:** a green robot on every step AI touched (planned by Nemotron, LLM-written code,
+  auto-fix branch, diagnosed), with the reasons in the tooltip and an "AI assistance" row in the
+  step panel. The robot no longer hides the lock/pause marks.
+- **Repositories by URL:** Add repository on the Migration page; an agent fetches the licence,
+  Nemotron (or an SPDX rule without a model) classifies it, a review ticket is raised unless it's
+  clearly fine; licence pill on the row; remove. `POST /api/mac/repos`, `DELETE /api/mac/repos/{owner}/{name}`.
+- **Confluence doors:** open the real page when known; "Create in Confluence" publishes a page
+  on demand (`POST /api/mac/knowledge/{page}/publish`); without Confluence configured the door
+  opens the console's copy.
+- `GET /api/mac/health` (what's configured, names only): buttons that need the LLM are greyed
+  with the reason, and a 409 now shows inline under the actions as well as in the toast (why
+  Investigate "did nothing": no LLM key locally).
+- `GET /api/mac/run-index`: `GET /runs` plus `migration`, `based_on`, `autofix`; the Runs page
+  and the pipeline's history use it.
+- Look: pipeline blocks 300×80 with 15px names and 14px status dots, the graph scrolls instead
+  of shrinking below 92%; status dots and cards transition between states; skeleton loading
+  instead of "Loading…"; every list row is one large button; sidebar 288px with 50/68px items.
+
+#### How to adapt
+- `GET /services/active`, `/run-index`, `/repos`, `/knowledge/{page}/publish`, `/health` are in
+  `backend/app/planning_api.py` (docs/planning-api.md); `mac_api.py` is untouched. Two small
+  backend asks are in `docs/ui-data-needs.md` §8 (`migration`/`based_on` on run summaries,
+  `expected_live` for cancelled Deploys).
+- Added repositories live in `<MAC_DATA_DIR>/repos.json`.
+
+
 ### 2026-11-08: Migration flow with agents: Learn, detect-or-plan, breakpoints, investigate (Elathius, with Claude Code)
 
 #### What changed

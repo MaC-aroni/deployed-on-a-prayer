@@ -44,6 +44,12 @@ export const api = {
     return call("GET", `/runs?${q}`);
   },
   run: (id) => call("GET", `/runs/${enc(id)}`),
+  // GET /runs plus migration, based_on and autofix per run (planning API), for lists that link runs
+  runIndex: (migration, limit = 100) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (migration) q.set("migration", migration);
+    return call("GET", `/run-index?${q}`);
+  },
   events: (id, after = 0, step) => {
     const q = new URLSearchParams({ after: String(after) });
     if (step) q.set("step", step);
@@ -52,6 +58,11 @@ export const api = {
   play: (id, step) => call("POST", `/runs/${enc(id)}/steps/${enc(step)}/play`),
   resume: (id) => call("POST", `/runs/${enc(id)}/resume`),
   undo: (id) => call("POST", `/runs/${enc(id)}/undo`),
+  cancel: (id) => call("POST", `/runs/${enc(id)}/cancel`),
+  approvalsSync: (name) => call("POST", `/migrations/${enc(name)}/approvals/sync`),
+  // Outputs and probes: proof the deployed service answers from AWS
+  probe: (id, step, output, probe) => call("POST", `/runs/${enc(id)}/outputs/${enc(step)}/${enc(output)}/probes/${enc(probe)}`),
+  probes: (id) => call("GET", `/runs/${enc(id)}/probes`),
 
   // Planning: the knowledge graph, the Planner, and the plans it generated
   services: () => call("GET", "/services"),
@@ -67,9 +78,28 @@ export const api = {
   investigate: (runId, mode) => call("POST", `/runs/${enc(runId)}/investigate`, mode ? { mode } : {}),
   approveFix: (runId) => call("POST", `/runs/${enc(runId)}/approve-fix`),
 
+  // What this deployment has configured (names only): { llm, model, github, jira, confluence, aws, approvals_live }
+  health: () => call("GET", "/health"),
+  // Every deployed endpoint across every pipeline, for the Services tab
+  activeServices: () => call("GET", "/services/active"),
+  // Repositories added by URL (an agent checks the licence) and the Confluence door's "create page"
+  addRepo: (url) => call("POST", "/repos", { url }),
+  removeRepo: (slug) => call("DELETE", `/repos/${slug}`),
+  acceptRepo: (slug, note) => call("POST", `/repos/${slug}/accept`, { note: note ?? null }),
+  publishKnowledge: (page) => call("POST", `/knowledge/${enc(page)}/publish`),
+  reviewKnowledge: (page, status, note) => call("POST", `/knowledge/${enc(page)}/review`, { status, note }),
+  // Chat transcripts (the answers come from chatStream below; the server keeps no history itself)
+  chats: () => call("GET", "/chats"),
+  chatDetail: (id) => call("GET", `/chats/${enc(id)}`),
+  saveChat: (id, title, turns) => call("PUT", `/chats/${enc(id)}`, { title, turns }),
+  deleteChat: (id) => call("DELETE", `/chats/${enc(id)}`),
+
   // Sign-in: { login, required, available, repo }
   me: () => call("GET", "/auth/me"),
 };
+
+// The AI report a Report or Auto-fix run wrote (a download; 404 when there is none).
+export const reportUrl = (runId) => `/api/mac/runs/${enc(runId)}/report.md`;
 
 // A pipeline page reads one of two sources with the same shape.
 export function sourceApi(source) {
@@ -153,4 +183,53 @@ export function parseAgent(ev) {
   } catch {
     return null;
   }
+}
+
+// The assistant (docs/api.md → "The assistant"): POST the whole conversation, read the
+// server-sent events back with fetch (EventSource can't POST). onEvent gets {kind, data} for
+// `tool` (a lookup: name, args, ok, summary), `answer` ({content}, Markdown) and `error`
+// ({message}); it resolves when the stream ends. Throws ApiError on a non-2xx answer.
+export async function chatStream(messages, onEvent, { signal } = {}) {
+  const res = await fetch("/api/mac/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify({ messages }),
+    signal,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, detailOf(data, res.status));
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const dispatch = (chunk) => {
+    let kind = "message";
+    const lines = [];
+    for (const line of chunk.split("\n")) {
+      if (line.startsWith("event:")) kind = line.slice(6).trim();
+      else if (line.startsWith("data:")) lines.push(line.slice(5).trim());
+    }
+    if (kind === "end") return true;
+    let data = {};
+    try {
+      data = lines.length ? JSON.parse(lines.join("\n")) : {};
+    } catch {
+      data = { raw: lines.join("\n") };
+    }
+    onEvent({ kind, data });
+    return false;
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if (chunk.trim() && dispatch(chunk)) return;
+    }
+  }
+  if (buffer.trim()) dispatch(buffer);
 }

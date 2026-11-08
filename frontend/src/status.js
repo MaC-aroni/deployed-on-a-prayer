@@ -24,7 +24,8 @@ export const RUN_STATUS = {
   succeeded: { label: "Passed", tone: "green", icon: "succeeded" },
   failed: { label: "Failed", tone: "red", icon: "failed" },
   rollback_failed: { label: "Rollback failed", tone: "red", icon: "rollback_failed" },
-  undone: { label: "Undone", tone: "grey", icon: "skipped" },
+  undone: { label: "Undone", tone: "violet", icon: "rolled_back" },
+  cancelled: { label: "Cancelled", tone: "violet", icon: "skipped" },
   // pitch demo only
   passed: { label: "Passed", tone: "green", icon: "succeeded" },
   blocked: { label: "Blocked", tone: "amber", icon: "blocked" },

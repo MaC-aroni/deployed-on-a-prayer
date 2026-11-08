@@ -108,7 +108,18 @@ answers with AWS's response. The UI will add an **Endpoints** card (one button p
 status, `request_id`, `elapsed_ms`, body, the `curl` with copy) and a before/after list from
 `GET /runs/{id}/probes`. Nothing further needed from the backend for it.
 
-## 8. Smaller things
+## 8. Found while building ui_v2 (2026-11-08, afternoon)
+
+| Need | Status | Ask |
+|---|---|---|
+| `GET /runs` summaries lack `migration` and `based_on` | own workaround | the console uses `GET /run-index` (planning API) for now; adding `migration`, `based_on`, `autofix` to `_summary` in `mac_api.py` would let it drop that |
+| `expected_live` on a cancelled Deploy | gap | `_endpoints` treats only finished Rehearse and `undone` as gone; a `cancelled` Deploy was undone too and should report `expected_live: false`. The UI treats `run_status == "cancelled"` as off meanwhile |
+| `GET /plans/{id}` had no `endpoints` or live approval status | own (endpoints) · gap (approvals) | `endpoints` added in the planning API; live `approvals[].status/detail/checked` for generated plans still needs the same lookup `get_migration` does |
+| Health | own | `GET /health` exists in the planning API; fine to move into `mac_api.py` |
+| Review of generated knowledge pages | own | state follows the Jira ticket via `approvals.status(ticket)` (polled by the planning API, 30 s). If the runner's approval poller/webhook also covered `KB-*` and `LIC-*` tickets, the console could drop its own polling |
+| Chat over the knowledge base | own | `POST /chat` in the planning API uses the same sections/graph the Planner uses; a shared retrieval helper in `mac/` would keep the two from drifting |
+
+## 9. Smaller things
 
 - `GET /runs` could accept `mode=` to list only agent runs (`plan`, `ingest`, `diagnose`).
 - `GET /migrations` could include `failed_step` and `requested_by` in each `latest.*` summary.

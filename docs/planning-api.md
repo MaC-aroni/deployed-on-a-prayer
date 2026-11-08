@@ -66,9 +66,11 @@ the graph is `<MAC_DATA_DIR>/graph.json`, shared with `mise run mac ingest`.
   service is enriched from it and `learned` turns true; `approvers` and `sources` come from the
   graph. `plans` are the ids of generated plans for that service; `migration` is the reviewed
   `migration.yaml` in `examples/` for it, if one exists (the pipeline already exists then).
-- `page_url` is the Confluence page, known once the knowledge base was published
-  (`mise run mac publish-knowledge`); null locally, and the console shows
-  `GET /knowledge/{page}` instead. `generated` marks a page MaC wrote itself (`POST /learn`);
+- `page_url` is the Confluence page: from the publish record (`mise run mac publish-knowledge`),
+  or, when Confluence is configured and there is no record, found by title in the space (asked at
+  most every 10 minutes per page, then remembered). Null when Confluence isn't configured; the
+  console then links a Confluence search when `health.confluence_site` is set, else its own
+  `GET /knowledge/{page}` view. `generated` marks a page MaC wrote itself (`POST /learn`);
   `review` is then `{repo, ticket, ticket_url, run_id, …}`.
 - `repos` is every repository in the org (`MAC_GITHUB_REPO`'s owner, via GitHub, cached for a
   minute; `GITHUB_TOKEN` lifts the anonymous rate limit). `service`, `page` and `page_url`
@@ -183,3 +185,61 @@ it was already approved, or when `GITHUB_TOKEN` is missing. Nothing merges by it
 
 Investigations are listed by `GET /runs?migration=<name>` beside the runs they explain, so the
 pipeline page can show "fix proposed" under a failed run.
+
+## Health, run index, active services
+
+- `GET /api/mac/health` → `{llm, model, github, jira, confluence, confluence_site, aws, approvals_live}`: what this
+  deployment has configured, names only. The console greys Launch agent, Learn and Investigate
+  when `llm` is false and says why.
+- `GET /api/mac/run-index?migration=&limit=`: `GET /runs` plus `migration`, `based_on`,
+  `diagnostics_mode`, `autofix` and `active` per run, so lists can link a run to its pipeline and
+  the pipeline page can find the investigation of a failed run.
+- `GET /api/mac/services/active`: one row per declared output of every pipeline (reviewed and
+  generated), `{migration, service, owner_team, source, href, step, name, description, probes,
+  production?, rehearsal?}` where each environment entry is the runner API's
+  (`run_id, value, run_status, expected_live`) plus `last_probe` (the newest probe answer for
+  that output, or null). The Services tab; Ping calls the runner API's probe endpoint.
+- `GET /plans/{id}` now carries `endpoints` like `GET /migrations/{name}`.
+
+## Repositories added by URL
+
+`POST /api/mac/repos {"url": "https://github.com/owner/name"}` → `202` plus a run (mode
+`ingest`, migration `repo/<name>`), `422` for anything that isn't a GitHub repository URL. The
+Reader fetches the repository and its LICENSE from GitHub (a private or missing repo fails the
+run); the Licence checker asks the model to classify it for internal use and modification
+(`{spdx, category, risk: ok | review | confirm | blocked, reason}`), or, without an LLM, applies
+an SPDX rule (permissive → ok, copyleft → review, no licence → confirm); the Compiler records the
+repository in `<MAC_DATA_DIR>/repos.json` and **raises a Jira review ticket** for `review` and
+`blocked`. `confirm` (no licence file) is the adder's own call: `POST /api/mac/repos/{owner}/{name}/accept`
+`{note?}` records `licence.accepted`, `accepted_by`, `accepted_at` (it also works on `review` and
+`blocked`: "proceed anyway", the ticket stays for the record). `GET /services` lists the repo in
+`repos[]` with `custom: true`, `licence` and `page_title`; `DELETE /api/mac/repos/{owner}/{name}`
+removes it.
+
+## Create a Confluence page
+
+`POST /api/mac/knowledge/{page}/publish` creates or updates that one page in Confluence
+(`state.runner.pages`; the parent is linked when it was published before) and records the URL,
+so `page_url` is set from then on. `409` when Confluence isn't configured; `404` for an unknown
+page. For a repository with no page at all, `POST /learn` is the agent that writes and
+publishes one.
+
+## Review of a page MaC wrote
+
+A generated page carries the label `needs-review` until a person signs it off. Its review state
+is on `services[].review.status` and `GET /knowledge/{page}.review.status`:
+`pending | approved | rejected`. When Learn raised a Jira ticket, the state follows the ticket
+(asked at most every 30 s; Approved/Done → `approved`, Rejected/Declined/Won't Do → `rejected`),
+and the page's labels are rewritten (`needs-review` → `reviewed`). Without a ticket the review
+happens in the console: `POST /api/mac/knowledge/{page}/review {"status": "approved" |
+"rejected", "note"?}` (sign-in) records `reviewed_by` / `reviewed_at`, rewrites the labels and
+returns the page view; `409` for a hand-written page, `404` for an unknown one.
+
+## Chat transcripts
+
+The assistant itself is the runner API's `POST /api/mac/chat` ([`api.md`](api.md) → "The
+assistant": a streaming, tool-using agent over Confluence, Jira and MaC's records). That server
+keeps no history, so the console stores each conversation here: `PUT /api/mac/chats/{id}`
+`{title, turns}` (sign-in; id is 6–40 of `[A-Za-z0-9_-]`, the client mints it),
+`GET /api/mac/chats` (newest first), `GET /api/mac/chats/{id}`, `DELETE /api/mac/chats/{id}`.
+Files under `<MAC_DATA_DIR>/chats/`.
