@@ -35,7 +35,7 @@ from mac.graph import Graph, extract
 from mac.integrations import GitHubAPI, IntegrationError, TicketRequest, _request, open_pull_request, read_files
 from mac.knowledge import KnowledgeError, KnowledgePage, load_pages, publish
 from mac.knowledge import render as render_page
-from mac.llm import LLM, describe_providers, parse_json, providers as llm_providers, set_provider
+from mac.llm import DEFAULT_MODEL, LLM, describe_providers, parse_json, providers as llm_providers, set_provider
 from mac.planner import plan, pr_body
 from mac.runner import GateError
 from mac.sources import sections_from_pages
@@ -907,7 +907,10 @@ def health(state: mac_api.State = Depends(mac_api.get_state), config: Planning =
     `llm_providers` are the models that can be switched between; `llm_provider` is the one in use."""
     llm = config.llm_factory is not None
     chosen = describe_providers()
+    # The model in use: the active provider's, else (an LLM injected without keys, as in tests)
+    # the configured or default model name.
     model = next((p["model"] for p in chosen["llm_providers"] if p["active"]), None)
+    model = model or (os.environ.get("MAC_LLM_MODEL") or DEFAULT_MODEL)
     return {"llm": llm, "model": model if llm else None, **chosen,
             "github": bool(os.environ.get("GITHUB_TOKEN")),
             "jira": not isinstance(state.runner.approvals, mac_cli._NoJira),
