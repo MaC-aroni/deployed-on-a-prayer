@@ -9,12 +9,19 @@ from fastapi.testclient import TestClient
 
 from app import mac_api, planning_api
 from app.main import app
+from mac.integrations import IntegrationError
 
 from .conftest import DEMO_SPEC, REPO_ROOT
 from .test_agents import DEMO_TEXT, ScriptedLLM, demo_graph
 
 KNOWLEDGE = REPO_ROOT / "demo-data" / "confluence"
 SERVICE = "ClaimsAdjudicationService"
+FAKE_REPOS = [
+    {"name": "claims-service-iac", "full_name": "MaC-aroni/claims-service-iac", "url": "https://github.com/MaC-aroni/claims-service-iac",
+     "description": "Terraform for the claims service", "pushed_at": 1794100000.0, "archived": False},
+    {"name": "deployed-on-a-prayer", "full_name": "MaC-aroni/deployed-on-a-prayer", "url": "https://github.com/MaC-aroni/deployed-on-a-prayer",
+     "description": "MaC itself", "pushed_at": 1794100100.0, "archived": False},
+]
 
 
 class ExtractingLLM(ScriptedLLM):
@@ -35,8 +42,9 @@ def api(env, tmp_path):
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
     state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn())
     mac_api.configure(state)
-    holder = {"llm": None}
-    planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE))
+    holder = {"llm": None, "repos": lambda: FAKE_REPOS}
+    planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: holder["repos"]()))
     yield TestClient(app), env, holder
     mac_api.configure(None)
     planning_api.configure(None)
@@ -47,9 +55,33 @@ def events(client, run_id, step=None):
     return client.get(f"/api/mac/runs/{run_id}/events{query}").json()
 
 
-def test_services_are_empty_until_the_graph_is_ingested(api):
-    client, _, _ = api
-    assert client.get("/api/mac/services").json() == {"ingested": False, "graph_updated": None, "services": []}
+def by_name(services, name):
+    return next(s for s in services if s["name"] == name)
+
+
+def test_services_come_from_the_knowledge_base_before_anything_is_learned(api):
+    client, _, holder = api
+    data = client.get("/api/mac/services").json()
+    assert data["ingested"] is False and data["graph_updated"] is None
+    assert data["knowledge"]["pages"] >= 10 and data["knowledge"]["dir"] == "confluence"
+    names = [s["name"] for s in data["services"]]
+    assert SERVICE in names and "Claims MCP Tool" in names
+    svc = by_name(data["services"], SERVICE)
+    assert svc["learned"] is False and svc["team"] == "claims-platform" and svc["plans"] == []
+    assert "MaC-aroni/claims-service-iac" in svc["repos"] and svc["description"]
+    # Every repo in the org is listed; the ones a service documents point at it.
+    repos = {r["full_name"]: r for r in data["repos"]}
+    assert repos["MaC-aroni/claims-service-iac"]["service"] == SERVICE
+    assert repos["MaC-aroni/deployed-on-a-prayer"]["service"] is None
+    assert data["repos_error"] is None
+
+    def broken():
+        raise IntegrationError("GET /orgs -> HTTP 403: rate limited")
+
+    holder["repos"] = broken
+    data = client.get("/api/mac/services").json()
+    assert data["repos"] == [] and "rate limited" in data["repos_error"]
+    assert by_name(data["services"], SERVICE)["learned"] is False  # the knowledge base still answers
 
 
 def test_ingest_builds_the_graph_and_reports_every_page(api):
@@ -65,8 +97,9 @@ def test_ingest_builds_the_graph_and_reports_every_page(api):
     assert len(page_lines) == len(holder["llm"].prompts) >= 10
     services = client.get("/api/mac/services").json()
     assert services["ingested"] is True
-    [svc] = services["services"]
-    assert svc["name"] == SERVICE and svc["repos"] == ["MaC-aroni/claims-service-iac"] and svc["plans"] == []
+    svc = by_name(services["services"], SERVICE)
+    assert svc["learned"] is True and "MaC-aroni/claims-service-iac" in svc["repos"] and svc["plans"] == []
+    assert by_name(services["services"], "Claims MCP Tool")["learned"] is False  # the fake graph only knows one
 
 
 def test_plan_shows_each_attempt_writes_the_file_and_lists_it(api):
@@ -103,8 +136,7 @@ def test_plan_shows_each_attempt_writes_the_file_and_lists_it(api):
     assert [s["name"] for s in detail["stages"]] == ["check", "infrastructure", "data", "release", "access", "verify"]
     assert detail["goal"] == f"migrate-{SERVICE.lower()}-to-aws" and detail["yaml"].strip() == DEMO_TEXT.strip()
 
-    [svc] = client.get("/api/mac/services").json()["services"]
-    assert svc["plans"] == [run_id]
+    assert by_name(client.get("/api/mac/services").json()["services"], SERVICE)["plans"] == [run_id]
     # Reviewed migrations are untouched by generated plans.
     assert [m["name"] for m in client.get("/api/mac/migrations").json()] == ["claims-adjudication-onprem-to-aws"]
 

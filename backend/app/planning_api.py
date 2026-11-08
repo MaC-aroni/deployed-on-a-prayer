@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,8 @@ from pydantic import BaseModel
 
 from mac import agents_cli
 from mac.graph import Graph, extract
-from mac.integrations import GitHubAPI, IntegrationError, open_pull_request
+from mac.integrations import GitHubAPI, IntegrationError, _request, open_pull_request
+from mac.knowledge import KnowledgeError, load_pages
 from mac.llm import LLM
 from mac.planner import plan, pr_body
 from mac.spec import Spec, SpecError, load_spec
@@ -38,10 +40,15 @@ KNOWLEDGE_STEP = "knowledge"
 PLAN_STEP = "plan"
 
 
+GITHUB_API = "https://api.github.com"
+GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+
+
 @dataclass
 class Planning:
     llm_factory: Callable[[], LLM] | None  # None: no LLM configured here
     knowledge_dir: Path
+    repo_lister: Callable[[], list[dict]] | None = None  # None: GitHub, the org of MAC_GITHUB_REPO
 
 
 _config: Planning | None = None
@@ -199,29 +206,112 @@ def ingest(state: mac_api.State = Depends(mac_api.get_state), config: Planning =
 # ---- Services --------------------------------------------------------------------------------
 
 
+def _org() -> str:
+    return os.environ.get("MAC_GITHUB_REPO", "MaC-aroni/deployed-on-a-prayer").split("/")[0]
+
+
+def _epoch(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+_repo_cache: dict = {"at": 0.0, "repos": None}
+
+
+def _github_repos() -> list[dict]:
+    """Every repo in the org, newest push first. Cached for a minute to stay inside rate limits."""
+    if _repo_cache["repos"] is not None and time.time() - _repo_cache["at"] < 60:
+        return _repo_cache["repos"]
+    headers = dict(GITHUB_HEADERS)
+    if os.environ.get("GITHUB_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
+    reply = _request(f"{GITHUB_API}/orgs/{_org()}/repos?per_page=100&sort=pushed", headers) or []
+    repos = [{"name": r["name"], "full_name": r["full_name"], "url": r.get("html_url"),
+              "description": r.get("description"), "pushed_at": _epoch(r.get("pushed_at")),
+              "archived": bool(r.get("archived"))} for r in reply]
+    _repo_cache.update(at=time.time(), repos=repos)
+    return repos
+
+
+def _knowledge_services(config: Planning) -> tuple[list[dict], int]:
+    """Services the knowledge base documents (pages labelled `service`), with the repos each
+    page mentions. No model call: this is what the Migrate page shows before anything is learned."""
+    try:
+        pages = load_pages(config.knowledge_dir)
+    except (KnowledgeError, OSError):
+        return [], 0
+    repo_re = re.compile(rf"{re.escape(_org())}/[A-Za-z0-9_-]+", re.I)
+    out = []
+    for page in pages:
+        if "service" not in {label.lower() for label in page.labels}:
+            continue
+        name = page.title.split(":", 1)[1].strip() if ":" in page.title else page.title.strip()
+        repos = sorted({m.group(0) for m in repo_re.finditer(page.body)}, key=str.lower)
+        description = next((line.strip() for line in page.body.splitlines()
+                            if line.strip() and not line.lstrip().startswith(("#", "-", "|", "*", "```"))), "")
+        first = re.split(r"(?<=[.!?])\s", description, maxsplit=1)[0]  # the first sentence reads best on a card
+        description = first if len(first) <= 160 else description[:157].rstrip() + "…"
+        out.append({"name": name, "page": page.id, "team": page.owner or None, "description": description,
+                    "repos": repos, "approvers": [], "sources": [], "learned": False})
+    return out, len(pages)
+
+
 def _service_view(graph: Graph, node, plans_by_service: dict[str, list[str]]) -> dict:
     near = graph.neighbors(node.key, depth=1)
     wider = graph.neighbors(node.key, depth=2)
-    repos = sorted({n.name for n in near.nodes.values() if n.type == "repo"})
+    repos = sorted({n.name for n in near.nodes.values() if n.type == "repo"}, key=str.lower)
     teams = sorted({graph.nodes[e.source].name for e in graph.edges
                     if e.type == "owns" and e.target == node.key and e.source in graph.nodes})
     approvers = sorted({n.name.strip("`") for n in wider.nodes.values() if n.type == "approver"})
-    return {"name": node.name, "description": node.description, "team": teams[0] if teams else None,
-            "repos": repos, "approvers": approvers, "sources": node.sources,
+    return {"name": node.name, "page": None, "description": node.description, "team": teams[0] if teams else None,
+            "repos": repos, "approvers": approvers, "sources": node.sources, "learned": True,
             "plans": plans_by_service.get(node.name.lower(), [])}
 
 
 @router.get("/services")
-def services(state: mac_api.State = Depends(mac_api.get_state)):
-    graph = _load_graph(state)
-    if graph is None:
-        return {"ingested": False, "graph_updated": None, "services": []}
+def services(state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config)):
+    """What can be migrated: the knowledge base's services (always), enriched by the graph once
+    it's learned, plus every repo in the org so nothing is hidden."""
     plans_by_service: dict[str, list[str]] = {}
     for run_id, spec in _generated(state):
         plans_by_service.setdefault(spec.metadata.service.lower(), []).append(run_id)
-    nodes = sorted((n for n in graph.nodes.values() if n.type == "service"), key=lambda n: n.name)
-    return {"ingested": True, "graph_updated": _graph_path(state).stat().st_mtime,
-            "services": [_service_view(graph, n, plans_by_service) for n in nodes]}
+
+    base, page_count = _knowledge_services(config)
+    by_name = {s["name"].lower(): s for s in base}
+    graph = _load_graph(state)
+    if graph is not None:
+        for node in graph.nodes.values():
+            if node.type != "service":
+                continue
+            view = _service_view(graph, node, plans_by_service)
+            cur = by_name.get(node.name.lower())
+            if cur is None:
+                by_name[node.name.lower()] = view
+                continue
+            cur.update(learned=True, approvers=view["approvers"], sources=view["sources"],
+                       repos=sorted(set(cur["repos"]) | set(view["repos"]), key=str.lower),
+                       team=cur["team"] or view["team"], description=cur["description"] or view["description"])
+    for svc in by_name.values():
+        svc["plans"] = plans_by_service.get(svc["name"].lower(), [])
+
+    repos, repos_error = [], None
+    try:
+        repos = [dict(r) for r in (config.repo_lister or _github_repos)()]
+    except IntegrationError as e:
+        repos_error = str(e)
+    owner_of = {repo.lower(): svc["name"] for svc in by_name.values() for repo in svc["repos"]}
+    for repo in repos:
+        repo["service"] = owner_of.get(repo["full_name"].lower())
+
+    return {"ingested": graph is not None,
+            "graph_updated": _graph_path(state).stat().st_mtime if graph is not None else None,
+            "knowledge": {"pages": page_count, "dir": config.knowledge_dir.name},
+            "services": sorted(by_name.values(), key=lambda s: s["name"].lower()),
+            "repos": repos, "repos_error": repos_error}
 
 
 # ---- Plan ------------------------------------------------------------------------------------

@@ -16,16 +16,25 @@ the graph is `<MAC_DATA_DIR>/graph.json`, shared with `mise run mac ingest`.
 
 ## Services
 
-`GET /api/mac/services`: what can be migrated, from the knowledge graph.
+`GET /api/mac/services`: what can be migrated. Always answers, graph or not.
 ```json
-{"ingested": true, "graph_updated": 1794130000.1,
- "services": [{"name": "ClaimsAdjudicationService", "description": "…", "team": "claims-platform",
-               "repos": ["MaC-aroni/claims-service-iac", "MaC-aroni/claims-db-migrate"],
-               "approvers": ["tech-risk", "manager"], "sources": ["service-claims-adjudication#overview"],
-               "plans": ["8b8138e9c3fd"]}]}
+{"ingested": false, "graph_updated": null, "knowledge": {"pages": 15, "dir": "confluence"},
+ "services": [{"name": "ClaimsAdjudicationService", "page": "service-claims-adjudication",
+               "team": "claims-platform", "description": "ClaimsAdjudicationService decides medical claims…",
+               "repos": ["MaC-aroni/claims-db-migrate", "MaC-aroni/claims-service-iac"],
+               "learned": false, "approvers": [], "sources": [], "plans": []}],
+ "repos": [{"name": "claims-service-iac", "full_name": "MaC-aroni/claims-service-iac", "url": "https://github.com/…",
+            "description": "…", "pushed_at": 1794100000.0, "archived": false, "service": "ClaimsAdjudicationService"}],
+ "repos_error": null}
 ```
-`ingested` is false (and `services` empty) until the graph exists: offer **Ingest**. `plans` are
-the ids of generated plans for that service (see below).
+- `services` come from the knowledge base without any model call: pages whose `labels` include
+  `service`, with the repos each page mentions. Once the graph exists (`ingested: true`) each
+  service is enriched from it and `learned` turns true; `approvers` and `sources` come from the
+  graph. `plans` are the ids of generated plans for that service.
+- `repos` is every repository in the org (`MAC_GITHUB_REPO`'s owner, via GitHub, cached for a
+  minute; `GITHUB_TOKEN` lifts the anonymous rate limit). `service` names the documented service
+  that uses the repo, or is null: the Planner only plans with documented repos. If GitHub can't
+  be reached, `repos` is empty and `repos_error` says why.
 
 ## Ingest
 
