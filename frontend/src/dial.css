@@ -1590,3 +1590,45 @@ h2,
   display: block;
   white-space: nowrap;
 }
+
+/* ---------- the model switch (teammates' addition, skinned for the dial) ---------- */
+.model-switch {
+  background: transparent;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 10px 10px;
+  margin-bottom: 6px;
+}
+.model-switch-label {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--faint);
+}
+.model-switch-label svg {
+  color: var(--gilt);
+}
+.model-switch .segmented {
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: transparent;
+  padding: 0;
+}
+.model-switch .seg {
+  border-radius: 0;
+  font-size: 12px;
+  height: 28px;
+}
+.model-switch .seg + .seg {
+  border-left: 1px solid var(--line);
+}
+.model-switch .seg.active {
+  background: var(--fg);
+  color: var(--bg);
+}
+@media (min-resolution: 2dppx) {
+  .model-switch,
+  .model-switch .segmented,
+  .model-switch .seg + .seg {
+    border-width: 0.5px;
+  }
+}
