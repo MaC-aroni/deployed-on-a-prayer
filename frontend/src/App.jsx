@@ -1,15 +1,13 @@
 import "./styles.css";
 import Shell, { EmptyState } from "./components/Shell.jsx";
-import Approvals from "./pages/Approvals.jsx";
+import Demo from "./pages/Demo.jsx";
 import Migration from "./pages/Migration.jsx";
 import Migrations from "./pages/Migrations.jsx";
+import Runs from "./pages/Runs.jsx";
 import Excuses from "./Excuses.jsx";
 import { RouterProvider, matchPath, usePath } from "./router.jsx";
 
-const PROJECT = [
-  { label: "MaC-aroni", to: "/" },
-  { label: "claims-adjudication", to: "/" },
-];
+const ORG = { label: "MaC-aroni", to: "/" };
 
 function Routes() {
   const path = usePath();
@@ -17,36 +15,43 @@ function Routes() {
 
   if (path === "/" || path === "/migrations") {
     return (
-      <Shell crumbs={[...PROJECT, { label: "Migrations" }]}>
+      <Shell crumbs={[ORG, { label: "Migrations" }]}>
         <Migrations />
       </Shell>
     );
   }
-  if ((m = matchPath("/migrations/:id", path))) {
+  if ((m = matchPath("/migrations/:name", path))) {
+    const initialRun = new URLSearchParams(window.location.search).get("run");
     return (
-      <Shell crumbs={[...PROJECT, { label: "Migrations", to: "/migrations" }, { label: `#${m.id}` }]}>
-        <Migration id={m.id} />
+      <Shell crumbs={[ORG, { label: "Migrations", to: "/migrations" }, { label: m.name }]}>
+        <Migration key={m.name} name={m.name} initialRun={initialRun} />
       </Shell>
     );
   }
-  if (path === "/approvals") {
+  if (path === "/runs") {
     return (
-      <Shell crumbs={[...PROJECT, { label: "Approvals" }]}>
-        <Approvals />
+      <Shell crumbs={[ORG, { label: "Runs" }]}>
+        <Runs />
+      </Shell>
+    );
+  }
+  if (path === "/demo") {
+    return (
+      <Shell crumbs={[ORG, { label: "Pitch demo" }]}>
+        <Demo />
       </Shell>
     );
   }
   if (path === "/excuses") {
     return (
-      <Shell crumbs={[...PROJECT, { label: "Excuses" }]}>
+      <Shell crumbs={[ORG, { label: "Excuses" }]}>
         <Excuses />
       </Shell>
     );
   }
-  const label = path === "/knowledge" ? "Knowledge graph" : path === "/runs" ? "Runner" : "Not found";
   return (
-    <Shell crumbs={[...PROJECT, { label }]}>
-      <EmptyState title={label} body="Not in the first mock. The pipeline view at Migrations → #142 is the demo." />
+    <Shell crumbs={[ORG, { label: "Not found" }]}>
+      <EmptyState title="Not found" body="Try Migrations." />
     </Shell>
   );
 }

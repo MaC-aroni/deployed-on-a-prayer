@@ -15,17 +15,7 @@ export const STAGES = [
   { id: "recover", name: "Recover" },
 ];
 
-export const STATUS = {
-  succeeded: { label: "Succeeded", tone: "green" },
-  approved: { label: "Approved", tone: "green" },
-  failed: { label: "Failed", tone: "red" },
-  running: { label: "Running", tone: "blue" },
-  pending: { label: "Pending", tone: "grey" },
-  blocked: { label: "Awaiting approval", tone: "amber" },
-  manual: { label: "Manual gate", tone: "amber" },
-  rolled_back: { label: "Rolled back", tone: "orange" },
-  skipped: { label: "Skipped", tone: "grey" },
-};
+export { STATUS, RUN_STATUS } from "../status.js";
 
 export const RUN = {
   id: 142,
@@ -115,16 +105,6 @@ export function runStatusAt(t = NOW) {
   if (statuses.every((x) => x === "succeeded" || x === "approved")) return "passed";
   return "pending";
 }
-
-export const RUN_STATUS = {
-  passed: { label: "Passed", tone: "green" },
-  running: { label: "Running", tone: "blue" },
-  blocked: { label: "Blocked", tone: "amber" },
-  failed: { label: "Failed", tone: "red" },
-  recovering: { label: "Recovering", tone: "violet" },
-  rolled_back: { label: "Rolled back", tone: "orange" },
-  pending: { label: "Pending", tone: "grey" },
-};
 
 // ---- Agent traces: observation → reasoning → action → outcome -------------
 

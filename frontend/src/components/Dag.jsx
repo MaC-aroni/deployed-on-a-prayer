@@ -1,20 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Hand, Lock, RotateCw, Sparkles } from "lucide-react";
 import StatusIcon from "./StatusIcon.jsx";
-import { STAGES, stageStatusAt, statusAt } from "../data/mock.js";
 import { cx } from "../lib.js";
 
-const GUTTER = 22; // room on the left of each column for same-column edges
+// Generic pipeline graph: columns of step cards with bezier dependency edges.
+//   columns: [{ id, name, status, steps: [{ id, name, sub, status, agent, aside }] }]
+//   edges:   [{ from, to }]  (step ids)
+// Same-column edges route through a gutter on the column's left.
 
-function adjacency(steps) {
-  const parents = {};
-  const children = {};
-  for (const s of steps) {
-    parents[s.id] = s.needs;
-    for (const n of s.needs) (children[n] ||= []).push(s.id);
-  }
-  return { parents, children };
-}
+const GUTTER = 22;
 
 function collect(id, map) {
   const out = new Set();
@@ -42,15 +35,7 @@ function edgePath(a, b, sameColumn) {
   return `M${x},${y1} C${bulge},${y1} ${bulge},${y2} ${x},${y2}`;
 }
 
-function Aside({ step, status }) {
-  if (step.type === "agent") return <Sparkles size={14} className="node-aside nemotron" />;
-  if (step.type === "approval") return <Lock size={14} className="node-aside" />;
-  if (step.gate === "manual") return <Hand size={14} className="node-aside" />;
-  if (status === "failed" || status === "rolled_back") return <RotateCw size={14} className="node-aside" />;
-  return <span className="node-aside" />;
-}
-
-export default function Dag({ steps, t, selectedId, onSelect, showDeps = true, fit = true }) {
+export default function Dag({ columns, edges, selectedId, onSelect, showDeps = true, fit = true, emptyHint }) {
   const outerRef = useRef(null);
   const canvasRef = useRef(null);
   const nodeEls = useRef(new Map());
@@ -58,11 +43,22 @@ export default function Dag({ steps, t, selectedId, onSelect, showDeps = true, f
   const [avail, setAvail] = useState(0);
   const [hover, setHover] = useState(null);
 
-  const { parents, children } = useMemo(() => adjacency(steps), [steps]);
-  const columnOf = useMemo(() => Object.fromEntries(steps.map((s) => [s.id, s.stage])), [steps]);
-  const edges = useMemo(() => steps.flatMap((s) => s.needs.map((n) => ({ from: n, to: s.id }))), [steps]);
+  const columnOf = useMemo(() => {
+    const m = {};
+    for (const c of columns) for (const s of c.steps) m[s.id] = c.id;
+    return m;
+  }, [columns]);
 
-  // Lineage follows the hovered node only; selection is shown with a ring.
+  const { parents, children } = useMemo(() => {
+    const parents = {};
+    const children = {};
+    for (const { from, to } of edges) {
+      (parents[to] ||= []).push(from);
+      (children[from] ||= []).push(to);
+    }
+    return { parents, children };
+  }, [edges]);
+
   const lineage = useMemo(() => {
     if (!hover) return null;
     return new Set([hover, ...collect(hover, parents), ...collect(hover, children)]);
@@ -79,7 +75,7 @@ export default function Dag({ steps, t, selectedId, onSelect, showDeps = true, f
     if (outerRef.current) setAvail(outerRef.current.clientWidth);
   }, []);
 
-  useLayoutEffect(measure, [measure, steps]);
+  useLayoutEffect(measure, [measure, columns]);
   useEffect(() => {
     const ro = new ResizeObserver(measure);
     if (outerRef.current) ro.observe(outerRef.current);
@@ -90,6 +86,8 @@ export default function Dag({ steps, t, selectedId, onSelect, showDeps = true, f
 
   // Shrink to fit, but never below a readable size; past that the canvas scrolls.
   const scale = fit && geo.w > 0 && avail > 0 ? Math.max(0.62, Math.min(1, avail / geo.w)) : 1;
+
+  if (!columns.length) return <div className="dag-empty muted">{emptyHint ?? "Nothing to draw."}</div>;
 
   return (
     <div className="dag-outer" ref={outerRef} style={{ height: geo.h ? geo.h * scale : undefined }}>
@@ -102,53 +100,43 @@ export default function Dag({ steps, t, selectedId, onSelect, showDeps = true, f
               if (!a || !b) return null;
               const lit = lineage ? lineage.has(from) && lineage.has(to) : false;
               const dim = lineage ? !lit : false;
-              return (
-                <path
-                  key={`${from}->${to}`}
-                  d={edgePath(a, b, columnOf[from] === columnOf[to])}
-                  className={cx("edge", { lit, dim })}
-                />
-              );
+              return <path key={`${from}->${to}`} d={edgePath(a, b, columnOf[from] === columnOf[to])} className={cx("edge", { lit, dim })} />;
             })}
           </svg>
         )}
 
-        {STAGES.map((stage) => {
-          const inStage = steps.filter((s) => s.stage === stage.id);
-          return (
-            <section className="col" key={stage.id}>
-              <header className="col-head">
-                <StatusIcon status={stageStatusAt(stage.id, t)} size={16} />
-                <span className="col-name">{stage.name}</span>
-                <span className="col-count">{inStage.length}</span>
-              </header>
-              <div className="col-card">
-                {inStage.map((step) => {
-                  const status = statusAt(step, t);
-                  const dim = lineage ? !lineage.has(step.id) : false;
-                  return (
-                    <button
-                      key={step.id}
-                      type="button"
-                      ref={(el) => nodeEls.current.set(step.id, el)}
-                      className={cx("node", `is-${status}`, { selected: step.id === selectedId, dim, agent: step.type === "agent" })}
-                      onClick={() => onSelect(step.id)}
-                      onMouseEnter={() => setHover(step.id)}
-                      onMouseLeave={() => setHover(null)}
-                    >
-                      <StatusIcon status={status} size={26} agent={step.type === "agent"} />
-                      <span className="node-text">
-                        <span className="node-name">{step.name}</span>
-                        <span className="node-sub">{step.sub}</span>
-                      </span>
-                      <Aside step={step} status={status} />
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+        {columns.map((col) => (
+          <section className="col" key={col.id}>
+            <header className="col-head">
+              <StatusIcon status={col.status ?? "pending"} size={16} />
+              <span className="col-name">{col.name}</span>
+              <span className="col-count">{col.steps.length}</span>
+            </header>
+            <div className="col-card">
+              {col.steps.map((step) => {
+                const dim = lineage ? !lineage.has(step.id) : false;
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    ref={(el) => nodeEls.current.set(step.id, el)}
+                    className={cx("node", `is-${step.status}`, { selected: step.id === selectedId, dim, agent: step.agent })}
+                    onClick={() => onSelect?.(step.id)}
+                    onMouseEnter={() => setHover(step.id)}
+                    onMouseLeave={() => setHover(null)}
+                  >
+                    <StatusIcon status={step.status} size={26} agent={step.agent} />
+                    <span className="node-text">
+                      <span className="node-name">{step.name}</span>
+                      {step.sub && <span className="node-sub">{step.sub}</span>}
+                    </span>
+                    <span className="node-aside">{step.aside}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );

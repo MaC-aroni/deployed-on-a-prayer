@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, Sparkles, X } from "lucide-react";
 import StatusIcon, { Pill } from "./StatusIcon.jsx";
-import { LOGS, SPECS, STAGES, STATUS, TRACES, durationAt, statusAt } from "../data/mock.js";
+import { LOGS, SPECS, STAGES, TRACES, durationAt, statusAt } from "../data/mock.js";
+import { STATUS } from "../status.js";
 import { cx, fmtDuration } from "../lib.js";
 
 function Typewriter({ text, active }) {

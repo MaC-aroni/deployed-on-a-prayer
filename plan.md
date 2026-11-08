@@ -23,11 +23,38 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
 | Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review (set up locally, waiting to be created) |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
-| Not built yet | Real credentials (Zafeer), UI, API endpoints for the agents |
+| UI | `frontend/`: GitLab-style pipeline console over `/api/mac` (migrations, Build/Rehearse/Deploy, live DAG, step logs, approvals, Build report, run history), plus a mock pitch page at `/demo` |
+| Not built yet | Real credentials (Zafeer), API endpoints for the agents |
 
 ---
 
 ## Entries
+
+### 2026-11-08: The UI, against `/api/mac` (Elathius, with Claude Code)
+
+#### What changed
+- **The pipeline console** in `frontend/`, in the GitLab pipeline style the team picked:
+  - `/migrations`: every migration the runner knows, with its latest Build, Rehearse and Deploy.
+  - `/migrations/<name>`: stages as columns, steps as cards coloured by the runner's step
+    states, dependency lines (explicit `needs`, else stage order), and the top-bar buttons
+    **Build · Rehearse · Deploy** with the **Explain · Report · Auto-fix** selector. Buttons
+    are only greyed as a hint; the server's `409` reason is shown as it is.
+  - A selected step opens a panel under the graph with its logs (live over the SSE stream),
+    repo and locked commit, undo, and a **Play** button when the step is `waiting`.
+  - Tabs for **Approvals** (ticket, chain, design page, why it's waiting), the **Build
+    report** (locked commits, guardrails, approvals, design page), **Activity** (the run's
+    events) and **History**. `Resume` and `Undo` appear when the run allows them.
+  - `/runs`: run history across migrations. `/demo`: the pitch rehearsal on mock data with
+    Nemotron reasoning traces, kept until the agent endpoints exist.
+  - An **API token** box in the sidebar stores `MAC_API_TOKEN` in `localStorage` for Fly.
+- The frontend has one new dependency, `lucide-react` (icons).
+
+#### How to adapt
+- Run `mise run dev-local` and open http://localhost:5173. Put `GITHUB_TOKEN` in
+  `backend/.env`, or repeated Builds hit GitHub's anonymous rate limit.
+- **API changes:** the UI reads exactly the fields in `docs/api.md`. New step states or run
+  statuses need a colour in `frontend/src/status.js`.
+- **Agent endpoints:** when they exist, the `/demo` page's traces should come from them.
 
 ### 2026-11-07: The four agents (ob1-can-obi, with Claude Code)
 

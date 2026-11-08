@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { Activity, ChevronRight, ListChecks, Network, PanelLeft, Plus, Search, Sparkles, Workflow } from "lucide-react";
+import { Activity, ChevronRight, KeyRound, PanelLeft, Presentation, Search, Sparkles, Workflow } from "lucide-react";
+import { getToken, setToken } from "../api.js";
 import { Link, usePath } from "../router.jsx";
 import { cx } from "../lib.js";
 
 const NAV = [
   { to: "/migrations", label: "Migrations", Icon: Workflow, match: (p) => p === "/" || p.startsWith("/migrations") },
-  { to: "/approvals", label: "Approvals", Icon: ListChecks, match: (p) => p.startsWith("/approvals") },
-  { to: "/knowledge", label: "Knowledge graph", Icon: Network, match: (p) => p.startsWith("/knowledge") },
-  { to: "/runs", label: "Runner", Icon: Activity, match: (p) => p.startsWith("/runs") },
+  { to: "/runs", label: "Runs", Icon: Activity, match: (p) => p.startsWith("/runs") },
+  { to: "/demo", label: "Pitch demo", Icon: Presentation, match: (p) => p.startsWith("/demo") },
 ];
 
 const COLLAPSE_KEY = "mac.sidebar.collapsed";
@@ -20,7 +20,39 @@ function readCollapsed() {
   }
 }
 
-export default function Shell({ crumbs = [], children }) {
+function TokenBox() {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(getToken);
+  const has = Boolean(getToken());
+  function save() {
+    setToken(value.trim());
+    setOpen(false);
+  }
+  return (
+    <div className="token">
+      <button className="token-toggle" onClick={() => setOpen((v) => !v)} title="MaC API token (only needed on Fly)">
+        <KeyRound size={14} />
+        <span>{has ? "API token set" : "API token"}</span>
+      </button>
+      {open && (
+        <form
+          className="token-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <input type="password" placeholder="Bearer token for /api/mac on Fly" value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" />
+          <button className="btn" type="submit">
+            Save
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+export default function Shell({ crumbs = [], actions, children }) {
   const path = usePath();
   const [collapsed, setCollapsed] = useState(readCollapsed);
   useEffect(() => {
@@ -50,7 +82,7 @@ export default function Shell({ crumbs = [], children }) {
           <kbd>/</kbd>
         </label>
 
-        <div className="nav-section">Project</div>
+        <div className="nav-section">Prayerwell Health</div>
         <nav className="nav">
           {NAV.map(({ to, label, Icon, match }) => (
             <Link key={to} to={to} className={cx("nav-item", { active: match(path) })} title={label}>
@@ -61,12 +93,7 @@ export default function Shell({ crumbs = [], children }) {
         </nav>
 
         <div className="sidebar-foot">
-          <div className="env">
-            <span className="env-dot" />
-            <span>
-              AWS sandbox · <span className="mono">us-east-1</span>
-            </span>
-          </div>
+          <TokenBox />
           <div className="who">
             <span className="avatar">E</span>
             <span>Elathius</span>
@@ -89,12 +116,7 @@ export default function Shell({ crumbs = [], children }) {
               ))}
             </nav>
           </div>
-          <div className="topbar-actions">
-            <button className="btn btn-primary">
-              <Plus size={15} />
-              New migration
-            </button>
-          </div>
+          <div className="topbar-actions">{actions}</div>
         </header>
         <div className="content">{children}</div>
       </div>
@@ -102,11 +124,12 @@ export default function Shell({ crumbs = [], children }) {
   );
 }
 
-export function EmptyState({ title, body }) {
+export function EmptyState({ title, body, children }) {
   return (
     <div className="empty">
       <h2>{title}</h2>
       {body && <p>{body}</p>}
+      {children}
     </div>
   );
 }
