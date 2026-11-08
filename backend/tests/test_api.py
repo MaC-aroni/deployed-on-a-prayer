@@ -201,11 +201,23 @@ def test_a_crash_mid_build_is_failed_not_rollback_failed(api, env):
     run_id = client.post(f"/api/mac/migrations/{NAME}/build").json()["id"]
     run = latest_run(client, run_id)
     assert run["status"] == "failed" and "timed out" in run["reason"]
+    assert "running" not in run["steps"].values() and "pending" not in run["steps"].values()
 
 
-def test_recover_fails_a_build_cut_short(env, spec_path):
+def test_recover_fails_a_build_cut_short_and_settles_its_steps(env, spec_path):
     stuck = env.runner.start_build(spec_path)
     stuck.next_action, stuck.status = None, RunStatus.RUNNING
+    stuck.steps = {"preflight": "succeeded", "provision_storage": "running", "provision_iam": "pending"}
     env.store.save(stuck)
     assert env.runner.recover() == []
-    assert env.store.get(stuck.id).status == RunStatus.FAILED
+    after = env.store.get(stuck.id)
+    assert after.status == RunStatus.FAILED and after.failed_step == "provision_storage"
+    assert after.steps == {"preflight": "succeeded", "provision_storage": "failed", "provision_iam": "skipped"}
+
+
+def test_recover_repairs_a_finished_run_left_with_running_steps(env, spec_path):
+    old = env.runner.build(spec_path)
+    old.steps["provision_storage"] = "running"  # as the server left it before settle() existed
+    env.store.save(old)
+    env.runner.recover()
+    assert env.store.get(old.id).steps["provision_storage"] == "failed"
