@@ -2,6 +2,7 @@
 everything the runner needs to continue lives here, not in memory."""
 
 import sqlite3
+import json
 import threading
 import time
 import uuid
@@ -56,6 +57,7 @@ class RunRecord(BaseModel):
     reason: str | None = None
     diagnostics_mode: str = "explain"
     report: dict = {}  # Build: guardrails, approvals, plans, issues
+    outputs: dict[str, dict[str, str]] = {}  # step id -> declared output name -> value, e.g. the service URL
     based_on: str | None = None  # the Build (for Rehearse) or Rehearse (for Deploy) this relies on
     created: float = Field(default_factory=time.time)
     updated: float = Field(default_factory=time.time)
@@ -76,6 +78,14 @@ class Ticket(BaseModel):
     url: str
 
 
+class ApprovalRecord(BaseModel):
+    """The last known state of one approval for one version of the plan."""
+    approval: str
+    status: str  # approved | pending | rejected | unknown
+    detail: str
+    checked: float
+
+
 class DesignPage(BaseModel):
     page_id: str
     url: str
@@ -86,8 +96,13 @@ class Store:
     def __init__(self, path: Path | str):
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self.db = sqlite3.connect(str(path), check_same_thread=False, timeout=10)
         self.lock = threading.Lock()
+        # WAL lets the API read run history while a run is writing hundreds of log lines; the
+        # default journal made readers wait on the writer, which stalled the live stream and the
+        # health check. NORMAL sync is safe in WAL mode and skips an fsync per log line.
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
         self.listeners: list[Callable[[Event], None]] = []
         with self.lock, self.db:
             self.db.executescript(
@@ -117,6 +132,18 @@ class Store:
                 CREATE TABLE IF NOT EXISTS designs (
                     migration TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
                     digest TEXT NOT NULL, updated REAL NOT NULL);
+                -- Every probe of a step output (a signed request to the deployed service): the
+                -- before/after record of what AWS answered.
+                CREATE TABLE IF NOT EXISTS probes (
+                    run_id TEXT NOT NULL, step TEXT NOT NULL, output TEXT NOT NULL, probe TEXT NOT NULL,
+                    ts REAL NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS probes_by_run ON probes (run_id, ts);
+                -- Each approval's last known Jira state, so the UI can show it without a Build
+                -- and the poller can tell what changed.
+                CREATE TABLE IF NOT EXISTS approval_status (
+                    migration TEXT NOT NULL, digest TEXT NOT NULL, approval TEXT NOT NULL,
+                    status TEXT NOT NULL, detail TEXT NOT NULL, checked REAL NOT NULL,
+                    PRIMARY KEY (migration, digest, approval));
                 """
             )
 
@@ -166,6 +193,36 @@ class Store:
             rows = self.db.execute("SELECT approval, key, url FROM tickets WHERE migration = ? AND digest = ?",
                                    (migration, digest)).fetchall()
         return {r[0]: Ticket(approval=r[0], key=r[1], url=r[2]) for r in rows}
+
+    def add_probe(self, run_id: str, step: str, output: str, probe: str, data: dict) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO probes VALUES (?, ?, ?, ?, ?, ?)",
+                            (run_id, step, output, probe, data["checked"], json.dumps(data)))
+
+    def probes(self, run_id: str, limit: int = 100) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT data FROM probes WHERE run_id = ? ORDER BY ts DESC LIMIT ?",
+                                   (run_id, limit)).fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def ticket_owner(self, key: str) -> tuple[str, str] | None:
+        """(migration, digest) whose approval this Jira ticket belongs to, if MaC raised it."""
+        with self.lock:
+            row = self.db.execute("SELECT migration, digest FROM tickets WHERE key = ?", (key,)).fetchone()
+        return (row[0], row[1]) if row else None
+
+    def approval_records(self, migration: str, digest: str) -> dict[str, ApprovalRecord]:
+        with self.lock:
+            rows = self.db.execute("SELECT approval, status, detail, checked FROM approval_status "
+                                   "WHERE migration = ? AND digest = ?", (migration, digest)).fetchall()
+        return {r[0]: ApprovalRecord(approval=r[0], status=r[1], detail=r[2], checked=r[3]) for r in rows}
+
+    def save_approval_record(self, migration: str, digest: str, record: ApprovalRecord) -> None:
+        with self.lock, self.db:
+            self.db.execute(
+                "INSERT INTO approval_status VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (migration, digest, approval) "
+                "DO UPDATE SET status = excluded.status, detail = excluded.detail, checked = excluded.checked",
+                (migration, digest, record.approval, record.status, record.detail, record.checked))
 
     def design(self, migration: str) -> "DesignPage | None":
         with self.lock:

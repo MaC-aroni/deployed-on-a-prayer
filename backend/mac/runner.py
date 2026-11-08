@@ -14,14 +14,16 @@ background: `start_*` / `request_*` check the rules and record what should happe
 """
 
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .design import DesignWriter, facts, page_title, render_page
 from .diagnostics import Diagnostician, Failure, Mode, NotConfigured
 from .executors import Executor, StepContext, StepFailed
 from .integrations import Approvals, GitHub, IntegrationError, Pages, TicketRequest
-from .spec import SELF_ROLLBACK_ON_FAILURE, Approval, Spec, SpecError, Step, StepType, parse_spec
-from .store import DesignPage, RunRecord, RunStatus, StepState, Store, Ticket
+from .spec import SELF_ROLLBACK_ON_FAILURE, Approval, Spec, SpecError, Step, StepType, load_spec, parse_spec
+from .store import ApprovalRecord, DesignPage, RunRecord, RunStatus, StepState, Store, Ticket
 from .validate import execution_order, follows_a_change, validate
 
 
@@ -176,11 +178,31 @@ class Runner:
             if run.next_action is not None and run.status.active:
                 queued.append(run.id)
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK) and run.mode == "build":
+                self.settle(run)
                 self._finish(run, RunStatus.FAILED, "the runner restarted in the middle of this Build; run it again")
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK):
+                self.settle(run, RunStatus.ROLLBACK_FAILED)
                 self._finish(run, RunStatus.ROLLBACK_FAILED,
                              "the runner restarted in the middle of this run; check what it left behind")
+            elif not run.status.active and self._unsettled(run):
+                self.settle(run, run.status)  # a finished run from before this repair existed
         return queued
+
+    def _unsettled(self, run: RunRecord) -> bool:
+        return any(s in (StepState.RUNNING, StepState.PENDING, StepState.BLOCKED, StepState.WAITING)
+                   for s in run.steps.values())
+
+    def settle(self, run: RunRecord, status: RunStatus = RunStatus.FAILED) -> None:
+        """A run that died mid-work can't leave steps running or pending: the step that was running
+        is failed (or rollback_failed, if the run was undoing), and the rest were never reached."""
+        for step_id, state in run.steps.items():
+            if state == StepState.RUNNING:
+                run.steps[step_id] = StepState.ROLLBACK_FAILED if status == RunStatus.ROLLBACK_FAILED else StepState.FAILED
+                run.failed_step = run.failed_step or step_id
+                self._event(run, "step", f"{step_id}: {run.steps[step_id]}", step_id)
+            elif state in (StepState.PENDING, StepState.BLOCKED, StepState.WAITING):
+                run.steps[step_id] = StepState.SKIPPED
+        self.store.save(run)
 
     def _do_build(self, run: RunRecord, spec: Spec) -> RunRecord:
         issues = validate(spec)
@@ -218,7 +240,9 @@ class Runner:
 
             if run.mode == "deploy" and step.requires_approval:
                 try:
-                    states = {a: self._approval_state(run, spec, spec.approval(a)) for a in step.requires_approval}
+                    log = lambda m: self._event(run, "log", m)  # noqa: E731
+                    states = {a: self._approval_state(run.migration, run.spec_digest, spec, spec.approval(a), log)
+                              for a in step.requires_approval}
                 except IntegrationError as e:
                     return self._wait(run, step, StepState.BLOCKED, f"couldn't check approvals: {e}")
                 rejected = [f"{a} ({detail})" for a, (status, detail) in states.items() if status == "rejected"]
@@ -234,7 +258,8 @@ class Runner:
             self._set(run, step, StepState.RUNNING)
             try:
                 ctx = self._context(run, spec, step)
-                self.executor.execute(ctx, "run")
+                produced = self.executor.execute(ctx, "run") or {}
+                self._record_outputs(run, step, produced)
                 if step.verify:
                     self.executor.execute(ctx, "verify")
             except Exception as e:  # noqa: BLE001 - any failure, even a runner bug, must trigger undo
@@ -313,54 +338,96 @@ class Runner:
     def _report_approvals(self, run: RunRecord, spec: Spec) -> None:
         """Raises every ticket whose turn has come, and records each approval's status."""
         run.report["approvals"] = {}
+        log = lambda m: self._event(run, "log", m)  # noqa: E731
         for approval in spec.approvals:
             try:
-                status, detail = self._approval_state(run, spec, approval)
+                status, detail = self._approval_state(run.migration, run.spec_digest, spec, approval, log)
             except IntegrationError as e:
                 status, detail = "unknown", str(e)
             ticket = self.store.ticket(run.migration, run.spec_digest, approval.id)
             run.report["approvals"][approval.id] = {
                 "status": status, "detail": detail,
                 "ticket": ticket.key if ticket else None, "url": ticket.url if ticket else None}
+            self.store.save_approval_record(run.migration, run.spec_digest,
+                                            ApprovalRecord(approval=approval.id, status=status, detail=detail, checked=time.time()))
             self._event(run, "log", f"approval {approval.id}: {status} ({detail})")
         self.store.save(run)
 
+    def sync_approvals(self, spec_path: Path) -> dict:
+        """Checks every approval of this migration's current plan against Jira: raises the tickets
+        whose turn has come (the next link of an `after` chain, once its predecessor is approved),
+        records each status, and queues every run that was waiting on an approval so it continues.
+        Called by the server's poller and the Jira webhook; the caller executes the queued runs.
+        Does nothing until a Build has raised the first tickets."""
+        spec = load_spec(spec_path)
+        migration, digest = spec.metadata.name, spec.digest()
+        tickets_before = set(self.store.tickets(migration, digest))
+        if not tickets_before:
+            return {"migration": migration, "changed": [], "raised": [], "resumed": [], "statuses": {}}
+        before = self.store.approval_records(migration, digest)
+        notes: list[str] = []
+        statuses: dict[str, dict] = {}
+        for approval in spec.approvals:
+            try:
+                status, detail = self._approval_state(migration, digest, spec, approval, notes.append)
+            except IntegrationError as e:
+                status, detail = "unknown", str(e)
+            statuses[approval.id] = {"status": status, "detail": detail}
+            self.store.save_approval_record(migration, digest,
+                                            ApprovalRecord(approval=approval.id, status=status, detail=detail, checked=time.time()))
+        changed = [a for a, s in statuses.items() if a not in before or before[a].status != s["status"]]
+        raised = sorted(set(self.store.tickets(migration, digest)) - tickets_before)
+        resumed: list[str] = []
+        if changed or raised:
+            latest = self.store.latest(migration)
+            if latest is not None:  # tell the console, on the run people are looking at
+                for note in notes:
+                    self._event(latest, "log", note)
+                self._event(latest, "log", "approvals changed in Jira: "
+                            + ", ".join(f"{a} {statuses[a]['status']}" for a in changed))
+            for run in self.store.runs(migration):
+                if run.status == RunStatus.WAITING and StepState.BLOCKED in run.steps.values():
+                    resumed.append(self.request_resume(run.id).id)
+        return {"migration": migration, "changed": changed, "raised": raised, "resumed": resumed, "statuses": statuses}
+
     # ---- Approvals: tickets raised by code, one per approval per spec version ---------------
 
-    def _approval_state(self, run: RunRecord, spec: Spec, approval: Approval) -> tuple[str, str]:
+    def _approval_state(self, migration: str, digest: str, spec: Spec, approval: Approval,
+                        log: Callable[[str], None]) -> tuple[str, str]:
         """(approved | pending | rejected, detail). Raises the ticket if its turn has come:
         everything in `after` approved, and the design page written if it needs one."""
-        ticket = self.store.ticket(run.migration, run.spec_digest, approval.id)
+        ticket = self.store.ticket(migration, digest, approval.id)
         if ticket is None:
             for dep in approval.after:
-                dep_status, _ = self._approval_state(run, spec, spec.approval(dep))
+                dep_status, _ = self._approval_state(migration, digest, spec, spec.approval(dep), log)
                 if dep_status == "rejected":
                     return "rejected", f"{dep} was rejected, so this was never requested"
                 if dep_status != "approved":
                     return "pending", f"not requested until {dep} is approved"
             if approval.design_doc:
-                page = self.store.design(run.migration)
-                if page is None or page.digest != run.spec_digest:
+                page = self.store.design(migration)
+                if page is None or page.digest != digest:
                     return "pending", "not requested until the design page is written (run Build)"
-            ticket = self._raise_ticket(run, spec, approval)
+            ticket = self._raise_ticket(migration, digest, spec, approval, log)
         return self.approvals.status(ticket.key), ticket.key
 
-    def _raise_ticket(self, run: RunRecord, spec: Spec, approval: Approval) -> Ticket:
+    def _raise_ticket(self, migration: str, digest: str, spec: Spec, approval: Approval,
+                      log: Callable[[str], None]) -> Ticket:
         with self._ticket_lock:
-            existing = self.store.ticket(run.migration, run.spec_digest, approval.id)
+            existing = self.store.ticket(migration, digest, approval.id)
             if existing:
                 return existing
             unblocks = [s.id for s in execution_order(spec) if approval.id in s.requires_approval]
             links = []
             if approval.design_doc:
-                links.append(("Design page", self.store.design(run.migration).url))
+                links.append(("Design page", self.store.design(migration).url))
             request = TicketRequest(
                 approval_id=approval.id,
                 summary=approval.summary,
                 paragraphs=[
                     (approval.justification or "").strip(),
                     f"Requested by MaC for migration {spec.metadata.name} ({spec.metadata.service}), "
-                    f"plan version {run.spec_digest[:12]}.",
+                    f"plan version {digest[:12]}.",
                     "Deploy waits for this approval before running: " + ", ".join(unblocks) + ".",
                     "To approve, move this ticket to Approved (or Done). To reject, move it to Rejected.",
                 ],
@@ -370,8 +437,8 @@ class Runner:
             )
             raised = self.approvals.raise_ticket(request)
             ticket = Ticket(approval=approval.id, key=raised.key, url=raised.url)
-            self.store.save_ticket(run.migration, run.spec_digest, ticket)
-            self._event(run, "log", f"raised {ticket.key} for approval {approval.id} ({approval.approver})")
+            self.store.save_ticket(migration, digest, ticket)
+            log(f"raised {ticket.key} for approval {approval.id} ({approval.approver})")
             return ticket
 
     # ---- The design page: an LLM writes prose; code publishes it ----------------------------
@@ -444,6 +511,19 @@ class Runner:
         for run in self.store.runs(spec.metadata.name):
             if run.status.active:
                 raise GateError(f"{run.mode} run {run.id} is still {run.status}. Finish or undo it first.")
+
+    def _record_outputs(self, run: RunRecord, step: Step, produced: dict[str, str]) -> None:
+        """Keeps the outputs the plan declared. One that wasn't produced fails the step: the
+        planner said this step would hand it back, and the probes depend on it."""
+        if not step.outputs:
+            return
+        missing = [o.name for o in step.outputs if not produced.get(o.name)]
+        if missing:
+            raise StepFailed(f"{step.id} didn't produce its declared output(s): {', '.join(missing)}")
+        run.outputs[step.id] = {o.name: produced[o.name] for o in step.outputs}
+        self.store.save(run)
+        for o in step.outputs:
+            self._event(run, "log", f"output {o.name} = {produced[o.name]}", step.id)
 
     def _context(self, run: RunRecord, spec: Spec, step: Step) -> StepContext:
         run_dir = self.data_dir / "runs" / run.id

@@ -18,6 +18,8 @@ labels: [platform, lambda, standard]
   **`AWS_IAM`**. Unauthenticated URLs are never allowed.
 - Callers sign each request with AWS SigV4 for the `lambda` service.
 - Services provide `GET /health`, returning `{"status": "ok"}`.
+- The service's Terraform publishes the function URL as the output `url`, so pipelines can
+  record where the service runs and check it answers.
 
 ## Roles
 

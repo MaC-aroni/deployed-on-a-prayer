@@ -65,6 +65,9 @@ steps:
     run:
       repo: github.com/MaC-aroni/claims-service-iac
       path: terraform/storage
+    outputs:
+      - name: table_name
+        description: The DynamoDB table the claims now live in
 
   - id: provision_iam
     sources: [platform-lambda#roles, platform-naming#resource-names]
@@ -97,6 +100,9 @@ steps:
     run:
       repo: github.com/MaC-aroni/claims-mcp-server
       path: terraform/server
+    outputs:
+      - name: url
+        description: The Claims MCP tool's AWS Lambda URL (AWS-signed requests only)
 
   - id: deploy_service
     sources: [platform-lambda#endpoints, service-claims-adjudication#target-aws]
@@ -106,6 +112,13 @@ steps:
     run:
       repo: github.com/MaC-aroni/claims-service-iac
       path: terraform/service
+    # What proves the service now runs in AWS: its URL, and two signed requests to it.
+    outputs:
+      - name: url
+        description: ClaimsAdjudicationService's AWS Lambda URL (AWS-signed requests only)
+        probes:
+          - {name: health, method: GET, path: /health}
+          - {name: adjudicate, method: POST, path: /adjudicate, body: {claim_id: CLM-1001}}
 
   - id: grant_mcp_access
     sources: [platform-mcp#how-access-is-granted, access-mcp#the-change-itself]

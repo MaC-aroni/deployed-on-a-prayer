@@ -23,6 +23,14 @@ run = "python scripts/dev.py --local"
 description = "The MaC runner CLI, e.g. `mise run mac validate examples/claims-adjudication/migration.yaml`"
 run = "python scripts/in_venv.py -m mac"
 
+[tasks.mac-jira-webhook]
+description = "Make approvals instant: set a webhook secret on Fly and register the Jira webhook (rotates it if run again)"
+run = "python scripts/in_venv.py scripts/jira_webhook.py"
+
+[tasks.mac-unlock]
+description = "Remove stale Terraform state locks left in S3 by a run that was killed (only when nothing is running)"
+run = "python scripts/in_venv.py scripts/unlock_tf_state.py"
+
 [tasks.test]
 description = "Run the backend tests"
 run = "python scripts/in_venv.py -m pytest backend"

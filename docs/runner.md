@@ -56,6 +56,12 @@ steps each approval unblocks), never written by a model. Rules:
   them. Statuses map by name: `Approved` or `Done` approves; `Rejected`, `Declined` or
   `Won't Do` rejects; anything else is pending.
 - Build's report lists every approval with its status, ticket and why it's waiting.
+- **Approvals follow Jira on their own.** The server asks Jira about every outstanding approval
+  every `MAC_APPROVAL_POLL_SECONDS` (default 30, 0 turns it off), and Jira can push changes to
+  `POST /api/mac/jira/webhook?token=<MAC_JIRA_WEBHOOK_SECRET>`. Either way `Runner.sync_approvals`
+  records the new statuses, raises the next ticket of an `after` chain the moment its
+  predecessor is approved, and continues every Deploy that was waiting (a rejection fails it and
+  undoes everything). Nobody has to press "Check approvals".
 
 ## The design page (the one LLM call)
 
@@ -112,6 +118,24 @@ guardrails: { require_ci_green: true, require_protected_branch: true, require_re
 diagnostics: { mode: explain } # default AI help; a run can override it
 ```
 
+**Outputs and probes.** A step can declare what it hands back, and how to check it:
+
+```yaml
+    outputs:
+      - name: url                      # Terraform: the output of that name; scripts: written to $MAC_OUTPUTS
+        description: The service's AWS Lambda URL
+        probes:                        # signed requests anyone can trigger from the console
+          - {name: health, method: GET, path: /health}
+          - {name: adjudicate, method: POST, path: /adjudicate, body: {claim_id: CLM-1001}, expect: 200}
+```
+
+After a step runs, the runner records each declared output on the run (`run.outputs[step][name]`)
+and logs `output url = …`. **A declared output that wasn't produced fails the step**, which undoes
+everything: the planner promised it. Terraform outputs come from `terraform output -json` after
+apply (sensitive ones are never read); scripts write a JSON object or `NAME=value` lines to the
+file named by `$MAC_OUTPUTS`. Probes send a SigV4-signed request (the landing zone only allows
+signed calls) and keep AWS's answer; see `docs/api.md`.
+
 Rules `mac validate` enforces:
 - `repo` is `github.com/<owner>/<repo>`, optionally `@<branch>`. It defaults to `main`.
 - `iac` steps have `run.path`, a Terraform directory, and roll back with `terraform destroy`.
@@ -119,6 +143,7 @@ Rules `mac validate` enforces:
 - `db_migration` steps need `verify`, and get a warning if they aren't `when: manual`.
 - Approvals have an `approver` and a `summary`. `after` names other approvals, with no loops.
 - No duplicate ids, no unknown references, no loops.
+- Output and probe names are unique per step; probe paths start with `/`; only POST probes have a body.
 
 Changes in v0.3: approvals lost `jira:` (MaC raises the tickets) and gained `approver`,
 `summary`, `after` and `design_doc`. Steps gained `codegen`: the engineers decide, step by step
@@ -143,6 +168,7 @@ becomes the step's log. The runner sets these environment variables:
 | `MAC_ACTION` | `run`, `verify`, `rollback` or `plan` |
 | `MAC_RUN_ID`, `MAC_STEP_ID`, `MAC_MIGRATION` | identifiers |
 | `MAC_RUN_DIR` | a directory kept for the whole run, for passing artifacts between steps |
+| `MAC_OUTPUTS` | (run action only) a file to write the step's declared outputs to: JSON, or `NAME=value` lines |
 | `MAC_TARGET_ACCOUNT`, `MAC_TARGET_REGION`, `AWS_REGION` | the target for this environment |
 
 Rollback scripts must be safe to run when the step only partly happened. Entrypoints run with
@@ -153,6 +179,16 @@ directory, so state always lives in the S3 bucket at
 `mac/<migration>/<rehearsal|production>/<step>.tfstate`, with S3 locking. The module receives
 `TF_VAR_mac_env` and `TF_VAR_mac_run_id`. Declare `variable "mac_env" {}` and use it in
 resource names.
+
+Build's `terraform plan` runs with `-lock=false` (it's read-only), so a Build never waits on
+or leaves a state lock. If a Rehearse or Deploy is killed mid-command (the server restarted),
+its S3 lock stays behind and the next apply fails with "Error acquiring the state lock"; when
+nothing is running, `mise run mac-unlock` removes stale locks.
+
+Each action's checkout is deleted as soon as it finishes (the log is in the store), and
+finished runs' work dirs are pruned when the server starts. Terraform providers are downloaded
+once into `<MAC_DATA_DIR>/tf-plugin-cache` (`TF_PLUGIN_CACHE_DIR`) and shared by every step and
+run; without that, each `iac` step pulled its own ~700 MB AWS provider.
 
 ## AI help when a run fails
 
@@ -198,4 +234,4 @@ Configuration comes from environment variables:
 | `NVIDIA_API_KEY`, `MAC_LLM_MODEL` (default `nvidia/nemotron-3-ultra-550b-a55b`), `MAC_LLM_BASE_URL` | the LLM that writes the design page |
 | `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the S3 bucket for Terraform state |
 | AWS credentials | the usual `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
-| `MAC_DATA_DIR` | run history and logs (default `./.mac`) |
+| `MAC_DATA_DIR` | run history, logs, the Terraform provider cache and work dirs (default `./.mac`) |

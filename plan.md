@@ -69,6 +69,86 @@ differently**. Keep it short; link to the docs instead of repeating them.
 - **Nemotron track:** the live site's `MAC_LLM_BASE_URL` / `MAC_LLM_MODEL` currently point at
   Grok. Point them at NVIDIA NIM (and set `NVIDIA_API_KEY`) before the pitch.
 - New step states or run statuses need a colour in `frontend/src/status.js`.
+
+### 2026-11-08: Step outputs and probes: show the service answering from AWS (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Spec:** steps can declare `outputs` (e.g. the deployed service's `url`) with `probes` (signed
+  requests that prove it answers). The planner is told to declare them for anything callable.
+  A declared output that isn't produced fails the step and undoes everything. `docs/runner.md`.
+- **The demo plan** now declares `provision_storage.table_name`, `deploy_mcp_server.url`, and
+  `deploy_service.url` with two probes: `GET /health` and `POST /adjudicate {claim_id: CLM-1001}`.
+  This changes the spec's digest, so **the next Build raises fresh Jira tickets** and rewrites
+  the design page (approvals cover an exact plan).
+- **API:** runs carry `outputs`; `GET /migrations/{name}` has `endpoints` (latest URL per
+  environment, and whether it should still be live); `POST /runs/{id}/outputs/{step}/{output}/probes/{probe}`
+  sends the signed request and returns AWS's answer (status, body, Lambda request id, timing,
+  an equivalent `curl`); `GET /runs/{id}/probes` is the history. Open to viewers, no sign-in.
+- Lambda URLs here only take SigV4-signed requests, so a plain curl gets 403. AWS also answers
+  **403 for a URL that doesn't exist**: that's the "before" (and the "after undo").
+
+#### What you need to do
+- **Elathius (UI):** add an "Endpoints" card (from `endpoints`) with a button per probe that
+  calls the probe endpoint and shows status, `request_id`, `elapsed_ms` and the JSON body; and a
+  before/after list from `GET /runs/{id}/probes`. Show the `curl` with a copy button.
+  `docs/api.md` → "Outputs and probes" has the shapes.
+
+### 2026-11-08: Instant approvals through a Jira webhook (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `mise run mac-jira-webhook` sets `MAC_JIRA_WEBHOOK_SECRET` on Fly and registers a Jira webhook
+  (issue updated, project `MAC`) that calls MaC. Approving a ticket now reaches the console in
+  about a second; the 30 s poller stays on as a safety net.
+- The access log masks `token=`, `code=` and `state=` in URLs, so the webhook secret and GitHub
+  sign-in codes never land in `fly logs`.
+
+#### What you need to do
+- Nothing. **Elathius:** no API change; approvals just update sooner.
+
+### 2026-11-08: Approvals follow Jira on their own (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **No more "Check approvals".** The server asks Jira about every outstanding approval every 30 s
+  (`MAC_APPROVAL_POLL_SECONDS`), and Jira can push changes instantly to
+  `POST /api/mac/jira/webhook?token=<MAC_JIRA_WEBHOOK_SECRET>`. When a ticket is approved, MaC
+  raises the **next ticket in the `after` chain** by itself (manager approved → the MCP team's
+  ticket appears), and any Deploy waiting on that approval continues. A rejection fails the
+  Deploy and undoes everything.
+- `GET /api/mac/migrations/{name}` now carries the **live** state per approval: `status`,
+  `detail`, `checked`, plus `approvals_checked` and `approvals_live`. These no longer depend on
+  the last Build.
+- `POST /api/mac/migrations/{name}/approvals/sync` checks Jira right now.
+- The migration's latest run gets a log line when Jira changes: `approvals changed in Jira: …`.
+- Docs: `docs/api.md` (Migrations), `docs/runner.md` (Approvals), `docs/cloud-setup.md` (the
+  webhook setup, 1 minute in Jira).
+
+#### What you need to do
+- **Elathius (UI):** read `approvals[].status` / `detail` / `checked` from the migration detail
+  instead of the Build report, and re-fetch the detail on a timer (the console already polls
+  every 30 s when idle). Show `checked` as "as of …". The "Check approvals" button can call
+  `POST /migrations/{name}/approvals/sync` and is now a convenience, not a necessity. When a
+  run's log says `approvals changed in Jira`, re-fetch the detail too.
+- **ob1-can-obi:** optionally set `MAC_JIRA_WEBHOOK_SECRET` on Fly and create the Jira webhook
+  (`docs/cloud-setup.md`); without it, changes arrive within 30 s instead of instantly.
+
+### 2026-11-08: Prod latency fixed: disk, SQLite, health check (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **The cause:** every `iac` step downloaded its own ~700 MB AWS provider into a fresh checkout
+  and nothing was ever deleted (11 GB locally after three Builds). On Fly the 1 GB volume filled
+  during the first Build, Terraform crawled, the health check timed out and the proxy refused
+  requests. Fly then auto-stopped the only machine mid-run because `primary_region` wasn't set.
+- Terraform providers now go to one shared cache (`TF_PLUGIN_CACHE_DIR` under `MAC_DATA_DIR`);
+  each action's checkout is deleted when it finishes; finished runs' work dirs are pruned at
+  startup.
+- SQLite runs in WAL mode, so the API reads history while a run writes logs; the live stream's
+  database reads moved off the event loop; `/api/health` is async.
+- Fly: `primary_region = "lax"`, 1 GB memory, health check timeout 10 s, grace 30 s. The
+  `mac_data` volume was extended to 3 GB.
+
+#### What you need to do
+- Nothing. If you ran Builds locally before this, `rm -rf .mac/work` frees the space.
+
 ### 2026-11-08: Console v2, GitLab-style (ob1-can-obi, with Claude Code)
 
 #### What changed

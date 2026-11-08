@@ -112,12 +112,17 @@ class FakeExecutor:
     def __init__(self):
         self.calls: list[tuple[str, str, str]] = []
         self.fail: dict[tuple[str, str], str] = {}
+        self.withhold: set[tuple[str, str]] = set()  # (step, output) not to produce
 
     def execute(self, ctx, action):
         self.calls.append((ctx.step.id, action, ctx.env_name))
         ctx.log(f"{action} {ctx.step.id}")
         if (ctx.step.id, action) in self.fail:
             raise StepFailed(self.fail[(ctx.step.id, action)])
+        if action != "run":
+            return {}
+        return {o.name: f"https://{ctx.step.id.replace('_', '')}{ctx.env_name}.lambda-url.us-east-1.on.aws/"
+                for o in ctx.step.outputs if (ctx.step.id, o.name) not in self.withhold}
 
     def actions(self, action):
         return [step for step, act, _ in self.calls if act == action]

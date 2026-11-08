@@ -13,6 +13,9 @@ import asyncio
 import json
 import logging
 import os
+import secrets
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -23,6 +26,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from mac import probe as probes
 from mac.cli import make_runner
 from mac.runner import GateError, Runner
 from mac.spec import Spec, SpecError, Step, load_spec, parse_spec
@@ -40,6 +44,9 @@ class State:
     runner: Runner
     migrations_dir: Path
     submit: Callable[[Callable[[], None]], None]  # runs work in the background
+    poll_seconds: int = 0  # how often to ask Jira about pending approvals; 0 = never
+    webhook_secret: str | None = None  # MAC_JIRA_WEBHOOK_SECRET; None = the Jira webhook is off
+    prober: Callable = probes.send  # (url, probe, region) -> result; tests swap it
 
 
 _state: State | None = None
@@ -58,6 +65,8 @@ def _default_state() -> State:
         runner=make_runner(data_dir),
         migrations_dir=Path(os.environ.get("MAC_MIGRATIONS_DIR", ROOT / "examples")),
         submit=pool.submit,
+        poll_seconds=int(os.environ.get("MAC_APPROVAL_POLL_SECONDS", "30")),
+        webhook_secret=os.environ.get("MAC_JIRA_WEBHOOK_SECRET") or None,
     )
 
 
@@ -65,10 +74,54 @@ def get_state() -> State:
     global _state
     if _state is None:
         state = _default_state()
-        for run_id in state.runner.recover():  # work queued before a restart
+        queued = state.runner.recover()  # work queued before a restart
+        # Checkouts from finished runs are dead weight on a small disk; their logs are in the store.
+        state.runner.executor.prune(set(queued))
+        for run_id in queued:
             state.submit(lambda r=run_id: _execute(state, r))
+        if state.poll_seconds > 0:
+            threading.Thread(target=_poll_loop, args=(state,), name="mac-approvals", daemon=True).start()
         _state = state
     return _state
+
+
+# ---- Approvals that follow Jira on their own ------------------------------------------------
+
+
+def sync_migration_approvals(state: State, path: Path) -> dict:
+    """One sync for one migration: raises due tickets, records statuses, and starts the runs
+    that were waiting on an approval. Safe to call from any thread."""
+    result = state.runner.sync_approvals(path)
+    for run_id in result["resumed"]:
+        state.submit(lambda r=run_id: _execute(state, r))
+    return result
+
+
+def poll_approvals_once(state: State) -> list[dict]:
+    """Every valid migration with tickets outstanding gets one Jira check."""
+    results = []
+    for name, (path, spec, _) in _find(state).items():
+        if spec is None:
+            continue
+        try:
+            result = sync_migration_approvals(state, path)
+        except Exception:  # noqa: BLE001 - one migration's Jira trouble mustn't stop the others
+            log.exception("approval sync failed for %s", name)
+            continue
+        if result["changed"] or result["raised"] or result["resumed"]:
+            log.info("approvals for %s: changed=%s raised=%s resumed=%s", name,
+                     result["changed"], result["raised"], result["resumed"])
+        results.append(result)
+    return results
+
+
+def _poll_loop(state: State) -> None:
+    while True:
+        time.sleep(state.poll_seconds)
+        try:
+            poll_approvals_once(state)
+        except Exception:  # noqa: BLE001
+            log.exception("approval poll crashed; will try again")
 
 
 router = APIRouter(prefix="/api/mac", tags=["mac"])
@@ -172,14 +225,116 @@ def get_migration(name: str, state: State = Depends(get_state)):
         ticket = tickets.get(approval.id)
         approvals.append(approval.model_dump(mode="json")
                          | {"ticket": ticket.model_dump(exclude={"approval"}) if ticket else None})
+    # Live statuses: the poller, the webhook, Build and a waiting Deploy all record them here.
+    records = store.approval_records(name, spec.digest())
+    for item in approvals:
+        record = records.get(item["id"])
+        item["status"] = record.status if record else ("pending" if item["ticket"] else "not_requested")
+        item["detail"] = record.detail if record else None
+        item["checked"] = record.checked if record else None
     page = store.design(name)
     return {
         "name": name, "service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
         "target": spec.target.model_dump(mode="json"), "diagnostics_default": spec.diagnostics.mode,
-        "stages": _stages(spec), "approvals": approvals,
+        "stages": _stages(spec), "approvals": approvals, "endpoints": _endpoints(store, name, spec),
+        "approvals_checked": max((r.checked for r in records.values()), default=None),
+        "approvals_live": state.poll_seconds > 0 or state.webhook_secret is not None,
         "design_page": {"url": page.url, "current": page.digest == spec.digest()} if page else None,
         "issues": problems, "latest": _latest(state, name), "active_run": _summary(active),
     }
+
+
+def _endpoints(store, name: str, spec: Spec) -> list[dict]:
+    """Every declared output, with its latest value per environment: what to show (and probe)
+    to prove the migration is really running in AWS."""
+    latest = {}
+    for run in store.runs(name, limit=100):  # newest first
+        env = {"deploy": "production", "rehearse": "rehearsal"}.get(run.mode)
+        if env and env not in latest and run.outputs:
+            latest[env] = run
+    result = []
+    for step in spec.steps:
+        for out in step.outputs:
+            entry = {"step": step.id, "name": out.name, "description": out.description,
+                     "probes": [p.model_dump(mode="json") for p in out.probes]}
+            for env, run in latest.items():
+                value = run.outputs.get(step.id, {}).get(out.name)
+                if value:
+                    # A finished Rehearse undid everything; an undone Deploy too. The URL is history.
+                    gone = run.mode == "rehearse" and not run.status.active or run.status == RunStatus.UNDONE
+                    entry[env] = {"run_id": run.id, "value": value, "run_status": run.status,
+                                  "expected_live": not gone}
+            result.append(entry)
+    return result
+
+
+@router.post("/runs/{run_id}/outputs/{step_id}/{output}/probes/{probe_name}")
+def run_probe(run_id: str, step_id: str, output: str, probe_name: str, state: State = Depends(get_state)):
+    """Sends one signed request to a URL this run recorded, and keeps the answer. Open to
+    viewers on purpose (it only reads, and only URLs MaC itself deployed); a repeat within
+    3 seconds returns the last answer instead of calling AWS again."""
+    run = _get_run(state, run_id)
+    value = run.outputs.get(step_id, {}).get(output)
+    if not value:
+        raise HTTPException(404, f"run {run_id} has no output {step_id}.{output}")
+    spec = parse_spec(run.spec_text, run.spec_path)
+    declared = next((o for s in spec.steps if s.id == step_id for o in s.outputs if o.name == output), None)
+    probe = next((p for p in (declared.probes if declared else ()) if p.name == probe_name), None)
+    if probe is None:
+        raise HTTPException(404, f"{step_id}.{output} has no probe {probe_name!r}")
+    store = state.runner.store
+    recent = next((p for p in store.probes(run_id, limit=20)
+                   if (p["step"], p["output"], p["probe"]) == (step_id, output, probe_name)), None)
+    if recent and time.time() - recent["checked"] < 3:
+        return recent
+    region = probes.region_of(value, spec.target.region)
+    result = state.prober(value, probe, region)
+    result.update(step=step_id, output=output, probe=probe_name, run_id=run_id,
+                  env="production" if run.mode == "deploy" else "rehearsal",
+                  expected_live=not (run.mode == "rehearse" and not run.status.active or run.status == RunStatus.UNDONE))
+    store.add_probe(run_id, step_id, output, probe_name, result)
+    store.add_event(run_id, "log", f"probe {probe_name}: {probe.method} {result['url']} -> "
+                    + (f"{result['status']} in {result.get('elapsed_ms')} ms" if result["status"] else result["error"]), step_id)
+    return result
+
+
+@router.get("/runs/{run_id}/probes")
+def list_probes(run_id: str, state: State = Depends(get_state)):
+    """Every probe of this run's outputs, newest first: the before/after record."""
+    _get_run(state, run_id)
+    return state.runner.store.probes(run_id)
+
+
+@router.post("/migrations/{name}/approvals/sync")
+def sync_approvals(name: str, state: State = Depends(get_state), user: str | None = Depends(signed_in)):
+    """Check Jira now, instead of waiting for the poller."""
+    path, _, _ = _migration(state, name)
+    return sync_migration_approvals(state, path)
+
+
+@router.post("/jira/webhook", include_in_schema=False)
+async def jira_webhook(request: Request, token: str | None = Query(default=None),
+                       state: State = Depends(get_state)):
+    """Jira Cloud calls this when an issue changes (no sign-in: the URL carries a shared secret).
+    Only tickets MaC raised are looked at; anything else is ignored."""
+    if state.webhook_secret is None:
+        raise HTTPException(404, "the Jira webhook isn't enabled (MAC_JIRA_WEBHOOK_SECRET)")
+    if not token or not secrets.compare_digest(token, state.webhook_secret):
+        raise HTTPException(401, "wrong webhook token")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    key = (body.get("issue") or {}).get("key")
+    owner = state.runner.store.ticket_owner(key) if key else None
+    if owner is None:
+        return {"issue": key, "synced": None}
+    migration = owner[0]
+    found = _find(state).get(migration)
+    if found is None or found[1] is None:
+        return {"issue": key, "synced": None}
+    result = await asyncio.to_thread(sync_migration_approvals, state, found[0])
+    return {"issue": key, "synced": migration, **{k: result[k] for k in ("changed", "raised", "resumed")}}
 
 
 def _start(state: State, starter: Callable[[], RunRecord], user: str | None) -> dict:
@@ -279,13 +434,15 @@ async def stream(run_id: str, request: Request, after: int = 0,
         nonlocal cursor
         idle = 0.0
         while not await request.is_disconnected():
-            batch = store.events(run_id, after=cursor)
+            # SQLite reads go to a worker thread, so a busy database never stalls the event loop
+            # (and with it every other request, including the health check).
+            batch = await asyncio.to_thread(store.events, run_id, after=cursor)
             for event in batch:
                 cursor = event.seq
                 yield f"id: {event.seq}\nevent: {event.kind}\ndata: {event.model_dump_json()}\n\n"
             if batch:
                 idle = 0.0
-            elif not store.get(run_id).status.active:
+            elif not (await asyncio.to_thread(store.get, run_id)).status.active:
                 yield f"event: end\ndata: {json.dumps(_summary(store.get(run_id)))}\n\n"
                 return
             else:
@@ -309,6 +466,7 @@ def _execute(state: State, run_id: str) -> None:
         if run.status.active:
             # A Build only reads and plans, so there's nothing to undo; anything else may have left changes.
             status = RunStatus.FAILED if run.mode == "build" else RunStatus.ROLLBACK_FAILED
+            state.runner.settle(run, status)
             run.status, run.reason, run.next_action = status, f"runner crashed: {e}", None
             store.save(run)
             store.add_event(run_id, "run", f"{run.mode} {run.status}: {run.reason}")
