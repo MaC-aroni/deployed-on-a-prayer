@@ -31,6 +31,45 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Migration flow with agents: Learn, detect-or-plan, breakpoints, investigate (Elathius, with Claude Code)
+
+#### What changed
+- **Sidebar:** Build → **Migration** and **Pipelines (count)** are the two big items; pipelines
+  only exist once a migration started, and the empty Pipelines page says so.
+- **Migration page:** every service and every repo has two doors, **Confluence** (the page, or
+  the console's copy at `/knowledge/<page>` until it's published) and **GitHub**. One primary per
+  service: **Launch agent** (learn if needed → detect an existing `migration.yaml` or write one →
+  render the pipeline → start Build) or **Open pipeline** when one exists. Undocumented repos get
+  **Learn**: an agent writes the knowledge page from the repository, merges the graph and raises
+  a Jira review ticket; the service then shows "under review · MAC-n".
+- **Agent view** at `/agents/<run>`: the hierarchy (Director → Readers / References / … →
+  Compiler) with each agent's observation → reasoning → action → outcome and model. Every
+  running agent shows the working-agent icon (`frontend/src/assets/greenloading.gif`); clicking
+  it opens this page. `/agents/demo` replays a mock Learn for the pitch.
+- **Pipeline:** `when: manual` steps are drawn as breakpoints; the primary button reads
+  **Continue · <step>** while the run waits there. On a failed run **Investigate** launches the
+  Diagnostician (Logs · Code · Fixer → Compiler raises the approval ticket); its card shows the
+  root cause and the proposed fix with **Approve fix**, which opens the pull request. Nothing
+  merges by itself.
+- **Planning API** (`backend/app/planning_api.py`, own module, nothing in `mac_api.py` touched):
+  `POST /learn`, `GET /knowledge/{page}`, `POST /runs/{id}/investigate`,
+  `POST /runs/{id}/approve-fix`; `POST /plan` takes `reuse` and `build`; `GET /services` adds
+  `page_url`, `generated`, `review`, `migration`. Every run emits `agent` events (JSON message:
+  agent, parent, role, model, phase, status, text). Contract: `docs/planning-api.md`.
+- Fixed: status dots were grey everywhere (the `.status` default outranked the tone classes).
+- [`docs/ui-data-needs.md`](docs/ui-data-needs.md) rewritten: screen by screen, what renders
+  from what and when, what's still a gap (auto-diagnosis wiring, `needs`, failure tail, agent
+  events from the runner's own agents, Confluence URLs on Fly), plus the Endpoints card to come.
+
+#### How to adapt
+- Generated knowledge pages live in `<MAC_DATA_DIR>/knowledge/` (`/data` on Fly), proposed fixes
+  in `<MAC_DATA_DIR>/fixes/`; both survive deploys with the volume.
+- Review and fix-approval tickets go through the runner's Jira integration (`ATLASSIAN_*`); with
+  it unset the runs say "not raised" and finish anyway.
+- The Confluence doors open Confluence only where `publish-knowledge` ran (it records the URLs
+  in the store); otherwise they open the console's page view.
+- Frontend: `follow()` now also streams `agent`, `approval` and `failure` event kinds.
+
 ### 2026-11-08: The console at `/`, the Migrate flow, planning endpoints (Elathius, with Claude Code)
 
 #### What changed
