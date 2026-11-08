@@ -86,6 +86,38 @@ document back in Markdown, and publishes it to Confluence. The Tech Risk ticket 
 - If the LLM or Confluence fails or isn't configured, **Build still passes**. The design-doc
   tickets just wait, and Build tries again next time.
 
+## The cost estimate (code only)
+
+At the end of a passing Build, MaC works out what the migration will cost on AWS each month,
+and every number in it has a source:
+
+| Input | Where it comes from |
+|---|---|
+| What gets created | Terraform's own plan: Build runs `terraform plan -out`, then `terraform show -json`, and keeps each resource's type and a few non-sensitive attributes (`memory_size`, `billing_mode`, ...) in `report.resources` |
+| How much it's used | the usage reader's figures (`docs/agents.md`), each with its Confluence section and quote, saved in `<data dir>/usage/<migration>.json` |
+| What AWS charges | AWS's public Price List offer files for the target region, with each price's SKU, rate code and dates; the saved copy `backend/mac/prices_snapshot.json` if AWS can't be reached |
+| Pricing rules | the AWS rules the formulas use (read and write units per KB, 100 bytes of item overhead, GB-seconds), each linked to AWS's docs |
+
+`mac/cost.py` multiplies them and writes each line's formula, for example `1,261,330
+invocations × 60 ms ÷ 1,000 × 256 MB ÷ 1,024 = 18,919.9 GB-seconds`. Tiered prices (the
+DynamoDB storage free tier, Lambda's duration tiers) are applied to the total per price, as AWS
+bills them. IAM, function URLs and Lambda permissions are listed as no charge, with AWS's page
+saying so. Resource types it can't price yet are listed, never left out silently.
+
+- A figure the docs don't give leaves its line **unpriced**, with the Jira question asking for it,
+  and the estimate is `partial`. No saving is claimed against a partial total.
+- With the finance page's figures, it compares with today's on-prem cost.
+- The estimate goes in `report.cost`. When it changes, the design page is republished with a
+  code-generated "Cost estimate" section (formulas, prices with SKUs, quotes linking to
+  Confluence), and each design-page approval's ticket (Tech Risk) gets one comment with the
+  summary. Building again with the same estimate repeats neither.
+- No model is called: the usage reader ran before. A cost problem (no figures yet, AWS down
+  and no snapshot) **never fails a Build**; it only shows in the report.
+
+The order: Build (its plans list the resources), then `mise run mac usage <spec>` (or
+`POST /api/mac/migrations/{name}/usage`), then Build again. `mise run mac cost <spec>`
+recalculates the estimate from the last Build without running one.
+
 ## The spec
 
 ```yaml
@@ -248,6 +280,9 @@ mise run mac rehearse <spec> [--ai explain|report|autofix]
 mise run mac deploy   <spec> [--ai explain|report]
 mise run mac play <run-id> <step>   |  resume <run-id>  |  undo <run-id>
 mise run mac status <run-id>        |  logs <run-id> [--step id]  |  runs
+mise run mac usage <spec>           # the usage reader (LLM): the figures the cost estimate needs
+mise run mac cost <spec>            # the cost estimate from the last Build, with every source
+mise run mac prices [--refresh]     # AWS's prices it uses; --refresh saves them as the snapshot
 ```
 
 Configuration comes from environment variables:
