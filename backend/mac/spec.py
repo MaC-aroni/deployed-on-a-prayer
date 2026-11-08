@@ -100,6 +100,24 @@ class Rollback(_Model):
     action: Literal["destroy"] | None = None  # iac: terraform destroy
 
 
+class Probe(_Model):
+    """A request MaC can send to a step's output URL to show the thing really runs in AWS.
+    Signed with SigV4 (Lambda function URLs only accept signed requests)."""
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    method: Literal["GET", "POST"] = "GET"
+    path: str = "/"
+    body: dict | None = None  # sent as JSON with POST
+    expect: int = 200  # the status that means it worked
+
+
+class StepOutput(_Model):
+    """Something a step must hand back when it runs, e.g. the URL of the service it deployed.
+    Terraform steps take it from `terraform output`; scripts write it to $MAC_OUTPUTS."""
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    description: str
+    probes: tuple[Probe, ...] = ()
+
+
 class Step(_Model):
     id: str = Field(pattern=_ID)
     stage: str
@@ -111,6 +129,7 @@ class Step(_Model):
     # a pull request a person reviews). Engineers choose per step how far they trust the LLM.
     codegen: Literal["engineer", "llm"] = "engineer"
     sources: tuple[str, ...] = ()  # knowledge-base sections this step follows, e.g. "platform-naming#resource-names"
+    outputs: tuple[StepOutput, ...] = ()  # what the step must produce; a missing one fails it
     run: Action
     verify: Verify | None = None
     rollback: Rollback | Literal["none"] | None = None

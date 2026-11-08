@@ -2,6 +2,7 @@
 everything the runner needs to continue lives here, not in memory."""
 
 import sqlite3
+import json
 import threading
 import time
 import uuid
@@ -56,6 +57,7 @@ class RunRecord(BaseModel):
     reason: str | None = None
     diagnostics_mode: str = "explain"
     report: dict = {}  # Build: guardrails, approvals, plans, issues
+    outputs: dict[str, dict[str, str]] = {}  # step id -> declared output name -> value, e.g. the service URL
     based_on: str | None = None  # the Build (for Rehearse) or Rehearse (for Deploy) this relies on
     created: float = Field(default_factory=time.time)
     updated: float = Field(default_factory=time.time)
@@ -130,6 +132,12 @@ class Store:
                 CREATE TABLE IF NOT EXISTS designs (
                     migration TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
                     digest TEXT NOT NULL, updated REAL NOT NULL);
+                -- Every probe of a step output (a signed request to the deployed service): the
+                -- before/after record of what AWS answered.
+                CREATE TABLE IF NOT EXISTS probes (
+                    run_id TEXT NOT NULL, step TEXT NOT NULL, output TEXT NOT NULL, probe TEXT NOT NULL,
+                    ts REAL NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS probes_by_run ON probes (run_id, ts);
                 -- Each approval's last known Jira state, so the UI can show it without a Build
                 -- and the poller can tell what changed.
                 CREATE TABLE IF NOT EXISTS approval_status (
@@ -185,6 +193,17 @@ class Store:
             rows = self.db.execute("SELECT approval, key, url FROM tickets WHERE migration = ? AND digest = ?",
                                    (migration, digest)).fetchall()
         return {r[0]: Ticket(approval=r[0], key=r[1], url=r[2]) for r in rows}
+
+    def add_probe(self, run_id: str, step: str, output: str, probe: str, data: dict) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO probes VALUES (?, ?, ?, ?, ?, ?)",
+                            (run_id, step, output, probe, data["checked"], json.dumps(data)))
+
+    def probes(self, run_id: str, limit: int = 100) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT data FROM probes WHERE run_id = ? ORDER BY ts DESC LIMIT ?",
+                                   (run_id, limit)).fetchall()
+        return [json.loads(r[0]) for r in rows]
 
     def ticket_owner(self, key: str) -> tuple[str, str] | None:
         """(migration, digest) whose approval this Jira ticket belongs to, if MaC raised it."""

@@ -186,3 +186,13 @@ def test_codegen_says_who_writes_each_steps_code():
     step(data, "provision_iam")["codegen"] = "robot"
     with pytest.raises(SpecError, match="codegen"):
         parse_spec(yaml.safe_dump(data))
+
+
+def test_outputs_and_probes_are_validated():
+    from mac.spec import parse_spec
+    from mac.validate import validate
+    text = DEMO_SPEC.read_text(encoding="utf-8").replace(
+        "{name: health, method: GET, path: /health}", "{name: health, method: GET, path: health, body: {x: 1}}")
+    problems = [str(i) for i in validate(parse_spec(text))]
+    assert any("path must start with /" in p for p in problems)
+    assert any("only POST probes send a body" in p for p in problems)

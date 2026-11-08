@@ -29,6 +29,29 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Step outputs and probes: show the service answering from AWS (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **Spec:** steps can declare `outputs` (e.g. the deployed service's `url`) with `probes` (signed
+  requests that prove it answers). The planner is told to declare them for anything callable.
+  A declared output that isn't produced fails the step and undoes everything. `docs/runner.md`.
+- **The demo plan** now declares `provision_storage.table_name`, `deploy_mcp_server.url`, and
+  `deploy_service.url` with two probes: `GET /health` and `POST /adjudicate {claim_id: CLM-1001}`.
+  This changes the spec's digest, so **the next Build raises fresh Jira tickets** and rewrites
+  the design page (approvals cover an exact plan).
+- **API:** runs carry `outputs`; `GET /migrations/{name}` has `endpoints` (latest URL per
+  environment, and whether it should still be live); `POST /runs/{id}/outputs/{step}/{output}/probes/{probe}`
+  sends the signed request and returns AWS's answer (status, body, Lambda request id, timing,
+  an equivalent `curl`); `GET /runs/{id}/probes` is the history. Open to viewers, no sign-in.
+- Lambda URLs here only take SigV4-signed requests, so a plain curl gets 403. AWS also answers
+  **403 for a URL that doesn't exist**: that's the "before" (and the "after undo").
+
+#### What you need to do
+- **Elathius (UI):** add an "Endpoints" card (from `endpoints`) with a button per probe that
+  calls the probe endpoint and shows status, `request_id`, `elapsed_ms` and the JSON body; and a
+  before/after list from `GET /runs/{id}/probes`. Show the `curl` with a copy button.
+  `docs/api.md` → "Outputs and probes" has the shapes.
+
 ### 2026-11-08: Instant approvals through a Jira webhook (ob1-can-obi, with Claude Code)
 
 #### What changed

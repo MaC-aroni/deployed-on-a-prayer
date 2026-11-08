@@ -1,4 +1,5 @@
 import shutil
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -313,3 +314,59 @@ def test_access_log_masks_the_webhook_secret_and_sign_in_codes():
                                ("GET", "/api/auth/callback?code=abc123&state=xyz"), None)
     RedactSecrets().filter(record)
     assert "abc123" not in record.getMessage() and "xyz" not in record.getMessage()
+
+
+def _deployed(client, env):
+    env.approvals.default = "approved"
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    reh = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()
+    client.post(f"/api/mac/runs/{reh['id']}/steps/db_migrate/play")
+    dep = client.post(f"/api/mac/migrations/{NAME}/deploy").json()
+    client.post(f"/api/mac/runs/{dep['id']}/steps/db_migrate/play")
+    return reh["id"], dep["id"]
+
+
+def test_endpoints_show_the_deployed_url_per_environment(api):
+    client, env, _ = api
+    reh, dep = _deployed(client, env)
+    endpoints = client.get(f"/api/mac/migrations/{NAME}").json()["endpoints"]
+    service = next(e for e in endpoints if e["step"] == "deploy_service")
+    assert [p["name"] for p in service["probes"]] == ["health", "adjudicate"]
+    assert service["production"]["run_id"] == dep and service["production"]["expected_live"] is True
+    assert service["rehearsal"]["run_id"] == reh and service["rehearsal"]["expected_live"] is False  # undone
+    assert client.get(f"/api/mac/runs/{dep}").json()["outputs"]["deploy_service"]["url"].startswith("https://")
+
+
+def test_probe_signs_a_request_to_a_recorded_url_and_keeps_the_answer(api):
+    client, env, state = api
+    _, dep = _deployed(client, env)
+    calls = []
+
+    def fake_prober(url, probe, region):
+        calls.append((url, probe.name, probe.method, probe.body, region))
+        return {"url": url.rstrip("/") + probe.path, "method": probe.method, "probe": probe.name, "status": 200,
+                "ok": True, "request_id": "abc-123", "body": {"decision": "approved"}, "error": None,
+                "served_by_aws": True, "elapsed_ms": 42, "checked": time.time(), "curl": "curl ..."}
+
+    state.prober = fake_prober
+    url = f"/api/mac/runs/{dep}/outputs/deploy_service/url/probes/adjudicate"
+    first = client.post(url).json()
+    assert first["status"] == 200 and first["env"] == "production" and first["expected_live"] is True
+    assert calls == [(calls[0][0], "adjudicate", "POST", {"claim_id": "CLM-1001"}, "us-east-1")]
+    client.post(url)  # within 3 s: the stored answer, no second AWS call
+    assert len(calls) == 1
+    history = client.get(f"/api/mac/runs/{dep}/probes").json()
+    assert len(history) == 1 and history[0]["request_id"] == "abc-123"
+    assert client.post(f"/api/mac/runs/{dep}/outputs/deploy_service/url/probes/nope").status_code == 404
+    assert client.post(f"/api/mac/runs/{dep}/outputs/preflight/url/probes/health").status_code == 404
+
+
+def test_probe_needs_no_sign_in_but_only_hits_recorded_urls(api):
+    from app import auth
+    client, env, state = api
+    _, dep = _deployed(client, env)
+    state.prober = lambda url, probe, region: {"url": url, "status": 200, "ok": True, "checked": time.time(),
+                                               "error": None, "elapsed_ms": 1}
+    auth.configure(auth.AuthConfig(required=True, repo="x", github=None, key=b"k" * 32))
+    assert client.post(f"/api/mac/runs/{dep}/outputs/deploy_service/url/probes/health").status_code == 200
+    assert client.post(f"/api/mac/migrations/{NAME}/build").status_code == 503  # buttons still locked

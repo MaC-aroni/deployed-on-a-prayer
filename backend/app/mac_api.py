@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from mac import probe as probes
 from mac.cli import make_runner
 from mac.runner import GateError, Runner
 from mac.spec import Spec, SpecError, Step, load_spec, parse_spec
@@ -45,6 +46,7 @@ class State:
     submit: Callable[[Callable[[], None]], None]  # runs work in the background
     poll_seconds: int = 0  # how often to ask Jira about pending approvals; 0 = never
     webhook_secret: str | None = None  # MAC_JIRA_WEBHOOK_SECRET; None = the Jira webhook is off
+    prober: Callable = probes.send  # (url, probe, region) -> result; tests swap it
 
 
 _state: State | None = None
@@ -234,12 +236,73 @@ def get_migration(name: str, state: State = Depends(get_state)):
     return {
         "name": name, "service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
         "target": spec.target.model_dump(mode="json"), "diagnostics_default": spec.diagnostics.mode,
-        "stages": _stages(spec), "approvals": approvals,
+        "stages": _stages(spec), "approvals": approvals, "endpoints": _endpoints(store, name, spec),
         "approvals_checked": max((r.checked for r in records.values()), default=None),
         "approvals_live": state.poll_seconds > 0 or state.webhook_secret is not None,
         "design_page": {"url": page.url, "current": page.digest == spec.digest()} if page else None,
         "issues": problems, "latest": _latest(state, name), "active_run": _summary(active),
     }
+
+
+def _endpoints(store, name: str, spec: Spec) -> list[dict]:
+    """Every declared output, with its latest value per environment: what to show (and probe)
+    to prove the migration is really running in AWS."""
+    latest = {}
+    for run in store.runs(name, limit=100):  # newest first
+        env = {"deploy": "production", "rehearse": "rehearsal"}.get(run.mode)
+        if env and env not in latest and run.outputs:
+            latest[env] = run
+    result = []
+    for step in spec.steps:
+        for out in step.outputs:
+            entry = {"step": step.id, "name": out.name, "description": out.description,
+                     "probes": [p.model_dump(mode="json") for p in out.probes]}
+            for env, run in latest.items():
+                value = run.outputs.get(step.id, {}).get(out.name)
+                if value:
+                    # A finished Rehearse undid everything; an undone Deploy too. The URL is history.
+                    gone = run.mode == "rehearse" and not run.status.active or run.status == RunStatus.UNDONE
+                    entry[env] = {"run_id": run.id, "value": value, "run_status": run.status,
+                                  "expected_live": not gone}
+            result.append(entry)
+    return result
+
+
+@router.post("/runs/{run_id}/outputs/{step_id}/{output}/probes/{probe_name}")
+def run_probe(run_id: str, step_id: str, output: str, probe_name: str, state: State = Depends(get_state)):
+    """Sends one signed request to a URL this run recorded, and keeps the answer. Open to
+    viewers on purpose (it only reads, and only URLs MaC itself deployed); a repeat within
+    3 seconds returns the last answer instead of calling AWS again."""
+    run = _get_run(state, run_id)
+    value = run.outputs.get(step_id, {}).get(output)
+    if not value:
+        raise HTTPException(404, f"run {run_id} has no output {step_id}.{output}")
+    spec = parse_spec(run.spec_text, run.spec_path)
+    declared = next((o for s in spec.steps if s.id == step_id for o in s.outputs if o.name == output), None)
+    probe = next((p for p in (declared.probes if declared else ()) if p.name == probe_name), None)
+    if probe is None:
+        raise HTTPException(404, f"{step_id}.{output} has no probe {probe_name!r}")
+    store = state.runner.store
+    recent = next((p for p in store.probes(run_id, limit=20)
+                   if (p["step"], p["output"], p["probe"]) == (step_id, output, probe_name)), None)
+    if recent and time.time() - recent["checked"] < 3:
+        return recent
+    region = probes.region_of(value, spec.target.region)
+    result = state.prober(value, probe, region)
+    result.update(step=step_id, output=output, probe=probe_name, run_id=run_id,
+                  env="production" if run.mode == "deploy" else "rehearsal",
+                  expected_live=not (run.mode == "rehearse" and not run.status.active or run.status == RunStatus.UNDONE))
+    store.add_probe(run_id, step_id, output, probe_name, result)
+    store.add_event(run_id, "log", f"probe {probe_name}: {probe.method} {result['url']} -> "
+                    + (f"{result['status']} in {result.get('elapsed_ms')} ms" if result["status"] else result["error"]), step_id)
+    return result
+
+
+@router.get("/runs/{run_id}/probes")
+def list_probes(run_id: str, state: State = Depends(get_state)):
+    """Every probe of this run's outputs, newest first: the before/after record."""
+    _get_run(state, run_id)
+    return state.runner.store.probes(run_id)
 
 
 @router.post("/migrations/{name}/approvals/sync")

@@ -118,6 +118,24 @@ guardrails: { require_ci_green: true, require_protected_branch: true, require_re
 diagnostics: { mode: explain } # default AI help; a run can override it
 ```
 
+**Outputs and probes.** A step can declare what it hands back, and how to check it:
+
+```yaml
+    outputs:
+      - name: url                      # Terraform: the output of that name; scripts: written to $MAC_OUTPUTS
+        description: The service's AWS Lambda URL
+        probes:                        # signed requests anyone can trigger from the console
+          - {name: health, method: GET, path: /health}
+          - {name: adjudicate, method: POST, path: /adjudicate, body: {claim_id: CLM-1001}, expect: 200}
+```
+
+After a step runs, the runner records each declared output on the run (`run.outputs[step][name]`)
+and logs `output url = …`. **A declared output that wasn't produced fails the step**, which undoes
+everything: the planner promised it. Terraform outputs come from `terraform output -json` after
+apply (sensitive ones are never read); scripts write a JSON object or `NAME=value` lines to the
+file named by `$MAC_OUTPUTS`. Probes send a SigV4-signed request (the landing zone only allows
+signed calls) and keep AWS's answer; see `docs/api.md`.
+
 Rules `mac validate` enforces:
 - `repo` is `github.com/<owner>/<repo>`, optionally `@<branch>`. It defaults to `main`.
 - `iac` steps have `run.path`, a Terraform directory, and roll back with `terraform destroy`.
@@ -125,6 +143,7 @@ Rules `mac validate` enforces:
 - `db_migration` steps need `verify`, and get a warning if they aren't `when: manual`.
 - Approvals have an `approver` and a `summary`. `after` names other approvals, with no loops.
 - No duplicate ids, no unknown references, no loops.
+- Output and probe names are unique per step; probe paths start with `/`; only POST probes have a body.
 
 Changes in v0.3: approvals lost `jira:` (MaC raises the tickets) and gained `approver`,
 `summary`, `after` and `design_doc`. Steps gained `codegen`: the engineers decide, step by step
@@ -149,6 +168,7 @@ becomes the step's log. The runner sets these environment variables:
 | `MAC_ACTION` | `run`, `verify`, `rollback` or `plan` |
 | `MAC_RUN_ID`, `MAC_STEP_ID`, `MAC_MIGRATION` | identifiers |
 | `MAC_RUN_DIR` | a directory kept for the whole run, for passing artifacts between steps |
+| `MAC_OUTPUTS` | (run action only) a file to write the step's declared outputs to: JSON, or `NAME=value` lines |
 | `MAC_TARGET_ACCOUNT`, `MAC_TARGET_REGION`, `AWS_REGION` | the target for this environment |
 
 Rollback scripts must be safe to run when the step only partly happened. Entrypoints run with

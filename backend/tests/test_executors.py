@@ -20,6 +20,11 @@ override = pathlib.Path("mac_backend_override.tf")
 with log.open("a", encoding="utf-8") as f:
     f.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "env": os.environ.get("TF_VAR_mac_env"), "cache": os.environ.get("TF_PLUGIN_CACHE_DIR"),
                         "override": override.read_text(encoding="utf-8") if override.exists() else None}) + "\\n")
+if sys.argv[1] == "output":
+    print(json.dumps({"table_name": {"value": "mac-claims-" + os.environ["TF_VAR_mac_env"] + "-claims", "sensitive": False},
+                      "url": {"value": "https://abc.lambda-url.us-east-1.on.aws/", "sensitive": False},
+                      "password": {"value": "hunter2", "sensitive": True}}))
+    sys.exit(0)
 print("terraform says hi")
 sys.exit(int(os.environ.get("FAKE_TF_EXIT", "0")) if sys.argv[1] != "init" else 0)
 """
@@ -118,8 +123,8 @@ def test_prune_keeps_only_active_runs(setup, tmp_path):
 def test_terraform_apply_uses_s3_state_per_environment_and_step(setup):
     executor, _, ctx, lines, tf_calls = setup
     executor.execute(ctx("provision_storage"), "run")
-    init, apply = tf_calls()
-    assert init["args"][0] == "init"
+    init, apply, output = tf_calls()  # output: the step declares outputs
+    assert init["args"][0] == "init" and output["args"][0] == "output"
     assert apply["args"][:2] == ["apply", "-input=false"] and "-auto-approve" in apply["args"]
     assert apply["env"] == "rehearsal"
     assert Path(apply["cwd"]).as_posix().endswith("provision_storage-apply/terraform/storage")
@@ -164,3 +169,26 @@ def test_hanging_command_times_out(setup):
     executor.timeout = 1
     with pytest.raises(StepFailed, match="took longer than 1s"):
         executor.execute(ctx("preflight"), "run")
+
+
+def test_terraform_apply_returns_outputs_but_never_sensitive_ones(setup):
+    executor, _, ctx, _, tf_calls = setup
+    outputs = executor.execute(ctx("provision_storage"), "run")
+    assert outputs["table_name"] == "mac-claims-rehearsal-claims" and "password" not in outputs
+    assert ["output", "-json", "-no-color"] in [c["args"] for c in tf_calls()]
+
+
+def test_plan_and_destroy_return_no_outputs(setup):
+    executor, _, ctx, _, _ = setup
+    assert executor.execute(ctx("provision_storage", mode="build"), "plan") == {}
+
+
+def test_script_outputs_come_from_the_mac_outputs_file(setup, tmp_path):
+    executor, workspace, ctx, _, _ = setup
+    script = ("import json, os\n"
+              "open(os.environ['MAC_OUTPUTS'], 'w').write(json.dumps({'rows': 3, 'table': 'claims'}))\n")
+    (workspace.repos[DB] / "migrate.py").write_text(script, encoding="utf-8")
+    assert executor.execute(ctx("db_migrate"), "run") == {"rows": "3", "table": "claims"}
+    (workspace.repos[DB] / "migrate.py").write_text(
+        "import os\nopen(os.environ['MAC_OUTPUTS'], 'w').write('rows=5\\nnote=ok\\n')\n", encoding="utf-8")
+    assert executor.execute(ctx("db_migrate"), "run") == {"rows": "5", "note": "ok"}
