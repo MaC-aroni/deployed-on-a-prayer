@@ -1,63 +1,107 @@
-# Cloud setup: AWS, Jira and Confluence
+# Cloud setup: AWS, Atlassian (Jira + Confluence) and NVIDIA
 
-What the runner needs from the outside world, who sets it up, and the values it reads.
-Never commit keys: put them in `backend/.env` locally, and send them privately to
-ob1-can-obi for Fly secrets.
+What the runner needs from the outside world and the values it reads. **Never commit keys:**
+put them in `backend/.env` locally (gitignored), and send them privately to ob1-can-obi for
+the Fly secrets.
 
-## AWS
+## AWS: one account
 
-One AWS Organization with three accounts, not one account per teammate:
+We use **one AWS account** for the hackathon. Rehearsal and production share it and are kept
+apart by name: every resource includes `MAC_ENV` (`mac-claims-rehearsal-...` vs
+`mac-claims-production-...`), and Terraform state is separate per environment. Leave
+`target.rehearsal` out of the spec.
 
-| Account | Used for | Who |
-|---|---|---|
-| management | billing, IAM Identity Center, the Terraform state bucket | maintainers |
-| mac-rehearsal | Rehearse runs (everything is created, then undone) | the runner; teammates for debugging |
-| mac-production | Deploy runs | the runner only; humans read-only |
+1. **Budget alert:** set an AWS Budget, for example $20 a month, with an email alert. The demo
+   uses Lambda, DynamoDB on demand and S3, which cost cents when idle.
+2. **State bucket:** create an S3 bucket in `us-east-1` with versioning on, for example
+   `mac-terraform-state-<account-id>`. There's no DynamoDB lock table: the runner uses S3's
+   own locking. State lands at `mac/<migration>/<rehearsal|production>/<step>.tfstate`.
+3. **Runner credentials:** an IAM user (or role) for the runner, with the policy below and an
+   access key. It only reaches resources named `mac-claims-*` and the state bucket.
+4. **Account ID:** put it in `examples/claims-adjudication/migration.yaml` as `target.account`.
+   The preflight check refuses to run against any other account.
 
-Teammates sign in through IAM Identity Center with their own user. A single account also
-works (the spec's `rehearsal` block is optional); then `MAC_ENV` naming is the only
-separation between rehearsal and production.
+### The runner's IAM policy
 
-Setup, in order:
-1. Create the organization and the two member accounts. Turn on MFA for the root user and
-   set a budget alert.
-2. Create the state bucket in the management account (versioning on). The runner uses S3
-   locking, so there is no DynamoDB table. Terraform state lands at
-   `mac/<migration>/<rehearsal|production>/<step>.tfstate`.
-3. Create a runner IAM user or role in each target account, allowed to create what the demo
-   needs (VPC, security group, IAM role, ECS or RDS) and to read and write the bucket.
-4. Put the account IDs in `examples/claims-adjudication/migration.yaml` (`target.account`,
-   and `target.rehearsal` if rehearsal is a separate account).
+Replace `<account-id>` and `<state-bucket>`:
 
-## Jira
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "WhoAmI", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*"},
+    {"Sid": "PreflightLists", "Effect": "Allow",
+     "Action": ["dynamodb:ListTables", "lambda:ListFunctions"], "Resource": "*"},
+    {"Sid": "ClaimsTables", "Effect": "Allow", "Action": "dynamodb:*",
+     "Resource": "arn:aws:dynamodb:us-east-1:<account-id>:table/mac-claims-*"},
+    {"Sid": "ClaimsFunctions", "Effect": "Allow", "Action": "lambda:*",
+     "Resource": "arn:aws:lambda:us-east-1:<account-id>:function:mac-claims-*"},
+    {"Sid": "ClaimsRoles", "Effect": "Allow",
+     "Action": ["iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:TagRole", "iam:UntagRole",
+                "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy", "iam:GetRolePolicy",
+                "iam:DeleteRolePolicy", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+                "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+                "iam:ListInstanceProfilesForRole"],
+     "Resource": "arn:aws:iam::<account-id>:role/mac-claims-*"},
+    {"Sid": "PassClaimsRolesToLambda", "Effect": "Allow", "Action": "iam:PassRole",
+     "Resource": "arn:aws:iam::<account-id>:role/mac-claims-*",
+     "Condition": {"StringEquals": {"iam:PassedToService": "lambda.amazonaws.com"}}},
+    {"Sid": "TerraformState", "Effect": "Allow",
+     "Action": ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+     "Resource": ["arn:aws:s3:::<state-bucket>", "arn:aws:s3:::<state-bucket>/mac/*"]}
+  ]
+}
+```
 
-1. Create a free Atlassian site and a Jira project with key `MAC`.
-2. Create `MAC-1` (tech risk), `MAC-2` (IAM review) and `MAC-3` (DBA sign-off), which the
-   demo spec points at.
-3. The runner treats the statuses `Approved` and `Done` as approved, and `Rejected` and
-   `Declined` as rejected. Any other status is pending. Add an `Approved` status to the
-   workflow if it only has To Do, In Progress and Done.
-4. Create an API token for the account that owns the project.
+## Atlassian: one site for Jira and Confluence
 
-## Confluence
+1. Create a free Atlassian site with Jira and Confluence, for example
+   `https://<your-site>.atlassian.net`.
+2. **Jira:** create a project with key **`MAC`**. In its workflow, add the statuses
+   **`Approved`** and **`Rejected`**. The runner treats `Approved` and `Done` as approved;
+   `Rejected`, `Declined` and `Won't Do` as rejected; anything else as pending.
+   **Don't create any tickets:** MaC raises them itself during Build, one per approval in the
+   spec (Tech Risk; then manager, then the Claims MCP team for MCP access).
+3. **Confluence:** create a space with key **`CLAIMS`**.
+4. **API token:** create one at id.atlassian.com (Security → API tokens), for an account that
+   can create Jira issues and Confluence pages.
+5. **Optional, to assign tickets:** find each approver's Jira accountId and set
+   `MAC_JIRA_ASSIGNEES`, for example
+   `{"tech-risk": "712020:...", "manager": "712020:...", "claims-mcp-team": "712020:..."}`.
+   Without it, tickets are created unassigned.
+6. **Publish the company knowledge base** (the 14 pages in `demo-data/confluence/`) into
+   the space. It's safe to re-run, and it updates the same pages:
+   `mise run mac publish-knowledge demo-data/confluence`
 
-Same Atlassian site and API token. Create a space with key `CLAIMS`, then run
-`mise run load-confluence`. It loads the ten demo pages from
-`examples/claims-adjudication/confluence/` (design doc, section 4.4) and can be re-run.
+## NVIDIA (the LLM that writes the design page)
+
+Create an API key at build.nvidia.com and set `NVIDIA_API_KEY`. The default model is
+`nvidia/nemotron-3-super-120b-a12b`. Without the key, Build still works, but the design page
+isn't written and the Tech Risk ticket waits.
 
 ## Variables
 
-| Variable | Where it is set |
+All go in `backend/.env` locally, and in Fly secrets for the deployed app:
+
+| Variable | Value |
 |---|---|
-| `ATLASSIAN_SITE` (for example `https://<site>.atlassian.net`), `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | `backend/.env`, Fly secrets |
-| `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | `backend/.env`, Fly secrets |
-| `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` | `backend/.env` or the AWS CLI, Fly secrets |
-| `GITHUB_TOKEN` | `backend/.env`, Fly secrets |
+| `GITHUB_TOKEN` | a token that can read the `MaC-aroni` repos |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (or `AWS_PROFILE` locally) | the runner's credentials |
+| `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the state bucket, and `us-east-1` |
+| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | the site URL, the token's account email, and the token |
+| `CONFLUENCE_SPACE_KEY` | `CLAIMS` |
+| `JIRA_PROJECT` | `MAC` (the default) |
+| `MAC_JIRA_ASSIGNEES` | optional, see above |
+| `NVIDIA_API_KEY` | the NVIDIA key |
 
-## Checks
+## Checks, in order
 
-- `aws sts get-caller-identity` shows the runner in the right account.
-- `GET <ATLASSIAN_SITE>/rest/api/3/issue/MAC-1` returns 200 with the token.
-- `mise run mac validate examples/claims-adjudication/migration.yaml` passes.
-- `mise run mac build examples/claims-adjudication/migration.yaml` reaches a real
-  `terraform plan`.
+1. `aws sts get-caller-identity` shows the runner's user in the right account.
+2. `mise run mac validate examples/claims-adjudication/migration.yaml` passes.
+3. `mise run mac publish-knowledge demo-data/confluence` prints `published 14 pages`.
+4. `mise run mac build examples/claims-adjudication/migration.yaml` passes all of these:
+   - the guardrails
+   - the preflight (right account)
+   - a real `terraform plan` for each infrastructure step
+   - the design page written to Confluence
+   - the Tech Risk and manager tickets raised in Jira
