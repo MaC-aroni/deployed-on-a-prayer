@@ -20,6 +20,9 @@ override = pathlib.Path("mac_backend_override.tf")
 with log.open("a", encoding="utf-8") as f:
     f.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "env": os.environ.get("TF_VAR_mac_env"), "cache": os.environ.get("TF_PLUGIN_CACHE_DIR"),
                         "override": override.read_text(encoding="utf-8") if override.exists() else None}) + "\\n")
+if sys.argv[1:3] == ["state", "list"]:
+    print(os.environ.get("FAKE_TF_STATE", ""), end="")
+    sys.exit(0)
 if sys.argv[1] == "output":
     print(json.dumps({"table_name": {"value": "mac-claims-" + os.environ["TF_VAR_mac_env"] + "-claims", "sensitive": False},
                       "url": {"value": "https://abc.lambda-url.us-east-1.on.aws/", "sensitive": False},
@@ -137,8 +140,7 @@ def test_terraform_apply_uses_s3_state_per_environment_and_step(setup):
 def test_production_and_rehearsal_state_never_mix(setup):
     executor, _, ctx, _, tf_calls = setup
     executor.execute(ctx("provision_storage", mode="deploy"), "rollback")
-    destroy = tf_calls()[-1]
-    assert destroy["args"][0] == "destroy"
+    destroy = next(c for c in tf_calls() if c["args"][0] == "destroy")  # then: state list
     assert "/production/provision_storage.tfstate" in destroy["override"]
 
 
@@ -212,3 +214,18 @@ def test_a_cancelled_script_is_killed(setup, tmp_path):
     with pytest.raises(StepFailed, match="cancelled"):
         executor.execute(context, "run")
     assert _t.monotonic() - started < 10
+
+
+def test_destroy_is_verified_by_an_empty_state(setup, monkeypatch):
+    executor, _, ctx, lines, tf_calls = setup
+    monkeypatch.delenv("FAKE_TF_STATE", raising=False)
+    executor.execute(ctx("provision_storage"), "rollback")
+    assert ["state", "list", "-no-color"] in [c["args"] for c in tf_calls()]
+    assert any("verified: Terraform state for this step is empty" in line for line in lines)
+
+
+def test_a_resource_left_in_state_fails_the_undo(setup, monkeypatch):
+    executor, _, ctx, _, _ = setup
+    monkeypatch.setenv("FAKE_TF_STATE", "aws_dynamodb_table.claims\n")
+    with pytest.raises(StepFailed, match="undo incomplete: still in Terraform state: aws_dynamodb_table.claims"):
+        executor.execute(ctx("provision_storage"), "rollback")

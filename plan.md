@@ -31,6 +31,17 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Undo is verified (ob1-can-obi, with Claude Code)
+
+#### What changed
+- After each `terraform destroy`, the runner checks the step's Terraform state is empty; anything
+  left fails the undo and is named in the log. Each undo ends with a run event: **"Undo verified:
+  N step(s) undone and checked empty"** or **"Undo NOT complete: …"**.
+
+#### What you need to do
+- **Elathius (UI):** show that final undo event prominently on failed and cancelled runs (green
+  for verified, red for not complete). It's the proof that a rollback really cleaned up.
+
 ### 2026-11-08: Auto-fix traces a failing check to the step that caused it (ob1-can-obi, with Claude Code)
 
 #### What changed

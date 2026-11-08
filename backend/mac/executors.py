@@ -175,6 +175,20 @@ class Executor:
                 "apply": ["apply", *flags, "-auto-approve", "-lock-timeout=60s"],
                 "destroy": ["destroy", *flags, "-auto-approve", "-lock-timeout=60s"]}[command]
         self._run([*self.terraform, *args], tf_dir, ctx, command, label=f"terraform {command}")
+        if command == "destroy":
+            self._verify_destroyed(ctx, tf_dir)
+
+    def _verify_destroyed(self, ctx: StepContext, tf_dir: Path) -> None:
+        """Proof, not trust: after destroy, the step's state must hold nothing. A resource still in
+        state means the undo didn't finish, and the run must say so."""
+        result = subprocess.run([*self.terraform, "state", "list", "-no-color"], cwd=tf_dir,
+                                env=self._env(ctx, "rollback"), capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise StepFailed(f"couldn't verify the undo: terraform state list failed: {result.stderr.strip()[-300:]}")
+        left = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if left:
+            raise StepFailed(f"undo incomplete: still in Terraform state: {', '.join(left)}")
+        ctx.log("verified: Terraform state for this step is empty; nothing it created is left")
 
     def _env(self, ctx: StepContext, action: str) -> dict[str, str]:
         target = ctx.spec.target

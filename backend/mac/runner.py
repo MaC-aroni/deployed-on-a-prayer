@@ -365,6 +365,14 @@ class Runner:
                 self._set(run, step, StepState.ROLLED_BACK)
             else:
                 self._event(run, "log", "undid this step's partial changes", step.id)
+        undone = [s.id for s in targets if s.mutating and run.steps.get(s.id) == StepState.ROLLED_BACK]
+        if ok and undone:
+            self._event(run, "run", f"Undo verified: {len(undone)} step(s) undone and checked empty "
+                        f"({', '.join(undone)}). Nothing this run created is left.")
+        elif not ok:
+            left = [s.id for s in targets if run.steps.get(s.id) == StepState.ROLLBACK_FAILED]
+            self._event(run, "run", f"Undo NOT complete: {', '.join(left)} could not be undone or verified. "
+                        "Press Undo to retry; see each step's log for what's left.")
         return ok
 
     # ---- Build helpers ------------------------------------------------------------------------
