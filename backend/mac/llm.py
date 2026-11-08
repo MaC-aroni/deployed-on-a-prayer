@@ -29,7 +29,7 @@ class NIMChat:
     def complete(self, system: str, user: str, *, max_tokens: int = 4096) -> str:
         body = {"model": self.model, "temperature": 0.2, "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        reply = _request(self.url, self.headers, method="POST", body=body)
+        reply = _request(self.url, self.headers, method="POST", body=body, timeout=self.timeout)
         try:
             text = reply["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:

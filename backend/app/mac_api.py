@@ -54,7 +54,7 @@ def configure(state: State) -> None:
 
 
 def _default_state() -> State:
-    data_dir = Path(os.environ.get("MAC_DATA_DIR", ROOT / "backend" / ".mac"))
+    data_dir = Path(os.environ.get("MAC_DATA_DIR", ROOT / ".mac"))  # the same history as `mise run mac`
     pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mac-run")
     token = os.environ.get("MAC_API_TOKEN") or None
     return State(

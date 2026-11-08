@@ -385,7 +385,7 @@ class Runner:
             markdown = self.design_writer.write(facts(spec, run.shas))
             page_id, url = self.pages.publish(page_title(spec), render_page(spec, run.shas, markdown, run.id),
                                               existing.page_id if existing else None)
-        except IntegrationError as e:
+        except Exception as e:  # noqa: BLE001 - the LLM or Confluence failing must never fail the Build
             return self._design_report(run, None, f"not written: {e}")
         self.store.save_design(run.migration, DesignPage(page_id=page_id, url=url, digest=run.spec_digest))
         self._design_report(run, url, "written")
