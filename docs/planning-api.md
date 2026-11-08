@@ -218,3 +218,27 @@ isn't `ok`. `GET /services` lists it in `repos[]` with `custom: true` and `licen
 so `page_url` is set from then on. `409` when Confluence isn't configured; `404` for an unknown
 page. For a repository with no page at all, `POST /learn` is the agent that writes and
 publishes one.
+
+## Review of a page MaC wrote
+
+A generated page carries the label `needs-review` until a person signs it off. Its review state
+is on `services[].review.status` and `GET /knowledge/{page}.review.status`:
+`pending | approved | rejected`. When Learn raised a Jira ticket, the state follows the ticket
+(asked at most every 30 s; Approved/Done → `approved`, Rejected/Declined/Won't Do → `rejected`),
+and the page's labels are rewritten (`needs-review` → `reviewed`). Without a ticket the review
+happens in the console: `POST /api/mac/knowledge/{page}/review {"status": "approved" |
+"rejected", "note"?}` (sign-in) records `reviewed_by` / `reviewed_at`, rewrites the labels and
+returns the page view; `409` for a hand-written page, `404` for an unknown one.
+
+## Chat
+
+`POST /api/mac/chat {"message": "...", "chat_id"?: "..."}` (sign-in on Fly) → one turn with a
+fresh agent over the whole knowledge base. Retrieval is code: `context_for` picks the graph's
+neighbourhood of what the question names and the most relevant sections (all pages, generated
+included); the model answers from those numbered sources and cites `[S1]`. `409` without an
+LLM, `422` on an empty message, `502` when the model doesn't answer. Reply:
+`{chat_id, title, model, reply (Markdown), sources: [{n, id, page, title, heading, url, cited}],
+trace: [{phase, text}], turns}`; the trace (observation, reasoning, outcome) is written by code
+from what was retrieved and cited. Transcripts live in `<MAC_DATA_DIR>/chats/<id>.json`:
+`GET /api/mac/chats` (newest first), `GET /api/mac/chats/{id}` (turns with their sources and
+traces), `DELETE /api/mac/chats/{id}`.

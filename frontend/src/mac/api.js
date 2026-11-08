@@ -86,6 +86,12 @@ export const api = {
   addRepo: (url) => call("POST", "/repos", { url }),
   removeRepo: (slug) => call("DELETE", `/repos/${slug}`),
   publishKnowledge: (page) => call("POST", `/knowledge/${enc(page)}/publish`),
+  reviewKnowledge: (page, status, note) => call("POST", `/knowledge/${enc(page)}/review`, { status, note }),
+  // Chat: a fresh agent over the whole knowledge base, one turn per call
+  chat: (message, chatId) => call("POST", "/chat", { message, chat_id: chatId ?? null }),
+  chats: () => call("GET", "/chats"),
+  chatDetail: (id) => call("GET", `/chats/${enc(id)}`),
+  deleteChat: (id) => call("DELETE", `/chats/${enc(id)}`),
 
   // Sign-in: { login, required, available, repo }
   me: () => call("GET", "/auth/me"),

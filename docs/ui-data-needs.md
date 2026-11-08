@@ -116,6 +116,8 @@ status, `request_id`, `elapsed_ms`, body, the `curl` with copy) and a before/aft
 | `expected_live` on a cancelled Deploy | gap | `_endpoints` treats only finished Rehearse and `undone` as gone; a `cancelled` Deploy was undone too and should report `expected_live: false`. The UI treats `run_status == "cancelled"` as off meanwhile |
 | `GET /plans/{id}` had no `endpoints` or live approval status | own (endpoints) · gap (approvals) | `endpoints` added in the planning API; live `approvals[].status/detail/checked` for generated plans still needs the same lookup `get_migration` does |
 | Health | own | `GET /health` exists in the planning API; fine to move into `mac_api.py` |
+| Review of generated knowledge pages | own | state follows the Jira ticket via `approvals.status(ticket)` (polled by the planning API, 30 s). If the runner's approval poller/webhook also covered `KB-*` and `LIC-*` tickets, the console could drop its own polling |
+| Chat over the knowledge base | own | `POST /chat` in the planning API uses the same sections/graph the Planner uses; a shared retrieval helper in `mac/` would keep the two from drifting |
 
 ## 9. Smaller things
 

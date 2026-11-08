@@ -1,6 +1,7 @@
 import "./styles.css";
 import Shell, { EmptyState } from "./components/Shell.jsx";
 import Agents from "./pages/Agents.jsx";
+import Chat from "./pages/Chat.jsx";
 import Demo from "./pages/Demo.jsx";
 import Knowledge from "./pages/Knowledge.jsx";
 import Migrate from "./pages/Migrate.jsx";
@@ -71,6 +72,13 @@ function Routes() {
     return (
       <Shell crumbs={[ORG, { label: `planning ${m.runId}` }]}>
         <Planning key={m.runId} runId={m.runId} />
+      </Shell>
+    );
+  }
+  if (path === "/chat" || (m = matchPath("/chat/:id", path))) {
+    return (
+      <Shell crumbs={[ORG, { label: "Chat" }]}>
+        <Chat key={m?.id ?? "new"} chatId={m?.id ?? null} />
       </Shell>
     );
   }

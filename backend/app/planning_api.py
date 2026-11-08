@@ -24,20 +24,22 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
+from typing import Literal
+import uuid
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from mac import agents_cli, cli as mac_cli
-from mac.graph import Graph, extract
+from mac.graph import Graph, context_for, extract
 from mac.integrations import GitHubAPI, IntegrationError, TicketRequest, _request, open_pull_request, read_files
 from mac.knowledge import KnowledgeError, KnowledgePage, load_pages, publish
 from mac.knowledge import render as render_page
 from mac.llm import DEFAULT_MODEL, LLM, parse_json
 from mac.planner import plan, pr_body
 from mac.runner import GateError
-from mac.sources import sections_from_pages
+from mac.sources import Catalog, relevant, sections_from_pages
 from mac.spec import Spec, SpecError, load_spec, parse_spec
 from mac.store import RunRecord, RunStatus
 from mac.validate import validate
@@ -220,6 +222,56 @@ def _generated_meta(state: mac_api.State, page_id: str) -> dict:
         return {}
 
 
+def _save_generated_meta(state: mac_api.State, page_id: str, meta: dict) -> None:
+    folder = _generated_dir(state)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{page_id}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _set_page_labels(state: mac_api.State, page_id: str, drop: str, add: str) -> None:
+    """Rewrite a generated page's front-matter labels (e.g. needs-review → reviewed)."""
+    path = _generated_dir(state) / f"{page_id}.md"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n") or "\n---\n" not in text[4:]:
+        return
+    head, body = text[4:].split("\n---\n", 1)
+    meta = yaml.safe_load(head) or {}
+    labels = [label for label in (meta.get("labels") or []) if label != drop]
+    if add not in labels:
+        labels.append(add)
+    meta["labels"] = labels
+    path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False, allow_unicode=True) + "---\n" + body, encoding="utf-8")
+
+
+_review_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def _review_state(state: mac_api.State, page_id: str, meta: dict) -> dict:
+    """The sidecar plus the effective review `status`: what Jira says about the ticket when
+    there is one (asked at most every 30 s), else what a person set in the console, else pending."""
+    status = meta.get("review_status") or "pending"
+    ticket = meta.get("ticket")
+    if ticket and not isinstance(state.runner.approvals, mac_cli._NoJira) and status == "pending":
+        cached = _review_cache.get(page_id)
+        if cached and time.time() - cached[0] < 30:
+            jira = cached[1]
+        else:
+            try:
+                jira = str(getattr(state.runner.approvals.status(ticket), "value", state.runner.approvals.status(ticket)))
+            except IntegrationError:
+                jira = None
+            _review_cache[page_id] = (time.time(), jira)
+        if jira in ("approved", "rejected"):
+            status = jira
+            meta = {**meta, "review_status": jira, "reviewed_by": "jira", "reviewed_at": time.time()}
+            _save_generated_meta(state, page_id, meta)
+            if jira == "approved":
+                _set_page_labels(state, page_id, "needs-review", "reviewed")
+    return {**meta, "status": status}
+
+
 def _base_pages(config: Planning) -> list[KnowledgePage]:
     try:
         return load_pages(config.knowledge_dir)
@@ -258,10 +310,45 @@ def knowledge_page(page_id: str, state: mac_api.State = Depends(mac_api.get_stat
     page = next((p for p in _all_pages(state, config) if p.id == page_id), None)
     if page is None:
         raise HTTPException(404, f"no knowledge page {page_id!r}")
+    return _page_view(state, page)
+
+
+def _page_view(state: mac_api.State, page: KnowledgePage) -> dict:
+    generated = "generated" in {label.lower() for label in page.labels}
     meta = _generated_meta(state, page.id)
+    review = _review_state(state, page.id, meta) if generated else None
+    if generated:  # the Jira readback may have just rewritten the labels on disk
+        page = _parse_generated(_generated_dir(state) / f"{page.id}.md") or page
     return {"id": page.id, "title": page.title, "body": page.body, "parent": page.parent, "owner": page.owner,
             "labels": list(page.labels), "source": page.source, "url": _urls(state).get(page.id),
-            "generated": "generated" in {label.lower() for label in page.labels}, "review": meta or None}
+            "generated": generated, "review": review}
+
+
+class ReviewBody(BaseModel):
+    status: Literal["approved", "rejected"]
+    note: str | None = None
+
+
+@router.post("/knowledge/{page_id}/review")
+def review_knowledge_page(page_id: str, body: ReviewBody, state: mac_api.State = Depends(mac_api.get_state),
+                          config: Planning = Depends(get_config), user: str | None = Depends(signed_in)):
+    """The manual sign-off on a page MaC wrote: approved pages lose their needs-review label
+    and count as documentation; rejected ones stay drafts until Learn rewrites them."""
+    page = next((p for p in _all_pages(state, config) if p.id == page_id), None)
+    if page is None:
+        raise HTTPException(404, f"no knowledge page {page_id!r}")
+    if "generated" not in {label.lower() for label in page.labels}:
+        raise HTTPException(409, "only pages MaC wrote are reviewed here; hand-written pages are reviewed in Confluence")
+    meta = {**_generated_meta(state, page_id), "review_status": body.status, "reviewed_by": user or "console",
+            "reviewed_at": time.time(), "note": body.note}
+    _save_generated_meta(state, page_id, meta)
+    _review_cache.pop(page_id, None)
+    if body.status == "approved":
+        _set_page_labels(state, page_id, "needs-review", "reviewed")
+    else:
+        _set_page_labels(state, page_id, "reviewed", "needs-review")
+    page = next(p for p in _all_pages(state, config) if p.id == page_id)
+    return _page_view(state, page)
 
 
 @router.post("/knowledge/{page_id}/publish")
@@ -869,6 +956,127 @@ def remove_repo(owner: str, name: str, state: mac_api.State = Depends(mac_api.ge
     return {"removed": f"{owner}/{name}"}
 
 
+# ---- Chat: a fresh agent over the whole knowledge base ----------------------------------------
+
+
+CHAT_PROMPT = """You are MaC's assistant for a company's engineering knowledge base: its services, repositories,
+standards, approvals and migration pipelines. Answer the question from the numbered sources and the
+graph facts below, and only from them; cite each claim as [S1], [S2]. When the sources don't say,
+say so plainly in one sentence and suggest which page would need to be written or which team to ask.
+Answer in short Markdown: a direct first sentence, then bullets if useful. No preamble."""
+
+MAX_TURNS = 8
+
+
+class ChatBody(BaseModel):
+    chat_id: str | None = None
+    message: str
+
+
+def _chats_dir(state: mac_api.State) -> Path:
+    return state.runner.data_dir / "chats"
+
+
+def _load_chat(state: mac_api.State, chat_id: str) -> dict | None:
+    path = _chats_dir(state) / f"{chat_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _save_chat(state: mac_api.State, chat: dict) -> None:
+    folder = _chats_dir(state)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{chat['id']}.json").write_text(json.dumps(chat, indent=2), encoding="utf-8")
+
+
+@router.post("/chat")
+def chat(body: ChatBody, state: mac_api.State = Depends(mac_api.get_state), config: Planning = Depends(get_config),
+         user: str | None = Depends(signed_in)):
+    """One turn with a fresh agent that has the whole knowledge base (hand-written and generated
+    pages) and the graph. Retrieval is code (the most relevant sections and the graph's
+    neighbourhood of what the question names); the model only writes the answer and cites."""
+    question = body.message.strip()
+    if not question:
+        raise HTTPException(422, "Say something")
+    llm = _llm(config)
+    chat = (_load_chat(state, body.chat_id) if body.chat_id else None) or {
+        "id": uuid.uuid4().hex[:12], "title": question[:80], "created": time.time(), "updated": time.time(),
+        "by": user, "turns": []}
+    history = chat["turns"][-MAX_TURNS:]
+    sections = _sections(state, config)
+    graph = _load_graph(state)
+    recent = " ".join(t["text"] for t in history if t["role"] == "user")[-400:]
+    if graph is not None:
+        sub, picked = context_for(graph, sections, question, k=10)
+        facts = sub.facts()
+        if len(facts) > 6000:
+            facts = facts[:6000] + "\n…"
+        matched = len(sub.nodes) if sub is not graph else 0
+    else:
+        picked, facts, matched = relevant(sections, question + " " + recent, k=10), "", 0
+    catalog = Catalog(picked)
+    transcript = "\n".join(f"{'User' if t['role'] == 'user' else 'Assistant'}: {t['text']}" for t in history)
+    prompt = ((f"Conversation so far:\n{transcript}\n\n" if transcript else "")
+              + f"Question: {question}\n\n"
+              + (f"Graph facts:\n{facts}\n\n" if facts else "")
+              + f"Sources:\n{catalog.prompt_block()}")
+    try:
+        reply = llm.complete(CHAT_PROMPT, prompt, max_tokens=1200).strip()
+    except IntegrationError as e:
+        raise HTTPException(502, f"the model didn't answer: {e}") from e
+    cited = {int(n) for n in re.findall(r"\[S(\d+)\]", reply)}
+    urls = _urls(state)
+    sources = [{"n": i, "id": sec.id, "page": sec.doc_id, "title": sec.doc_title, "heading": sec.heading,
+                "url": sec.url or urls.get(sec.doc_id), "cited": i in cited}
+               for i, sec in enumerate(catalog.sections, 1)]
+    docs = len({sec.doc_id for sec in catalog.sections})
+    trace = [
+        {"phase": "observation", "text": f"read {len(catalog.sections)} sections across {docs} page(s)"
+                                          + (f"; {matched} graph facts matched the question" if matched else "; the question names nothing in the graph" if graph is not None else "; no graph yet, text search only")},
+        {"phase": "reasoning", "text": ("answered from " + ", ".join(f"S{n}" for n in sorted(cited))) if cited else "the sources didn't settle it; said so"},
+        {"phase": "outcome", "text": f"{len(reply)} characters from {_model_name(llm) or 'the configured model'}"},
+    ]
+    chat["turns"] += [{"role": "user", "text": question, "ts": time.time()},
+                      {"role": "assistant", "text": reply, "ts": time.time(), "sources": sources, "trace": trace,
+                       "model": _model_name(llm)}]
+    chat["updated"] = time.time()
+    _save_chat(state, chat)
+    return {"chat_id": chat["id"], "title": chat["title"], "model": _model_name(llm), "reply": reply,
+            "sources": sources, "trace": trace, "turns": len(chat["turns"])}
+
+
+@router.get("/chats")
+def list_chats(state: mac_api.State = Depends(mac_api.get_state)):
+    out = []
+    for path in _chats_dir(state).glob("*.json") if _chats_dir(state).is_dir() else []:
+        c = _load_chat(state, path.stem)
+        if c:
+            out.append({"id": c["id"], "title": c["title"], "created": c["created"], "updated": c["updated"],
+                        "turns": len(c["turns"])})
+    return sorted(out, key=lambda c: c["updated"], reverse=True)
+
+
+@router.get("/chats/{chat_id}")
+def get_chat(chat_id: str, state: mac_api.State = Depends(mac_api.get_state)):
+    c = _load_chat(state, chat_id)
+    if c is None:
+        raise HTTPException(404, f"no chat {chat_id!r}")
+    return c
+
+
+@router.delete("/chats/{chat_id}")
+def delete_chat(chat_id: str, state: mac_api.State = Depends(mac_api.get_state), user: str | None = Depends(signed_in)):
+    path = _chats_dir(state) / f"{chat_id}.json"
+    if not path.is_file():
+        raise HTTPException(404, f"no chat {chat_id!r}")
+    path.unlink()
+    return {"deleted": chat_id}
+
+
 # ---- Services --------------------------------------------------------------------------------
 
 
@@ -917,7 +1125,7 @@ def _knowledge_services(state: mac_api.State, config: Planning) -> tuple[list[di
         out.append({"name": name, "page": page.id, "page_title": page.title, "page_url": urls.get(page.id),
                     "team": page.owner or None, "description": description, "repos": repos, "approvers": [],
                     "sources": [], "learned": False, "generated": generated,
-                    "review": _generated_meta(state, page.id) or None if generated else None})
+                    "review": _review_state(state, page.id, _generated_meta(state, page.id)) if generated else None})
     return out, len(pages)
 
 

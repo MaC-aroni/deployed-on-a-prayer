@@ -31,6 +31,29 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: ui_v2 round 2: review loop for generated pages, Chat, wording (Elathius, with Claude Code)
+
+#### What changed
+- **Why "under review" never went away:** a page MaC writes from a repository is a draft
+  (`needs-review`) until a person signs it off, but nothing read the review back. Now the
+  state follows the Jira ticket when Learn raised one, and otherwise a person approves or
+  rejects on the page itself (`/knowledge/<page>`, `POST /api/mac/knowledge/{page}/review`).
+  Approved pages lose `needs-review`; cards and rows show "review needed · MAC-n" → "written
+  by MaC" → "page rejected", with a **Review page** door while pending.
+- **Chat** (`/chat`, sidebar "Ask"): a Claude-style chat over the whole knowledge base. Each
+  question spins up a fresh agent (spinning cog while it works): retrieval in code (graph
+  neighbourhood + relevant sections), the configured model answers with `[S1]` citations,
+  sources as chips, a collapsible "how I answered" trace, transcripts kept per chat.
+  `POST /api/mac/chat`, `GET/DELETE /api/mac/chats[/id]`.
+- Wording: the service primary is **Build Migration Pipeline**; the "Also open a PR" toggle and
+  the toolbar "Learn knowledge base" moved into each card's ··· menu.
+
+#### How to adapt
+- Chat transcripts live in `<MAC_DATA_DIR>/chats/`; review decisions in the page's sidecar
+  under `<MAC_DATA_DIR>/knowledge/`.
+- On Fly: approving the `KB-*` ticket in Jira resolves the review within 30 s; so does Approve
+  in the console.
+
 ### 2026-11-08: ui_v2: Cancel, endpoints, Services tab, AI marks, repos by URL, bigger console (Elathius, with Claude Code)
 
 #### What changed

@@ -45,6 +45,8 @@ def api(env, tmp_path):
     holder = {"llm": None, "repos": lambda: FAKE_REPOS}
     planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
                                                  repo_lister=lambda: holder["repos"]()))
+    planning_api._review_cache.clear()  # module-level caches must not leak between tests
+    planning_api._repo_cache.update(at=0.0, repos=None)
     yield TestClient(app), env, holder
     mac_api.configure(None)
     planning_api.configure(None)
@@ -428,3 +430,68 @@ def test_run_index_carries_migration_and_based_on(api):
     assert set(row) >= {"id", "mode", "status", "reason", "failed_step", "created", "updated", "migration", "based_on"}
     assert client.get(f"/api/mac/run-index?migration={NAME}&limit=1").json()[0]["id"] == row["id"]
     assert client.get("/api/mac/run-index?migration=nothing").json() == []
+
+
+def _learned(client, holder, env, name="eligibility-sync"):
+    extracted = json.dumps({"nodes": [{"type": "service", "name": "EligibilitySyncService", "sources": ["S1"]}], "edges": []})
+    holder["llm"] = ScriptedLLM(LEARNED, extracted)
+    planning_api.configure(planning_api.Planning(llm_factory=lambda: holder["llm"], knowledge_dir=KNOWLEDGE,
+                                                 repo_lister=lambda: FAKE_REPOS, repo_reader=lambda slug: FAKE_REPO))
+    return client.post("/api/mac/learn", json={"repo": name}).json()["id"]
+
+
+def test_review_closes_the_loop_from_the_console_or_from_jira(api):
+    client, env, holder = api
+    env.approvals.default = "pending"  # the review ticket sits in Jira until someone moves it
+    _learned(client, holder, env)
+    page = "generated-eligibility-sync"
+    svc = by_name(client.get("/api/mac/services").json()["services"], "EligibilitySyncService")
+    assert svc["review"]["status"] == "pending" and svc["review"]["ticket"] == "MAC-1"
+    assert "needs-review" in client.get(f"/api/mac/knowledge/{page}").json()["labels"]
+
+    # Jira approves the review ticket: the console sees it without anyone clicking (Jira is asked
+    # at most every 30 s, so the cache is cleared here to stand in for the wait).
+    env.approvals.by_approval["KB-eligibility-sync"] = "approved"
+    planning_api._review_cache.clear()
+    view = client.get(f"/api/mac/knowledge/{page}").json()
+    assert view["review"]["status"] == "approved" and view["review"]["reviewed_by"] == "jira"
+    assert "reviewed" in view["labels"] and "needs-review" not in view["labels"]
+    assert by_name(client.get("/api/mac/services").json()["services"], "EligibilitySyncService")["review"]["status"] == "approved"
+
+    # A person can reject in the console; the page goes back to a draft.
+    res = client.post(f"/api/mac/knowledge/{page}/review", json={"status": "rejected", "note": "owner is wrong"})
+    assert res.status_code == 200 and res.json()["review"]["status"] == "rejected" and "needs-review" in res.json()["labels"]
+    assert client.post(f"/api/mac/knowledge/{page}/review", json={"status": "approved"}).json()["review"]["status"] == "approved"
+    assert client.post("/api/mac/knowledge/service-claims-adjudication/review", json={"status": "approved"}).status_code == 409
+    assert client.post("/api/mac/knowledge/nope/review", json={"status": "approved"}).status_code == 404
+    assert client.post(f"/api/mac/knowledge/{page}/review", json={"status": "maybe"}).status_code == 422
+
+
+def test_chat_answers_from_the_knowledge_base_with_sources_and_keeps_the_transcript(api):
+    client, env, holder = api
+    holder["llm"] = ScriptedLLM("ClaimsAdjudicationService reads CLAIMS_DB and calls the Claims MCP tool [S1] [S2].",
+                                "It needs the DBA sign-off [S1].")
+    res = client.post("/api/mac/chat", json={"message": "What does ClaimsAdjudicationService depend on?"})
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["reply"].startswith("ClaimsAdjudicationService") and data["turns"] == 2
+    assert len(data["sources"]) >= 2 and data["sources"][0]["n"] == 1 and data["sources"][0]["cited"] is True
+    assert all(src["page"] and src["title"] for src in data["sources"])
+    assert [t["phase"] for t in data["trace"]] == ["observation", "reasoning", "outcome"]
+    assert "answered from S1, S2" == data["trace"][1]["text"]
+    system, user = holder["llm"].prompts[0]
+    assert "cite each claim as [S1]" in system and "Question: What does ClaimsAdjudicationService" in user and "[S1]" in user
+
+    second = client.post("/api/mac/chat", json={"chat_id": data["chat_id"], "message": "Which approvals?"}).json()
+    assert second["turns"] == 4
+    assert "Conversation so far:" in holder["llm"].prompts[1][1] and "What does ClaimsAdjudicationService" in holder["llm"].prompts[1][1]
+    [listed] = client.get("/api/mac/chats").json()
+    assert listed["id"] == data["chat_id"] and listed["title"].startswith("What does") and listed["turns"] == 4
+    detail = client.get(f"/api/mac/chats/{data['chat_id']}").json()
+    assert [t["role"] for t in detail["turns"]] == ["user", "assistant", "user", "assistant"]
+    assert (env.runner.data_dir / "chats" / f"{data['chat_id']}.json").is_file()
+    assert client.delete(f"/api/mac/chats/{data['chat_id']}").status_code == 200
+    assert client.get(f"/api/mac/chats/{data['chat_id']}").status_code == 404
+    assert client.post("/api/mac/chat", json={"message": "   "}).status_code == 422
+    planning_api.configure(planning_api.Planning(llm_factory=None, knowledge_dir=KNOWLEDGE))
+    assert client.post("/api/mac/chat", json={"message": "hi"}).status_code == 409

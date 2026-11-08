@@ -2768,3 +2768,312 @@ a.row-title:hover {
 .repos-table .tr {
   grid-template-columns: minmax(0, 1.4fr) 130px minmax(0, 1.1fr) auto;
 }
+
+/* ---------- review bar (knowledge pages MaC wrote) ---------- */
+.review-bar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 3px 0 0 var(--warn);
+  animation: rise 0.15s ease-out;
+}
+.review-bar.is-approved {
+  box-shadow: inset 3px 0 0 var(--accent-2);
+}
+.review-bar.is-rejected {
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+.review-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.btn-danger {
+  background: var(--bad);
+  color: #fff;
+}
+.door-review {
+  color: var(--warn);
+}
+
+/* ---------- chat ---------- */
+.chat {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 20px;
+  height: calc(100vh - 56px);
+  min-height: 520px;
+  margin: -8px -40px -64px;
+  padding: 8px 0 0 0;
+}
+.chat-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 12px 16px 24px;
+  overflow-y: auto;
+}
+.chat-new {
+  height: 40px;
+  justify-content: center;
+}
+.chat-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-rail-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--muted);
+  transition: background var(--t), color var(--t);
+}
+.chat-rail-item:hover,
+.chat-rail-item.active {
+  background: var(--surface);
+  color: var(--fg);
+}
+.chat-rail-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.chat-rail-del {
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+}
+.chat-rail-item:hover .chat-rail-del {
+  opacity: 1;
+}
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface);
+  border-radius: var(--radius) 0 0 0;
+}
+.chat-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 24px 12px;
+}
+.chat-column {
+  max-width: 780px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.chat-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.chat-empty {
+  text-align: center;
+  padding: 72px 0 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.chat-empty-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+}
+.chat-empty h1 {
+  font-size: 24px;
+  margin: 4px 0 0;
+}
+.chat-empty p {
+  max-width: 520px;
+  margin: 0;
+}
+.chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 12px;
+}
+.chat-suggestion {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  max-width: 320px;
+  transition: background var(--t), transform var(--t);
+}
+.chat-suggestion:hover:not(:disabled) {
+  background: #363848;
+}
+.chat-turn {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  animation: rise 0.18s ease-out;
+}
+.chat-turn.role-user {
+  justify-content: flex-end;
+}
+.chat-turn.role-user .chat-bubble {
+  background: var(--accent-soft);
+  color: var(--fg);
+  max-width: 72%;
+  border-radius: 16px 16px 4px 16px;
+  white-space: pre-wrap;
+}
+.chat-turn.role-assistant .chat-bubble {
+  background: transparent;
+  padding: 2px 0;
+  flex: 1;
+  min-width: 0;
+}
+.chat-turn.role-error .chat-bubble {
+  background: var(--bad-soft);
+  border-radius: 12px;
+}
+.chat-bubble {
+  padding: 12px 16px;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.chat-bubble .markdown {
+  font-size: 14.5px;
+}
+.chat-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--accent);
+  color: #fff;
+  margin-top: 4px;
+}
+.chat-avatar.working {
+  background: var(--accent-2);
+  color: #0b1f1b;
+}
+.chat-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.chat-error {
+  color: var(--fg);
+}
+.chat-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.chat-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat-chip .mono {
+  color: var(--accent);
+}
+.chat-trace {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.chat-trace-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.chat-trace .trace {
+  margin-top: 8px;
+  gap: 6px;
+}
+.chat-composer-wrap {
+  padding: 8px 24px 16px;
+  background: linear-gradient(to bottom, transparent, var(--surface) 30%);
+}
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 10px 10px 18px;
+  border-radius: 18px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition: box-shadow var(--t);
+}
+.chat-composer:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.chat-composer.disabled {
+  align-items: center;
+  padding: 14px 18px;
+}
+.chat-composer textarea {
+  flex: 1;
+  border: 0;
+  background: none;
+  outline: 0;
+  resize: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 1.5;
+  min-height: 24px;
+  max-height: 160px;
+  padding: 6px 0;
+}
+.chat-composer textarea::placeholder {
+  color: var(--faint);
+}
+.chat-send {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 12px;
+}
+.chat-foot {
+  text-align: center;
+  margin: 8px 0 0;
+}

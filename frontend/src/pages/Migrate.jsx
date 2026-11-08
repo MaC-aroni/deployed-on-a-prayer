@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, ExternalLink, GitBranch, Github, Plus, Rocket, Scale, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { BookOpen, ClipboardCheck, ExternalLink, GitBranch, Github, Plus, Rocket, Scale, Sparkles, Trash2, Wand2 } from "lucide-react";
 import Menu from "../components/Menu.jsx";
 import { EmptyState, useAuth } from "../components/Shell.jsx";
 import { SkeletonPage } from "../components/Skeleton.jsx";
@@ -11,7 +11,7 @@ import { cx } from "../lib.js";
 
 // Build → Migration. Every candidate shows first: the services the knowledge base documents, and
 // every repository in the org. Each has two doors, its Confluence page and its GitHub repo.
-// "Launch agent" on a service runs Learn (if needed) → detect or write migration.yaml → Build;
+// "Build Migration Pipeline" on a service runs Learn (if needed) → detect or write migration.yaml → Build;
 // "Learn" on an undocumented repo writes its knowledge page and raises a review ticket.
 
 function Toast({ toast, onClose }) {
@@ -39,10 +39,15 @@ function Step({ label, status, text }) {
 }
 
 // The two doors: the Confluence page (or the console's copy of it) and the GitHub repository.
-function Doors({ pageUrl, pageId, repoUrl, learn, create, busy = false, size = "sm", stop = true }) {
+function Doors({ pageUrl, pageId, repoUrl, learn, create, review, busy = false, size = "sm", stop = true }) {
   const onClick = stop ? (e) => e.stopPropagation() : undefined;
   return (
     <span className={cx("doors", size)}>
+      {review && pageId && (
+        <Link className="btn door door-review" to={`/knowledge/${pageId}`} onClick={onClick} title="MaC wrote this page; a person signs it off">
+          <ClipboardCheck size={14} /> Review page
+        </Link>
+      )}
       {pageUrl ? (
         <a className="btn door" href={pageUrl} target="_blank" rel="noreferrer" onClick={onClick} title="Open the Confluence page">
           <BookOpen size={14} /> Confluence <ExternalLink size={11} />
@@ -51,11 +56,11 @@ function Doors({ pageUrl, pageId, repoUrl, learn, create, busy = false, size = "
         <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), create())} disabled={busy} title="Create this page in Confluence and link it here from now on">
           <BookOpen size={14} /> {busy ? "Creating…" : "Create in Confluence"}
         </button>
-      ) : pageId ? (
+      ) : pageId && !review ? (
         <Link className="btn door" to={`/knowledge/${pageId}`} onClick={onClick} title="Confluence isn't configured here: open the console's copy of the page">
           <BookOpen size={14} /> Page
         </Link>
-      ) : learn ? (
+      ) : pageId ? null : learn ? (
         <button type="button" className="btn door door-learn" onClick={(e) => (onClick?.(e), learn())} disabled={busy} title="Launch an agent to write this repository's knowledge page and raise a review ticket">
           <Sparkles size={14} /> {busy ? "Launching…" : "Learn"}
         </button>
@@ -88,7 +93,6 @@ export default function Migrate() {
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
   const [busy, setBusy] = useState(null); // service name, repo full_name, or "ingest"
-  const [withPr, setWithPr] = useState(false);
 
   const load = useCallback(
     () =>
@@ -120,7 +124,7 @@ export default function Migrate() {
   }
   const learnAll = () => launch("ingest", () => api.ingest(), (r) => `/agents/${r.id}`);
   const learnRepo = (repo) => launch(repo.full_name, () => api.learn(repo.full_name), (r) => `/agents/${r.id}`);
-  const plan = (svc, opts = {}) => launch(svc.name, () => api.plan({ service: svc.name, pr: withPr, build: true, ...opts }), (r) => `/migrate/${r.id}`);
+  const plan = (svc, opts = {}) => launch(svc.name, () => api.plan({ service: svc.name, build: true, ...opts }), (r) => `/migrate/${r.id}`);
   const addRepo = (e) => {
     e?.preventDefault();
     if (!repoUrl.trim()) return;
@@ -170,15 +174,7 @@ export default function Migrate() {
       <div className="toolbar">
         <span className="label">Services in the knowledge base</span>
         <span className="spacer" />
-        <label className="toggle-row">
-          <span>Also open a PR</span>
-          <button type="button" role="switch" aria-checked={withPr} className={cx("toggle", { on: withPr })} onClick={() => setWithPr((v) => !v)}>
-            <span className="toggle-knob" />
-          </button>
-        </label>
-        <button className={cx("btn btn-secondary", { hint: locked })} onClick={learnAll} disabled={busy === "ingest" || noLlm} title={llmHint ?? "Launch the agents that read the whole knowledge base into the graph"}>
-          <BookOpen size={14} /> {busy === "ingest" ? "Launching…" : data.ingested ? "Re-learn knowledge base" : "Learn knowledge base"}
-        </button>
+        <span className="muted small">{data.services.length} services · the knowledge base is learned when the first pipeline is built</span>
       </div>
 
       <div className="cards">
@@ -186,14 +182,15 @@ export default function Migrate() {
           const latestPlanId = svc.plans[0];
           const latestPlan = latestPlanId ? planById[latestPlanId] : null;
           const build = latestPlan?.latest?.build;
-          const learnStatus = svc.learned ? "green" : svc.generated ? "amber" : "grey";
+          const review = svc.review?.status ?? null; // pending | approved | rejected, for pages MaC wrote
+          const learnStatus = svc.learned && review !== "pending" && review !== "rejected" ? "green" : svc.generated ? (review === "rejected" ? "red" : "amber") : "grey";
           const planStatus = svc.migration || latestPlanId ? "green" : "grey";
           const buildMeta = build ? runMeta(build.status, "build") : null;
           const primary = svc.migration
             ? { label: "Open pipeline", onClick: () => navigate(`/migrations/${encodeURIComponent(svc.migration)}`), icon: <Wand2 size={14} />, title: "A reviewed migration.yaml exists" }
             : latestPlanId
               ? { label: "Open pipeline", onClick: () => navigate(`/plans/${latestPlanId}`), icon: <Wand2 size={14} />, title: "The plan the agent wrote" }
-              : { label: "Launch agent", onClick: () => plan(svc), icon: <Rocket size={14} />, needsLlm: true, title: svc.learned ? "Detect or write migration.yaml, then Build" : "Learn the knowledge base, detect or write migration.yaml, then Build" };
+              : { label: "Build Migration Pipeline", onClick: () => plan(svc), icon: <Rocket size={14} />, needsLlm: true, title: "Learn if needed, detect or write migration.yaml, render the pipeline, Build" };
           return (
             <article className="card service-card" key={svc.name}>
               <header className="card-head card-head-btn" role="button" tabIndex={0} onClick={primary.onClick} onKeyDown={(e) => e.key === "Enter" && primary.onClick()} title={primary.label}>
@@ -201,17 +198,29 @@ export default function Migrate() {
                   <strong>{svc.name}</strong>
                   <span className="muted">{svc.team ?? "owner unknown"}</span>
                 </div>
-                {svc.generated && (
-                  <Pill tone="amber" title="MaC wrote this page from the repository; a person reviews it">
-                    under review{svc.review?.ticket ? ` · ${svc.review.ticket}` : ""}
+                {svc.generated && review === "pending" && (
+                  <Pill tone="amber" title="MaC wrote this page from the repository; a person signs it off (Review page below)">
+                    review needed{svc.review?.ticket ? ` · ${svc.review.ticket}` : ""}
+                  </Pill>
+                )}
+                {svc.generated && review === "approved" && (
+                  <Pill tone="violet" title={`Written by MaC, reviewed by ${svc.review.reviewed_by ?? "a person"}`}>
+                    <Sparkles size={11} /> written by MaC
+                  </Pill>
+                )}
+                {svc.generated && review === "rejected" && (
+                  <Pill tone="red" title="The page was rejected; Learn again to rewrite it">
+                    page rejected
                   </Pill>
                 )}
                 <Menu
                   label={`More for ${svc.name}`}
                   items={[
-                    { label: "Launch agent", detail: "learn · detect or plan · build", icon: <Rocket size={14} />, onClick: () => plan(svc) },
-                    { label: "Plan again", detail: withPr ? "fresh migration.yaml, opens a PR" : "fresh migration.yaml, no Build", icon: <Sparkles size={14} />, onClick: () => plan(svc, { reuse: false, build: false }) },
+                    { label: "Build Migration Pipeline", detail: "learn · detect or plan · build", icon: <Rocket size={14} />, onClick: () => plan(svc) },
+                    { label: "Plan again", detail: "fresh migration.yaml, no Build", icon: <Sparkles size={14} />, onClick: () => plan(svc, { reuse: false, build: false }) },
+                    { label: "Plan again, open a PR", detail: "fresh migration.yaml into mac-migrations", icon: <Sparkles size={14} />, onClick: () => plan(svc, { reuse: false, build: false, pr: true }) },
                     { label: data.ingested ? "Re-learn knowledge base" : "Learn knowledge base", detail: "ingest only", icon: <BookOpen size={14} />, onClick: learnAll },
+                    ...(svc.generated && svc.page ? [{ label: review === "pending" ? "Review the page" : "Open the page", detail: review === "pending" ? "approve or reject what MaC wrote" : `review: ${review}`, icon: <ClipboardCheck size={14} />, onClick: () => navigate(`/knowledge/${svc.page}`) }] : []),
                     ...(svc.plans.length > 1 ? svc.plans.slice(1, 4).map((id) => ({ label: `Open plan ${id}`, onClick: () => navigate(`/plans/${id}`) })) : []),
                   ]}
                 />
@@ -226,11 +235,11 @@ export default function Migrate() {
                 ))}
               </div>
               <div className="stepper">
-                <Step label="Learn" status={learnStatus} text={svc.learned ? "graph ready" : svc.generated ? "page under review" : "knowledge base"} />
+                <Step label="Learn" status={learnStatus} text={svc.generated && review === "pending" ? "page under review" : svc.generated && review === "rejected" ? "page rejected" : svc.learned ? "graph ready" : svc.generated ? "page reviewed" : "knowledge base"} />
                 <Step label="Plan" status={planStatus} text={svc.migration ? "yaml found" : latestPlan ? `${latestPlan.iterations ?? "?"} attempt${latestPlan.iterations === 1 ? "" : "s"}` : "detect or write"} />
                 <Step label="Build" status={buildMeta ? buildMeta.tone : "grey"} text={buildMeta ? buildMeta.label.toLowerCase() : "runner"} />
               </div>
-              <Doors pageUrl={svc.page_url} pageId={svc.page} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} create={health?.confluence && svc.page ? () => createPage(svc.page) : null} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
+              <Doors pageUrl={svc.page_url} pageId={svc.page} repoUrl={svc.repos[0] ? repoUrlOf(svc.repos[0]) : null} create={health?.confluence && svc.page ? () => createPage(svc.page) : null} review={review === "pending" || review === "rejected"} busy={busy === `page:${svc.page}`} size="lg" stop={false} />
               <footer className="card-foot">
                 <button className={cx("btn btn-primary", { hint: locked })} onClick={primary.onClick} disabled={busy === svc.name || busy === "ingest" || (primary.needsLlm && noLlm)} title={primary.needsLlm && llmHint ? llmHint : primary.title}>
                   {primary.icon} {busy === svc.name ? "Launching…" : primary.label}
@@ -281,8 +290,8 @@ export default function Migrate() {
                 <div className="muted small">{r.pushed_at ? `pushed ${fmtAgo(r.pushed_at)}` : ""}</div>
                 <div className="cell-pills">
                   {svc ? (
-                    <Pill tone={svc.learned ? "green" : svc.generated ? "amber" : "grey"}>
-                      {svc.generated ? "under review · " : "part of "}
+                    <Pill tone={svc.review?.status === "pending" ? "amber" : svc.review?.status === "rejected" ? "red" : svc.learned ? "green" : "grey"} title={svc.review ? `page written by MaC · review ${svc.review.status}` : ""}>
+                      {svc.review?.status === "pending" ? "review needed · " : svc.review?.status === "rejected" ? "page rejected · " : "part of "}
                       {svc.name}
                     </Pill>
                   ) : (
@@ -297,7 +306,7 @@ export default function Migrate() {
                   {r.custom && <Pill tone="grey">added by hand</Pill>}
                 </div>
                 <div className="cell-actions">
-                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} create={health?.confluence && r.page ? () => createPage(r.page) : null} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
+                  <Doors pageUrl={r.page_url} pageId={r.page} repoUrl={r.url} learn={svc ? null : noLlm ? null : () => learnRepo(r)} create={health?.confluence && r.page ? () => createPage(r.page) : null} review={svc?.review?.status === "pending" || svc?.review?.status === "rejected"} busy={learning || busy === `page:${r.page}`} size="md" stop={false} />
                   {r.custom && (
                     <button className="icon-btn" title="Remove from the list" onClick={() => removeRepo(r)}>
                       <Trash2 size={14} />
