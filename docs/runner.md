@@ -26,6 +26,10 @@ If any step fails, or its `verify` fails, the runner:
 4. asks the AI for help, in the run's mode (see below).
 
 The run ends `failed` if everything was undone, or `rollback_failed` if an undo itself failed.
+**An undo is verified, not trusted:** after each `terraform destroy`, the runner runs
+`terraform state list` for that step; anything still in state fails the undo with the leftovers
+named. A clean undo ends with a `run` event "Undo verified: N step(s) undone and checked empty";
+an incomplete one with "Undo NOT complete: …" (press Undo to retry).
 The runner keeps undoing the other steps either way. `rollback_failed` means a person has to look.
 If the runner itself crashes or restarts mid-run, a Rehearse or Deploy ends `rollback_failed`
 (what it left behind is unknown), but a Build just ends `failed`: it only reads and plans.

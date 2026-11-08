@@ -529,3 +529,23 @@ def test_cancel_a_build_just_stops(env, spec_path):
     assert [c for c in env.executor.calls if c[1] == "rollback"] == []
     with pytest.raises(GateError, match="nothing to cancel"):
         env.runner.request_cancel(run.id)
+
+
+def test_a_clean_undo_ends_with_a_verified_summary(env, spec_path):
+    env.runner.build(spec_path)
+    env.executor.fail[("smoke_test", "run")] = "boom"
+    run = env.runner.rehearse(spec_path)
+    run = env.runner.play(run.id, "db_migrate")
+    messages = [e.message for e in env.store.events(run.id) if e.kind == "run"]
+    assert any(m.startswith("Undo verified: 6 step(s) undone") for m in messages)
+
+
+def test_an_incomplete_undo_says_so(env, spec_path):
+    env.runner.build(spec_path)
+    env.executor.fail[("smoke_test", "run")] = "boom"
+    env.executor.fail[("provision_storage", "rollback")] = "undo incomplete: still in Terraform state: aws_dynamodb_table.claims"
+    run = env.runner.rehearse(spec_path)
+    run = env.runner.play(run.id, "db_migrate")
+    assert run.status == RunStatus.ROLLBACK_FAILED
+    messages = [e.message for e in env.store.events(run.id) if e.kind == "run"]
+    assert any("Undo NOT complete: provision_storage" in m for m in messages)
