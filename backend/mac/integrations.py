@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -76,7 +77,26 @@ class Pages(Protocol):
         this title) exists. Returns (page_id, url)."""
 
 
+TRANSIENT = {502, 503, 504}
+RETRIES = 3  # for GET/HEAD only: a repeated POST could raise a second ticket or open a second PR
+RETRY_DELAY = 2.0
+
+
 def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None, timeout: int = 30):
+    attempts = RETRIES if method in ("GET", "HEAD") else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return _request_once(url, headers, method=method, body=body, timeout=timeout)
+        except IntegrationError as e:
+            # GitHub and Atlassian both have the odd 5xx or dropped connection; a read can simply
+            # be asked again. Anything else, or the last attempt, is the caller's problem.
+            transient = e.status in TRANSIENT or e.status is None  # None: timeout, DNS, dropped connection
+            if attempt == attempts or not transient:
+                raise
+            time.sleep(RETRY_DELAY * attempt)
+
+
+def _request_once(url: str, headers: dict[str, str], *, method: str = "GET", body=None, timeout: int = 30):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     if data is not None:
