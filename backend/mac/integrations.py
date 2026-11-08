@@ -1,5 +1,5 @@
-"""Connections to GitHub, git and Jira. The runner depends only on the Protocols, so tests
-can pass stand-ins; everything else here talks to the real services."""
+"""Connections to GitHub, git, Jira and Confluence. The runner depends only on the Protocols,
+so tests can pass stand-ins; everything else here talks to the real services."""
 
 import base64
 import json
@@ -45,8 +45,34 @@ class Workspace(Protocol):
         """Put the repo's files at exactly that commit into dest (an empty directory)."""
 
 
+@dataclass(frozen=True)
+class TicketRequest:
+    """Everything a new approval ticket says. Written by code from the spec, never by a model."""
+
+    approval_id: str
+    summary: str
+    paragraphs: list[str]
+    approver: str  # spec's approver name; mapped to a Jira assignee if configured
+    labels: list[str]
+    links: list[tuple[str, str]]  # (text, url), e.g. the design page
+
+
+@dataclass(frozen=True)
+class RaisedTicket:
+    key: str
+    url: str
+
+
 class Approvals(Protocol):
     def status(self, ticket: str) -> ApprovalStatus: ...
+
+    def raise_ticket(self, request: TicketRequest) -> RaisedTicket: ...
+
+
+class Pages(Protocol):
+    def publish(self, title: str, storage_html: str, page_id: str | None) -> tuple[str, str]:
+        """Creates the page, or updates it if page_id (or a page with this title) exists.
+        Returns (page_id, url)."""
 
 
 def _request(url: str, headers: dict[str, str], *, method: str = "GET", body=None):
@@ -154,20 +180,96 @@ class GitCheckout:
                 raise IntegrationError(f"git {args[0]} {repo.slug}@{sha[:7]} failed: {result.stderr.strip()}")
 
 
-class JiraApprovals:
-    """Reads approval tickets from Jira Cloud. Status names decide the outcome."""
+class _Atlassian:
+    """One Atlassian Cloud site serves both Jira and Confluence, with one API token."""
 
-    def __init__(self, site: str, email: str, token: str,
-                 approved=("Approved", "Done"), rejected=("Rejected", "Declined")):
+    def __init__(self, site: str, email: str, token: str):
         self.site = site.rstrip("/")
         basic = base64.b64encode(f"{email}:{token}".encode()).decode()
         self.headers = {"Authorization": f"Basic {basic}", "Accept": "application/json"}
+
+    def call(self, path: str, *, method: str = "GET", body=None):
+        return _request(f"{self.site}{path}", self.headers, method=method, body=body)
+
+
+class JiraApprovals(_Atlassian):
+    """Raises approval tickets in one Jira project and reads their status by name."""
+
+    def __init__(self, site: str, email: str, token: str, project: str = "MAC", issue_type: str = "Task",
+                 assignees: dict[str, str] | None = None,
+                 approved=("Approved", "Done"), rejected=("Rejected", "Declined", "Won't Do")):
+        super().__init__(site, email, token)
+        self.project = project
+        self.issue_type = issue_type
+        self.assignees = assignees or {}  # spec approver name -> Jira accountId
         self.approved = {s.lower() for s in approved}
         self.rejected = {s.lower() for s in rejected}
 
     def status(self, ticket: str) -> ApprovalStatus:
-        issue = _request(f"{self.site}/rest/api/3/issue/{urllib.parse.quote(ticket)}?fields=status", self.headers)
+        issue = self.call(f"/rest/api/3/issue/{urllib.parse.quote(ticket)}?fields=status")
         return classify_status(issue["fields"]["status"]["name"], self.approved, self.rejected)
+
+    def raise_ticket(self, request: TicketRequest) -> RaisedTicket:
+        fields = {
+            "project": {"key": self.project},
+            "issuetype": {"name": self.issue_type},
+            "summary": request.summary[:250],
+            "description": adf_document(request.paragraphs, request.links),
+            "labels": [_label(label) for label in request.labels],
+        }
+        if request.approver in self.assignees:
+            fields["assignee"] = {"accountId": self.assignees[request.approver]}
+        created = self.call("/rest/api/3/issue", method="POST", body={"fields": fields})
+        return RaisedTicket(key=created["key"], url=f"{self.site}/browse/{created['key']}")
+
+
+class ConfluencePages(_Atlassian):
+    """Publishes pages into one Confluence space (Confluence Cloud REST v2)."""
+
+    def __init__(self, site: str, email: str, token: str, space_key: str):
+        super().__init__(site, email, token)
+        self.space_key = space_key
+        self._space_id: str | None = None
+
+    def space_id(self) -> str:
+        if self._space_id is None:
+            found = self.call(f"/wiki/api/v2/spaces?keys={urllib.parse.quote(self.space_key)}")["results"]
+            if not found:
+                raise IntegrationError(f"Confluence space {self.space_key!r} not found")
+            self._space_id = found[0]["id"]
+        return self._space_id
+
+    def publish(self, title: str, storage_html: str, page_id: str | None) -> tuple[str, str]:
+        body = {"representation": "storage", "value": storage_html}
+        if page_id is None:
+            # Our record may be gone (a restart without the volume): reuse a page with this title.
+            query = urllib.parse.urlencode({"space-id": self.space_id(), "title": title})
+            existing = self.call(f"/wiki/api/v2/pages?{query}")["results"]
+            page_id = existing[0]["id"] if existing else None
+        if page_id is None:
+            page = self.call("/wiki/api/v2/pages", method="POST", body={
+                "spaceId": self.space_id(), "status": "current", "title": title, "body": body})
+        else:
+            current = self.call(f"/wiki/api/v2/pages/{page_id}")
+            page = self.call(f"/wiki/api/v2/pages/{page_id}", method="PUT", body={
+                "id": page_id, "status": "current", "title": title, "body": body,
+                "version": {"number": current["version"]["number"] + 1, "message": "Updated by MaC"}})
+        return page["id"], f"{self.site}/wiki{page['_links']['webui']}"
+
+
+def adf_document(paragraphs: list[str], links: list[tuple[str, str]]) -> dict:
+    """Jira's rich-text format (Atlassian Document Format): plain paragraphs plus link lines."""
+    content = [{"type": "paragraph", "content": [{"type": "text", "text": p}]} for p in paragraphs if p]
+    for text, url in links:
+        content.append({"type": "paragraph", "content": [
+            {"type": "text", "text": f"{text}: "},
+            {"type": "text", "text": url, "marks": [{"type": "link", "attrs": {"href": url}}]}]})
+    return {"type": "doc", "version": 1, "content": content}
+
+
+def _label(text: str) -> str:
+    # Jira labels can't contain spaces.
+    return "".join(c if c.isalnum() or c in "-_." else "-" for c in text)[:255]
 
 
 def classify_status(name: str, approved: set[str], rejected: set[str]) -> ApprovalStatus:

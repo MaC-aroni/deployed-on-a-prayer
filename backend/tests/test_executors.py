@@ -47,7 +47,7 @@ def setup(tmp_path, monkeypatch):
     write(DB, "migrate.py", "import os\nprint('copying for', os.environ['MAC_ENV'], os.environ['MAC_TARGET_ACCOUNT'])\n")
     write(DB, "verify.py", "import sys\nprint('row counts differ')\nsys.exit(3)\n")
     write(SMOKE, "checks/preflight.py", "import os\nprint(os.environ['MAC_ACTION'], os.environ['MAC_STEP_ID'])\n")
-    write(IAC, "terraform/network/main.tf", "# a module\n")
+    write(IAC, "terraform/storage/main.tf", "# a module\n")
     fake_tf = tmp_path / "fake_terraform.py"
     fake_tf.write_text(FAKE_TERRAFORM, encoding="utf-8")
     log = tmp_path / "tf.log"
@@ -100,13 +100,13 @@ def test_each_action_gets_a_fresh_checkout(setup, tmp_path):
 
 def test_terraform_apply_uses_s3_state_per_environment_and_step(setup):
     executor, _, ctx, lines, tf_calls = setup
-    executor.execute(ctx("provision_network"), "run")
+    executor.execute(ctx("provision_storage"), "run")
     init, apply = tf_calls()
     assert init["args"][0] == "init"
     assert apply["args"][:2] == ["apply", "-input=false"] and "-auto-approve" in apply["args"]
     assert apply["env"] == "rehearsal"
-    assert Path(apply["cwd"]).as_posix().endswith("provision_network-apply/terraform/network")
-    assert 'key          = "mac/claims-adjudication-onprem-to-aws/rehearsal/provision_network.tfstate"' \
+    assert Path(apply["cwd"]).as_posix().endswith("provision_storage-apply/terraform/storage")
+    assert 'key          = "mac/claims-adjudication-onprem-to-aws/rehearsal/provision_storage.tfstate"' \
         in apply["override"]
     assert "use_lockfile = true" in apply["override"]
     assert "terraform says hi" in lines
@@ -114,15 +114,15 @@ def test_terraform_apply_uses_s3_state_per_environment_and_step(setup):
 
 def test_production_and_rehearsal_state_never_mix(setup):
     executor, _, ctx, _, tf_calls = setup
-    executor.execute(ctx("provision_network", mode="deploy"), "rollback")
+    executor.execute(ctx("provision_storage", mode="deploy"), "rollback")
     destroy = tf_calls()[-1]
     assert destroy["args"][0] == "destroy"
-    assert "/production/provision_network.tfstate" in destroy["override"]
+    assert "/production/provision_storage.tfstate" in destroy["override"]
 
 
 def test_build_plans(setup):
     executor, _, ctx, _, tf_calls = setup
-    executor.execute(ctx("provision_network", mode="build"), "plan")
+    executor.execute(ctx("provision_storage", mode="build"), "plan")
     assert tf_calls()[-1]["args"][0] == "plan"
 
 
@@ -130,14 +130,14 @@ def test_terraform_failure_raises(setup, monkeypatch):
     executor, _, ctx, _, _ = setup
     monkeypatch.setenv("FAKE_TF_EXIT", "1")
     with pytest.raises(StepFailed, match="terraform apply exited with code 1"):
-        executor.execute(ctx("provision_network"), "run")
+        executor.execute(ctx("provision_storage"), "run")
 
 
 def test_terraform_without_state_bucket_refuses(setup):
     executor, _, ctx, _, _ = setup
     executor.tf_state = None
     with pytest.raises(StepFailed, match="MAC_TF_STATE_BUCKET"):
-        executor.execute(ctx("provision_network"), "run")
+        executor.execute(ctx("provision_storage"), "run")
 
 
 def test_hanging_command_times_out(setup):

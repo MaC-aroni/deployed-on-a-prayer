@@ -179,12 +179,21 @@ def list_migrations(state: State = Depends(get_state)):
 @router.get("/migrations/{name}")
 def get_migration(name: str, state: State = Depends(get_state)):
     path, spec, problems = _migration(state, name)
-    active = next((r for r in state.runner.store.runs(name) if r.status.active), None)
+    store = state.runner.store
+    active = next((r for r in store.runs(name) if r.status.active), None)
+    # Tickets belong to this exact version of the spec; an edited plan gets fresh ones.
+    tickets = store.tickets(name, spec.digest())
+    approvals = []
+    for approval in spec.approvals:
+        ticket = tickets.get(approval.id)
+        approvals.append(approval.model_dump(mode="json")
+                         | {"ticket": ticket.model_dump(exclude={"approval"}) if ticket else None})
+    page = store.design(name)
     return {
         "name": name, "service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
         "target": spec.target.model_dump(mode="json"), "diagnostics_default": spec.diagnostics.mode,
-        "stages": _stages(spec),
-        "approvals": [a.model_dump(mode="json") for a in spec.approvals],
+        "stages": _stages(spec), "approvals": approvals,
+        "design_page": {"url": page.url, "current": page.digest == spec.digest()} if page else None,
         "issues": problems, "latest": _latest(state, name), "active_run": _summary(active),
     }
 

@@ -57,8 +57,18 @@ def validate(spec: Spec) -> list[Issue]:
         _check_shape(step, where, error, warning)
 
     for approval in spec.approvals:
+        where = f"approvals.{approval.id}"
         if approval.id not in used_approvals:
-            warning(f"approvals.{approval.id}", "no step requires this approval")
+            warning(where, "no step requires this approval")
+        for dep in approval.after:
+            if dep == approval.id:
+                error(where, "is after itself")
+            elif dep not in approval_ids:
+                error(where, f"is after unknown approval {dep!r}")
+
+    graph = {a.id: [d for d in a.after if d in approval_ids and d != a.id] for a in spec.approvals}
+    for cycle in _find_cycles(graph):
+        error("approvals", "approvals wait on each other in a loop: " + " -> ".join(cycle))
 
     for cycle in _cycles(spec):
         error("steps", "steps wait on each other in a loop: " + " -> ".join(cycle))
@@ -96,7 +106,10 @@ def _check_shape(step: Step, where: str, error, warning) -> None:
 
 def _cycles(spec: Spec) -> list[list[str]]:
     known = {s.id for s in spec.steps}
-    graph = {s.id: [n for n in s.needs if n in known and n != s.id] for s in spec.steps}
+    return _find_cycles({s.id: [n for n in s.needs if n in known and n != s.id] for s in spec.steps})
+
+
+def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
     state: dict[str, int] = {}  # 1 = on the current path, 2 = done
     found: list[list[str]] = []
 

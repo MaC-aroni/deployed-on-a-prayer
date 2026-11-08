@@ -1,41 +1,71 @@
-"""`mac`: drive the runner from a terminal. The web UI will call the same Runner methods.
+"""`mac`: drive the runner from a terminal. The web UI calls the same Runner methods.
 
-Configuration (environment variables):
+Configuration (environment variables; see docs/runner.md):
   MAC_DATA_DIR            run history, logs and work dirs (default: ./.mac)
   GITHUB_TOKEN            read access to the pipeline's repos (guardrails + checkout)
-  JIRA_SITE, JIRA_EMAIL, JIRA_API_TOKEN   approvals; without them, approval steps wait
+  ATLASSIAN_SITE, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN   Jira approvals + Confluence pages
+  JIRA_PROJECT (default MAC), JIRA_ISSUE_TYPE (default Task), MAC_JIRA_ASSIGNEES (JSON)
+  CONFLUENCE_SPACE_KEY    where the design page goes
+  NVIDIA_API_KEY, MAC_LLM_MODEL, MAC_LLM_BASE_URL   the LLM that writes the design page
   MAC_TF_STATE_BUCKET, MAC_TF_STATE_REGION   S3 bucket for Terraform state
   AWS credentials as usual (AWS_PROFILE or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
 """
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
 
+from .design import NIMDesignWriter
 from .executors import Executor, TerraformState
-from .integrations import GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
+from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
 from .runner import GateError, Runner
 from .spec import SpecError, load_spec
 from .store import Event, RunRecord, RunStatus, Store
 from .validate import execution_order, validate
 
+DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+
 
 class _NoJira:
+    """Without Jira, approval steps wait with this message instead of failing."""
+
+    message = "Jira isn't configured (ATLASSIAN_SITE, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN)"
+
     def status(self, ticket: str):
-        raise IntegrationError("Jira isn't configured (JIRA_SITE, JIRA_EMAIL, JIRA_API_TOKEN)")
+        raise IntegrationError(self.message)
+
+    def raise_ticket(self, request):
+        raise IntegrationError(self.message)
+
+
+def _env(*names: str) -> str | None:
+    """The first of these variables that's set. JIRA_* still works from before ATLASSIAN_*."""
+    return next((os.environ[n] for n in names if os.environ.get(n)), None)
 
 
 def make_runner(data_dir: Path) -> Runner:
     token = os.environ.get("GITHUB_TOKEN")
-    if all(os.environ.get(k) for k in ("JIRA_SITE", "JIRA_EMAIL", "JIRA_API_TOKEN")):
-        approvals = JiraApprovals(os.environ["JIRA_SITE"], os.environ["JIRA_EMAIL"], os.environ["JIRA_API_TOKEN"])
-    else:
-        approvals = _NoJira()
+    site = _env("ATLASSIAN_SITE", "JIRA_SITE")
+    email = _env("ATLASSIAN_EMAIL", "JIRA_EMAIL")
+    api_token = _env("ATLASSIAN_API_TOKEN", "JIRA_API_TOKEN")
+    approvals, pages = _NoJira(), None
+    if site and email and api_token:
+        assignees = json.loads(os.environ.get("MAC_JIRA_ASSIGNEES") or "{}")
+        approvals = JiraApprovals(site, email, api_token, project=os.environ.get("JIRA_PROJECT", "MAC"),
+                                  issue_type=os.environ.get("JIRA_ISSUE_TYPE", "Task"), assignees=assignees)
+        if os.environ.get("CONFLUENCE_SPACE_KEY"):
+            pages = ConfluencePages(site, email, api_token, os.environ["CONFLUENCE_SPACE_KEY"])
+    writer = None
+    if os.environ.get("NVIDIA_API_KEY"):
+        writer = NIMDesignWriter(os.environ["NVIDIA_API_KEY"], os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
+                                 os.environ.get("MAC_LLM_BASE_URL", "https://integrate.api.nvidia.com/v1"))
     bucket = os.environ.get("MAC_TF_STATE_BUCKET")
     tf_state = TerraformState(bucket, os.environ.get("MAC_TF_STATE_REGION", "us-east-1")) if bucket else None
     executor = Executor(GitCheckout(token), data_dir / "work", tf_state)
-    return Runner(Store(data_dir / "mac.db"), GitHubAPI(token), approvals, executor, data_dir)
+    return Runner(Store(data_dir / "mac.db"), GitHubAPI(token), approvals, executor, data_dir,
+                  design_writer=writer, pages=pages)
 
 
 def _print_event(event: Event) -> None:

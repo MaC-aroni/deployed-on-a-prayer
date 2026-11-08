@@ -61,11 +61,20 @@ A file that can't be read is still listed, with `"valid": false` and its `proble
     "needs": [], "requires_approval": ["APPR-TR-001"],
     "repo": "github.com/MaC-aroni/claims-service-iac@main", "entrypoint": null, "path": "terraform/network",
     "verify": null, "rollback": "terraform destroy"}]}],
- "approvals": [{"id": "APPR-TR-001", "type": "tech_risk_cloud_migration", "jira": "MAC-1", "justification": "…"}],
+ "approvals": [{"id": "APPR-MCP-001", "type": "access_request_owner", "approver": "claims-mcp-team",
+                "summary": "…", "justification": "…", "after": ["APPR-MGR-001"], "design_doc": false,
+                "ticket": {"key": "MAC-3", "url": "https://….atlassian.net/browse/MAC-3"}}],
+ "design_page": {"url": "https://….atlassian.net/wiki/spaces/MAC/pages/…", "current": true},
  "issues": [], "latest": {"build": null, "rehearse": null, "deploy": null}, "active_run": null}
 ```
 Stages and steps come **in run order**. Draw stages as columns, left to right, and steps as
 cards inside them.
+
+`approvals[].ticket` is the Jira ticket for **this version** of the spec, or `null` if it
+hasn't been raised yet: after a chain approval (`after`) or the design page. Ticket statuses
+come from the latest Build's `report.approvals`, or from a waiting Deploy's `reason`.
+`design_page.current` is false when the spec changed since the page was written; the next
+Build rewrites it.
 
 ### Starting runs (the top-bar buttons)
 
@@ -96,8 +105,12 @@ cards inside them.
  "completed": ["preflight", "provision_network", "provision_iam"], "played": [],
  "report": {}, "based_on": "<build or rehearse id>", "created": 1794108020.19, "updated": 1794108020.50}
 ```
-- `report` is filled in by Build: `issues`, `guardrails` (per repo: `[{name, passed, detail}]`)
-  and `approvals` (per approval id: `approved`, `pending` or `rejected`).
+- `report` is filled in by Build:
+  - `issues`
+  - `guardrails`: per repo, `[{name, passed, detail}]`
+  - `approvals`: per approval id, `{status, detail, ticket, url}`. `status` is `approved`,
+    `pending`, `rejected` or `unknown`; `detail` is the ticket key or why it's waiting
+  - `design_page`: `{url, status}`
 - `GET /api/mac/runs?migration=<name>&limit=50` lists run summaries, newest first. Use it
   for a history list.
 

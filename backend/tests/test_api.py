@@ -33,7 +33,7 @@ def test_lists_migrations_with_stages_and_latest_runs(api):
     client, _, _ = api
     [item] = client.get("/api/mac/migrations").json()
     assert item["name"] == NAME and item["valid"] is True
-    assert item["stages"] == ["check", "infrastructure", "data", "release", "verify"]
+    assert item["stages"] == ["check", "infrastructure", "data", "release", "access", "verify"]
     assert item["latest"] == {"build": None, "rehearse": None, "deploy": None}
 
 
@@ -42,11 +42,27 @@ def test_migration_detail_is_ready_to_draw(api):
     detail = client.get(f"/api/mac/migrations/{NAME}").json()
     infra = detail["stages"][1]
     assert infra["name"] == "infrastructure"
-    assert [s["id"] for s in infra["steps"]] == ["provision_network", "provision_iam"]
-    network = infra["steps"][0]
-    assert network["rollback"] == "terraform destroy" and network["requires_approval"] == ["APPR-TR-001"]
+    assert [s["id"] for s in infra["steps"]] == ["provision_storage", "provision_iam"]
+    storage = infra["steps"][0]
+    assert storage["rollback"] == "terraform destroy" and storage["requires_approval"] == ["APPR-TR-001"]
     assert detail["stages"][2]["steps"][0]["when"] == "manual"
-    assert [a["jira"] for a in detail["approvals"]] == ["MAC-1", "MAC-2", "MAC-3"]
+    assert [(a["approver"], a["after"], a["ticket"]) for a in detail["approvals"]] == [
+        ("tech-risk", [], None), ("manager", [], None), ("claims-mcp-team", ["APPR-MGR-001"], None)]
+    assert detail["design_page"] is None
+
+
+def test_migration_detail_shows_tickets_and_design_page_after_build(api):
+    client, env, _ = api
+    env.approvals.default = "pending"
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    detail = client.get(f"/api/mac/migrations/{NAME}").json()
+    tickets = {a["id"]: a["ticket"] for a in detail["approvals"]}
+    assert tickets["APPR-TR-001"]["key"] == "MAC-1" and tickets["APPR-MGR-001"]["key"] == "MAC-2"
+    assert tickets["APPR-MCP-001"] is None  # waits for the manager
+    assert detail["design_page"] == {"url": "https://example.atlassian.net/wiki/spaces/MAC/pages/1", "current": True}
+    build = client.get(f"/api/mac/runs/{detail['latest']['build']['id']}").json()
+    assert build["report"]["approvals"]["APPR-MCP-001"]["detail"].startswith("not requested until")
+    assert build["report"]["design_page"]["status"] == "written"
 
 
 def test_unknown_migration_is_404(api):
@@ -115,7 +131,7 @@ def test_failure_and_events(api, env):
     client.post(f"/api/mac/runs/{run_id}/steps/db_migrate/play")
     run = latest_run(client, run_id)
     assert run["status"] == "failed" and run["failed_step"] == "smoke_test"
-    assert run["steps"]["provision_network"] == "rolled_back"
+    assert run["steps"]["provision_storage"] == "rolled_back"
 
     smoke_logs = client.get(f"/api/mac/runs/{run_id}/events", params={"step": "smoke_test"}).json()
     assert any(e["message"] == "run smoke_test" for e in smoke_logs)

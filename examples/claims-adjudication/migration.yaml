@@ -1,6 +1,6 @@
 # The demo migration. Hand-written for now; later the Planner and Compliance agents generate it.
-# The three repos it uses are the "existing prod" repos from the design doc (not created yet).
-apiVersion: mac/v0.2
+# The four repos it uses are the "existing prod" repos of four teams, in the MaC-aroni org.
+apiVersion: mac/v0.3
 kind: Migration
 metadata:
   name: claims-adjudication-onprem-to-aws
@@ -13,21 +13,34 @@ target:
   region: us-east-1
 
 # Columns in the pipeline view, left to right. Each stage starts when the one before finishes.
-stages: [check, infrastructure, data, release, verify]
+stages: [check, infrastructure, data, release, access, verify]
 
+# MaC raises these as Jira tickets (once per version of this file) and Deploy waits for them.
 approvals:
   - id: APPR-TR-001
     type: tech_risk_cloud_migration
-    jira: MAC-1
+    approver: tech-risk
+    summary: "Tech Risk: move ClaimsAdjudicationService and the Claims MCP tool to AWS"
     justification: >
-      Moves ClaimsAdjudicationService off end-of-life on-prem hardware onto the approved
-      AWS landing zone. Every change is rehearsed first and fully reversible.
-  - id: APPR-SEC-001
-    type: iam_role_review
-    jira: MAC-2
-  - id: APPR-DBA-001
-    type: dba_db_migration
-    jira: MAC-3
+      Moves ClaimsAdjudicationService and the Claims MCP tool off end-of-life on-prem hardware
+      onto the approved AWS landing zone. Every change was rehearsed first and is fully
+      reversible; the design page linked here covers the architecture, risks and rollback.
+    design_doc: true
+  - id: APPR-MGR-001
+    type: access_request_manager
+    approver: manager
+    summary: "Manager approval: ClaimsAdjudicationService needs access to the Claims MCP tool"
+    justification: >
+      After the migration, the claims service calls the Claims MCP tool (check_eligibility)
+      for every claim it adjudicates. This grants the service's AWS role permission to call it.
+  - id: APPR-MCP-001
+    type: access_request_owner
+    approver: claims-mcp-team
+    after: [APPR-MGR-001] # the MCP team is only asked once the manager has said yes
+    summary: "Claims MCP team: allow ClaimsAdjudicationService to call the Claims MCP tool"
+    justification: >
+      The requester's manager approved this access. Granting it lets the claims service's role,
+      and only that role, invoke the Claims MCP tool in each environment.
 
 steps:
   - id: preflight
@@ -38,19 +51,18 @@ steps:
       entrypoint: checks/preflight.py
     rollback: none
 
-  - id: provision_network
+  - id: provision_storage
     stage: infrastructure
     type: iac
     requires_approval: [APPR-TR-001]
     run:
       repo: github.com/MaC-aroni/claims-service-iac
-      path: terraform/network
+      path: terraform/storage
 
   - id: provision_iam
     stage: infrastructure
     type: iac
-    needs: [provision_network]
-    requires_approval: [APPR-SEC-001]
+    requires_approval: [APPR-TR-001]
     run:
       repo: github.com/MaC-aroni/claims-service-iac
       path: terraform/iam
@@ -59,7 +71,7 @@ steps:
     stage: data
     type: db_migration
     when: manual
-    requires_approval: [APPR-DBA-001]
+    requires_approval: [APPR-TR-001]
     run:
       repo: github.com/MaC-aroni/claims-db-migrate
       entrypoint: migrate.py
@@ -68,15 +80,29 @@ steps:
     rollback:
       entrypoint: rollback.py
 
+  - id: deploy_mcp_server
+    stage: release
+    type: iac
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-mcp-server
+      path: terraform/server
+
   - id: deploy_service
     stage: release
-    type: script
+    type: iac
     requires_approval: [APPR-TR-001]
     run:
       repo: github.com/MaC-aroni/claims-service-iac
-      entrypoint: deploy.py
-    rollback:
-      entrypoint: undeploy.py
+      path: terraform/service
+
+  - id: grant_mcp_access
+    stage: access
+    type: iac
+    requires_approval: [APPR-MGR-001, APPR-MCP-001]
+    run:
+      repo: github.com/MaC-aroni/claims-mcp-server
+      path: terraform/access
 
   - id: smoke_test
     stage: verify
