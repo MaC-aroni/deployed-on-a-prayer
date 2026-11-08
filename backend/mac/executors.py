@@ -145,7 +145,9 @@ class Executor:
         flags = ["-input=false", "-no-color"]
         self.plugin_cache.mkdir(parents=True, exist_ok=True)
         self._run([*self.terraform, "init", *flags], tf_dir, ctx, command, label="terraform init")
-        args = {"plan": ["plan", *flags, "-lock-timeout=60s"],
+        # Build's plan is read-only, so it takes no state lock: a run killed mid-plan can't leave a
+        # stale lock behind, and a Build never waits on a Rehearse or Deploy that holds one.
+        args = {"plan": ["plan", *flags, "-lock=false"],
                 "apply": ["apply", *flags, "-auto-approve", "-lock-timeout=60s"],
                 "destroy": ["destroy", *flags, "-auto-approve", "-lock-timeout=60s"]}[command]
         self._run([*self.terraform, *args], tf_dir, ctx, command, label=f"terraform {command}")
