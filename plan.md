@@ -18,7 +18,7 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | MaC runner | `backend/mac/`, spec `mac/v0.3`, rules in [`docs/runner.md`](docs/runner.md) |
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
-| Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` (built and tested; waiting to be created on GitHub) |
+| Demo repos | [`claims-service-iac`](https://github.com/MaC-aroni/claims-service-iac), [`claims-db-migrate`](https://github.com/MaC-aroni/claims-db-migrate), [`claims-mcp-server`](https://github.com/MaC-aroni/claims-mcp-server), [`claims-smoke-tests`](https://github.com/MaC-aroni/claims-smoke-tests). Their `main` needs 1 approving review |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
 | Not built yet | AWS account and state bucket (Zafeer), Atlassian site, UI, the remaining agents |
 
@@ -82,10 +82,13 @@ differently**. Keep it short; link to the docs instead of repeating them.
      strings, and Build's report has `design_page`. See `docs/api.md`.
    - Show each approval's `detail` (for example "not requested until APPR-MGR-001 is
      approved") so people know why it's waiting.
-4. **Demo repos:** they're waiting to be created on GitHub. Until they're on GitHub they're on
-   ob1-can-obi's laptop in `~/Desktop/mac-demo-repos/`. Unlike this repo, their `main`
-   **requires one approving review**, because Build checks that every commit it runs was
-   reviewed. So Elathius or Zafeer-R must approve their first PRs.
+4. **Demo repos** are in the org: `claims-service-iac`, `claims-db-migrate`,
+   `claims-mcp-server` and `claims-smoke-tests`.
+   - Elathius and Zafeer-R are invited as admins; accept the invites.
+   - Unlike this repo, their `main` **requires one approving review** (plus the `test` CI
+     check), because Build checks that every commit it runs was reviewed. You can't approve
+     your own PR.
+   - Each one's first PR (#1, CI green) is waiting for approval.
 5. **Zafeer (AWS):** the runner's credentials need, in one account and region:
    - DynamoDB (create, delete, read and write tables)
    - IAM (create and delete roles and their policies; `iam:PassRole` on `mac-claims-*`)
