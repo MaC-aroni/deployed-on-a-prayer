@@ -141,6 +141,16 @@ export default function Console() {
     api.events(lastBuild.id).then(setBuildEvents).catch(() => {});
   }, [lastBuild?.id, lastBuild?.status, runId, events.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Stay in sync without a reload: re-fetch when the tab comes back, and poll gently while no
+  // live stream is open (a finished run can still change, e.g. repaired after a server restart).
+  useEffect(() => {
+    const sync = () => { if (document.visibilityState === "visible") refresh(name, runId); };
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", sync);
+    const timer = live === "on" ? null : setInterval(sync, 30000);
+    return () => { window.removeEventListener("focus", sync); document.removeEventListener("visibilitychange", sync); if (timer) clearInterval(timer); };
+  }, [name, runId, live, refresh]);
+
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape" && !modal) setSelected(null); };
     window.addEventListener("keydown", onKey);
