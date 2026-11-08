@@ -1541,8 +1541,14 @@ h2,
 /* the armed label is longer than "Cancel": a fixed width keeps the control in place */
 .cancel-run .row-action {
   white-space: nowrap;
+  width: 140px;
   min-width: 140px;
+  padding-left: 0;
+  padding-right: 0;
   justify-content: center;
+}
+.cancel-run {
+  width: 140px;
 }
 /* a run's reason is shown as written, two lines in the list; the full text is on hover and on the run */
 .all-runs .tr > .reason {
@@ -1568,16 +1574,19 @@ h2,
   .migrations-table .tr {
     grid-template-columns: 170px minmax(0, 1fr) auto;
   }
+  /* a service name is one word: it clips with an ellipsis (full name on hover) rather than
+     breaking mid-word */
   .migrations-table .row-title {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    line-height: 1.15;
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 16px;
+    line-height: 1.2;
   }
 }
-@media (max-width: 820px) {
-  .migrations-table .row-title {
-    word-break: normal;
-    overflow-wrap: break-word;
-    font-size: 16px;
-  }
+.migrations-table .row-meta .mono {
+  display: block;
+  white-space: nowrap;
 }

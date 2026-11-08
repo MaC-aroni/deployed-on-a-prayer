@@ -140,7 +140,7 @@ export default function Migrations() {
                 {head && <span className="muted small">{fmtAgo(head.updated)}</span>}
               </div>
               <div className="cell-title">
-                <Link to={m.href} className="row-title" onClick={(e) => e.stopPropagation()}>
+                <Link to={m.href} className="row-title" title={m.service ?? m.name} onClick={(e) => e.stopPropagation()}>
                   {m.service ?? m.name}
                 </Link>
                 <span className="row-meta">
