@@ -23,14 +23,11 @@ from .design import NIMDesignWriter
 from .executors import Executor, TerraformState
 from .integrations import ConfluencePages, GitCheckout, GitHubAPI, IntegrationError, JiraApprovals
 from .knowledge import KnowledgeError, load_pages, publish
-
+from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL
 from .runner import GateError, Runner
 from .spec import SpecError, load_spec
 from .store import Event, RunRecord, RunStatus, Store
 from .validate import execution_order, validate
-
-DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
-
 
 class _NoJira:
     """Without Jira, approval steps wait with this message instead of failing."""
@@ -65,7 +62,7 @@ def make_runner(data_dir: Path) -> Runner:
     llm_key = os.environ.get("MAC_LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
     if llm_key:
         writer = NIMDesignWriter(llm_key, os.environ.get("MAC_LLM_MODEL", DEFAULT_MODEL),
-                                 os.environ.get("MAC_LLM_BASE_URL", "https://integrate.api.nvidia.com/v1"))
+                                 os.environ.get("MAC_LLM_BASE_URL", DEFAULT_BASE_URL))
     bucket = os.environ.get("MAC_TF_STATE_BUCKET")
     tf_state = TerraformState(bucket, os.environ.get("MAC_TF_STATE_REGION", "us-east-1")) if bucket else None
     executor = Executor(GitCheckout(token), data_dir / "work", tf_state)
