@@ -100,7 +100,7 @@ class StartBody(BaseModel):
 def _step_view(step: Step) -> dict:
     rollback = step.effective_rollback
     return {
-        "id": step.id, "stage": step.stage, "type": step.type, "when": step.when,
+        "id": step.id, "stage": step.stage, "type": step.type, "when": step.when, "codegen": step.codegen,
         "needs": list(step.needs), "requires_approval": list(step.requires_approval),
         "repo": str(step.run.repo), "entrypoint": step.run.entrypoint, "path": step.run.path,
         "verify": step.verify.entrypoint if step.verify else None,

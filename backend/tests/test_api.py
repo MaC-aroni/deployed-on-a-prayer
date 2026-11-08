@@ -45,6 +45,7 @@ def test_migration_detail_is_ready_to_draw(api):
     assert [s["id"] for s in infra["steps"]] == ["provision_storage", "provision_iam"]
     storage = infra["steps"][0]
     assert storage["rollback"] == "terraform destroy" and storage["requires_approval"] == ["APPR-TR-001"]
+    assert storage["codegen"] == "llm" and infra["steps"][1]["codegen"] == "engineer"
     assert detail["stages"][2]["steps"][0]["when"] == "manual"
     assert [(a["approver"], a["after"], a["ticket"]) for a in detail["approvals"]] == [
         ("tech-risk", [], None), ("manager", [], None), ("claims-mcp-team", ["APPR-MGR-001"], None)]

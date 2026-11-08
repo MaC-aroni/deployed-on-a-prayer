@@ -54,6 +54,7 @@ steps:
   - id: provision_storage
     stage: infrastructure
     type: iac
+    codegen: llm # the team trusts the LLM to write this step's Terraform (as a reviewed PR)
     requires_approval: [APPR-TR-001]
     run:
       repo: github.com/MaC-aroni/claims-service-iac
