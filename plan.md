@@ -29,6 +29,24 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Prod latency fixed: disk, SQLite, health check (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **The cause:** every `iac` step downloaded its own ~700 MB AWS provider into a fresh checkout
+  and nothing was ever deleted (11 GB locally after three Builds). On Fly the 1 GB volume filled
+  during the first Build, Terraform crawled, the health check timed out and the proxy refused
+  requests. Fly then auto-stopped the only machine mid-run because `primary_region` wasn't set.
+- Terraform providers now go to one shared cache (`TF_PLUGIN_CACHE_DIR` under `MAC_DATA_DIR`);
+  each action's checkout is deleted when it finishes; finished runs' work dirs are pruned at
+  startup.
+- SQLite runs in WAL mode, so the API reads history while a run writes logs; the live stream's
+  database reads moved off the event loop; `/api/health` is async.
+- Fly: `primary_region = "lax"`, 1 GB memory, health check timeout 10 s, grace 30 s. The
+  `mac_data` volume was extended to 3 GB.
+
+#### What you need to do
+- Nothing. If you ran Builds locally before this, `rm -rf .mac/work` frees the space.
+
 ### 2026-11-08: Console v2, GitLab-style (ob1-can-obi, with Claude Code)
 
 #### What changed

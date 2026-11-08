@@ -60,6 +60,9 @@ class Executor:
                  terraform: list[str] | None = None, python: str = sys.executable, timeout: int = 1800):
         self.workspace = workspace
         self.work_root = Path(work_root)
+        # Providers are downloaded once and shared by every step and run. Without this, each iac
+        # step pulled its own ~700 MB AWS provider, which filled the prod disk in one Build.
+        self.plugin_cache = self.work_root.parent / "tf-plugin-cache"
         self.tf_state = tf_state
         self.terraform = terraform or ["terraform"]
         self.python = python
@@ -75,11 +78,24 @@ class Executor:
 
         repo, entrypoint = self._entrypoint(step, action)
         workdir = self._checkout(ctx, repo, action)
-        path = workdir / entrypoint
-        if not path.is_file():
-            raise StepFailed(f"{entrypoint} doesn't exist in {repo.slug}@{ctx.shas[repo.key][:7]}")
-        cmd = [self.python, str(path)] if path.suffix == ".py" else [str(path)]
-        self._run(cmd, workdir, ctx, action, label=entrypoint)
+        try:
+            path = workdir / entrypoint
+            if not path.is_file():
+                raise StepFailed(f"{entrypoint} doesn't exist in {repo.slug}@{ctx.shas[repo.key][:7]}")
+            cmd = [self.python, str(path)] if path.suffix == ".py" else [str(path)]
+            self._run(cmd, workdir, ctx, action, label=entrypoint)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)  # the log is in the store; the files aren't needed
+
+    def prune(self, keep: set[str]) -> int:
+        """Delete the work dirs of every run not in `keep` (runs still in progress). Returns how many."""
+        gone = 0
+        if self.work_root.is_dir():
+            for child in self.work_root.iterdir():
+                if child.is_dir() and child.name not in keep:
+                    shutil.rmtree(child, ignore_errors=True)
+                    gone += 1
+        return gone
 
     def _entrypoint(self, step: Step, action: ActionName) -> tuple[RepoRef, str]:
         if action == "run":
@@ -104,7 +120,12 @@ class Executor:
         if self.tf_state is None:
             raise StepFailed("Terraform state bucket isn't configured (MAC_TF_STATE_BUCKET)")
         workdir = self._checkout(ctx, ctx.step.run.repo, command)
-        tf_dir = workdir / ctx.step.run.path
+        try:
+            self._terraform_in(ctx, command, workdir / ctx.step.run.path)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    def _terraform_in(self, ctx: StepContext, command: str, tf_dir: Path) -> None:
         if not tf_dir.is_dir():
             raise StepFailed(f"{ctx.step.run.path} doesn't exist in {ctx.step.run.repo.slug}")
         # Our own backend config wins over whatever the repo declares, so state always lands
@@ -122,8 +143,11 @@ class Executor:
             encoding="utf-8",
         )
         flags = ["-input=false", "-no-color"]
+        self.plugin_cache.mkdir(parents=True, exist_ok=True)
         self._run([*self.terraform, "init", *flags], tf_dir, ctx, command, label="terraform init")
-        args = {"plan": ["plan", *flags, "-lock-timeout=60s"],
+        # Build's plan is read-only, so it takes no state lock: a run killed mid-plan can't leave a
+        # stale lock behind, and a Build never waits on a Rehearse or Deploy that holds one.
+        args = {"plan": ["plan", *flags, "-lock=false"],
                 "apply": ["apply", *flags, "-auto-approve", "-lock-timeout=60s"],
                 "destroy": ["destroy", *flags, "-auto-approve", "-lock-timeout=60s"]}[command]
         self._run([*self.terraform, *args], tf_dir, ctx, command, label=f"terraform {command}")
@@ -144,7 +168,8 @@ class Executor:
             "MAC_TARGET_ACCOUNT": account,
             "MAC_TARGET_REGION": region,
         }
-        tf = {"TF_IN_AUTOMATION": "1", "TF_VAR_mac_env": ctx.env_name, "TF_VAR_mac_run_id": ctx.run_id,
+        tf = {"TF_IN_AUTOMATION": "1", "TF_PLUGIN_CACHE_DIR": str(self.plugin_cache),
+              "TF_VAR_mac_env": ctx.env_name, "TF_VAR_mac_run_id": ctx.run_id,
               "AWS_REGION": region, "PYTHONUNBUFFERED": "1"}
         return {**os.environ, **tf, **mac, **ctx.extra_env}
 

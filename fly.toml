@@ -1,4 +1,5 @@
 app = "deployed-on-a-prayer"
+primary_region = "lax" # min_machines_running only applies to the primary region
 
 [env]
   APP_ENV = "production"
@@ -20,10 +21,11 @@ app = "deployed-on-a-prayer"
     method = "GET"
     path = "/api/health"
     interval = "15s"
-    timeout = "5s"
-    grace_period = "10s"
+    timeout = "10s"
+    grace_period = "30s"
 
 [[vm]]
-  memory = "512mb"
+  # Terraform with the AWS provider needs several hundred MB on its own.
+  memory = "1gb"
   cpu_kind = "shared"
   cpus = 1

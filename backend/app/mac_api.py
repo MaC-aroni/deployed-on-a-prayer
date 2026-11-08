@@ -65,7 +65,10 @@ def get_state() -> State:
     global _state
     if _state is None:
         state = _default_state()
-        for run_id in state.runner.recover():  # work queued before a restart
+        queued = state.runner.recover()  # work queued before a restart
+        # Checkouts from finished runs are dead weight on a small disk; their logs are in the store.
+        state.runner.executor.prune(set(queued))
+        for run_id in queued:
             state.submit(lambda r=run_id: _execute(state, r))
         _state = state
     return _state
@@ -279,13 +282,15 @@ async def stream(run_id: str, request: Request, after: int = 0,
         nonlocal cursor
         idle = 0.0
         while not await request.is_disconnected():
-            batch = store.events(run_id, after=cursor)
+            # SQLite reads go to a worker thread, so a busy database never stalls the event loop
+            # (and with it every other request, including the health check).
+            batch = await asyncio.to_thread(store.events, run_id, after=cursor)
             for event in batch:
                 cursor = event.seq
                 yield f"id: {event.seq}\nevent: {event.kind}\ndata: {event.model_dump_json()}\n\n"
             if batch:
                 idle = 0.0
-            elif not store.get(run_id).status.active:
+            elif not (await asyncio.to_thread(store.get, run_id)).status.active:
                 yield f"event: end\ndata: {json.dumps(_summary(store.get(run_id)))}\n\n"
                 return
             else:

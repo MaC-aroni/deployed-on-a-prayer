@@ -154,6 +154,16 @@ directory, so state always lives in the S3 bucket at
 `TF_VAR_mac_env` and `TF_VAR_mac_run_id`. Declare `variable "mac_env" {}` and use it in
 resource names.
 
+Build's `terraform plan` runs with `-lock=false` (it's read-only), so a Build never waits on
+or leaves a state lock. If a Rehearse or Deploy is killed mid-command (the server restarted),
+its S3 lock stays behind and the next apply fails with "Error acquiring the state lock"; when
+nothing is running, `mise run mac-unlock` removes stale locks.
+
+Each action's checkout is deleted as soon as it finishes (the log is in the store), and
+finished runs' work dirs are pruned when the server starts. Terraform providers are downloaded
+once into `<MAC_DATA_DIR>/tf-plugin-cache` (`TF_PLUGIN_CACHE_DIR`) and shared by every step and
+run; without that, each `iac` step pulled its own ~700 MB AWS provider.
+
 ## AI help when a run fails
 
 One selector: **Explain · Report · Auto-fix**. Each includes the one before it.
@@ -198,4 +208,4 @@ Configuration comes from environment variables:
 | `NVIDIA_API_KEY`, `MAC_LLM_MODEL` (default `nvidia/nemotron-3-ultra-550b-a55b`), `MAC_LLM_BASE_URL` | the LLM that writes the design page |
 | `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the S3 bucket for Terraform state |
 | AWS credentials | the usual `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
-| `MAC_DATA_DIR` | run history and logs (default `./.mac`) |
+| `MAC_DATA_DIR` | run history, logs, the Terraform provider cache and work dirs (default `./.mac`) |
