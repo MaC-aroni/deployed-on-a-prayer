@@ -237,3 +237,86 @@ def test_llm_posts_are_retried_on_timeouts(monkeypatch):
     monkeypatch.delenv("MAC_LLM_TIMEOUT", raising=False)
     assert NIMChat("k").complete("s", "u") == "hello"
     assert calls == [300, 300]
+
+
+def _llm_replies(monkeypatch, replies):
+    """Scripted raw API replies for NIMChat; records every request body."""
+    from mac import integrations
+
+    bodies = []
+
+    def fake(url, headers, *, method="GET", body=None, timeout=30):
+        bodies.append(body)
+        return replies.pop(0)
+
+    monkeypatch.setattr(integrations, "_request_once", fake)
+    monkeypatch.setattr(integrations, "RETRY_DELAY", 0)
+    return bodies
+
+
+def test_a_reasoning_model_that_spent_its_budget_thinking_is_asked_again_with_more_room(monkeypatch):
+    from mac.llm import NIMChat
+
+    monkeypatch.delenv("MAC_LLM_THINKING", raising=False)
+    bodies = _llm_replies(monkeypatch, [
+        {"choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "hmm " * 500}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "{\"nodes\": []}", "reasoning_content": "ok"}}]},
+    ])
+    assert NIMChat("k", "nvidia/nemotron-3-ultra-550b-a55b").complete("s", "u", max_tokens=4096) == '{"nodes": []}'
+    assert [b["max_tokens"] for b in bodies] == [4096, 16384]
+    assert "chat_template_kwargs" not in bodies[0]
+
+
+def test_an_unclosed_think_block_counts_as_spent_budget(monkeypatch):
+    from mac.llm import NIMChat
+
+    bodies = _llm_replies(monkeypatch, [
+        {"choices": [{"finish_reason": "length", "message": {"content": "<think>still going"}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "<think>done</think>answer"}}]},
+    ])
+    assert NIMChat("k").complete("s", "u", max_tokens=1000) == "answer"
+    assert [b["max_tokens"] for b in bodies] == [1000, 4000]
+
+
+def test_an_empty_answer_that_was_not_thinking_fails_at_once_with_the_reason(monkeypatch):
+    from mac.llm import NIMChat
+
+    bodies = _llm_replies(monkeypatch, [{"choices": [{"finish_reason": "stop", "message": {"content": ""}}]}])
+    with pytest.raises(IntegrationError, match="empty response \\(finish_reason=stop"):
+        NIMChat("k").complete("s", "u")
+    assert len(bodies) == 1
+
+
+def test_the_budget_stops_growing_at_the_cap(monkeypatch):
+    from mac.llm import NIMChat
+
+    monkeypatch.setenv("MAC_LLM_MAX_TOKENS", "8000")
+    empty = {"choices": [{"finish_reason": "length", "message": {"content": ""}}]}
+    bodies = _llm_replies(monkeypatch, [dict(empty), dict(empty), dict(empty)])
+    with pytest.raises(IntegrationError, match="max_tokens=8000"):
+        NIMChat("k").complete("s", "u", max_tokens=4096)
+    assert [b["max_tokens"] for b in bodies] == [4096, 8000]
+
+
+def test_thinking_can_be_switched_off_for_nemotron(monkeypatch):
+    from mac.llm import NIMChat
+
+    monkeypatch.setenv("MAC_LLM_THINKING", "off")
+    bodies = _llm_replies(monkeypatch, [{"choices": [{"message": {"content": "hi"}}]},
+                                        {"choices": [{"message": {"content": "hi", "tool_calls": None}}]}])
+    assert NIMChat("k").complete("s", "u") == "hi"
+    NIMChat("k").chat([{"role": "user", "content": "u"}])
+    assert all(b["chat_template_kwargs"] == {"enable_thinking": False} for b in bodies)
+
+
+def test_chat_turn_cut_off_mid_thought_is_asked_again(monkeypatch):
+    from mac.llm import NIMChat
+
+    monkeypatch.delenv("MAC_LLM_THINKING", raising=False)
+    bodies = _llm_replies(monkeypatch, [
+        {"choices": [{"finish_reason": "length", "message": {"content": None}}]},
+        {"choices": [{"finish_reason": "tool_calls", "message": {"content": None, "tool_calls": [{"id": "1", "function": {"name": "mac_status", "arguments": "{}"}}]}}]},
+    ])
+    message = NIMChat("k").chat([{"role": "user", "content": "u"}], tools=[{"type": "function", "function": {"name": "mac_status"}}])
+    assert message["tool_calls"][0]["function"]["name"] == "mac_status"
+    assert [b["max_tokens"] for b in bodies] == [2048, 8192]

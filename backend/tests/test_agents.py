@@ -263,3 +263,20 @@ def test_open_pull_request_makes_branch_files_and_pr(http):
     assert ref["body"] == {"ref": "refs/heads/b", "sha": "base123"}
     assert put["body"]["branch"] == "b" and "sha" not in put["body"]
     assert pull["body"] == {"title": "Plan", "head": "b", "base": "main", "body": "body"}
+
+
+def test_ingest_skips_a_page_the_model_would_not_read_and_keeps_the_rest():
+    from mac.integrations import IntegrationError
+
+    class Flaky(ScriptedLLM):
+        def default(self, user):
+            if "Prayerwell Health Engineering Handbook" in user:
+                raise IntegrationError("the LLM returned an empty response (finish_reason=length)")
+            return json.dumps({"nodes": [{"type": "service", "name": "ClaimsAdjudicationService", "sources": ["S1"]}],
+                               "edges": []})
+
+    logs = []
+    graph, dropped = extract(SECTIONS, Flaky(), log=logs.append)
+    assert graph.find("ClaimsAdjudicationService") is not None
+    assert [d for d in dropped if d.startswith("handbook: skipped")]
+    assert any(m.startswith("skipped handbook") for m in logs)

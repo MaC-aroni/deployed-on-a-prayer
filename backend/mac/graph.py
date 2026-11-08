@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .integrations import IntegrationError
 from .llm import LLM, parse_json
 from .sources import Catalog, Section, relevant
 
@@ -132,6 +133,12 @@ def extract(sections: list[Section], llm: LLM, log=print) -> tuple[Graph, list[s
             data = parse_json(llm.complete(EXTRACT_PROMPT, catalog.prompt_block(), max_tokens=4096))
         except ValueError as e:
             dropped.append(f"{doc_id}: unreadable reply ({e})")
+            continue
+        except IntegrationError as e:
+            # One page the model couldn't read mustn't lose the other pages' facts; the page is
+            # reported as dropped and the next ingest picks it up.
+            dropped.append(f"{doc_id}: skipped, the model didn't answer ({str(e)[:160]})")
+            log(f"skipped {doc_id}: {e}")
             continue
         for raw in data.get("nodes", []):
             ids = _cited(raw.get("sources"), catalog)
