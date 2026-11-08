@@ -3319,6 +3319,8 @@ a.row-title:hover {
   font-size: 13px;
   max-width: 420px;
   text-align: center;
+}
+
 /* ---------- cost estimate (components/CostPanel.jsx) ---------- */
 .cost-chip {
   display: inline-flex;
