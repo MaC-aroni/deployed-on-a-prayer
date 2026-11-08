@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app import auth, mac_api
 from app.main import app
-from mac.store import RunStatus
+from mac.store import RunStatus, StepState
 
 from .conftest import DB, DEMO_SPEC
 
@@ -18,7 +18,8 @@ def api(env, tmp_path):
     (migrations / "claims").mkdir(parents=True)
     shutil.copy(DEMO_SPEC, migrations / "claims" / "migration.yaml")
     # Background work runs inline, so each response already reflects the finished work.
-    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn())
+    state = mac_api.State(runner=env.runner, migrations_dir=migrations, submit=lambda fn: fn(),
+                          poll_seconds=0, webhook_secret="hook-secret")
     mac_api.configure(state)
     auth.configure(auth.AuthConfig(required=False, repo="MaC-aroni/deployed-on-a-prayer", github=None, key=b"k" * 32))
     yield TestClient(app), env, state
@@ -207,7 +208,7 @@ def test_a_crash_mid_build_is_failed_not_rollback_failed(api, env):
 def test_recover_fails_a_build_cut_short_and_settles_its_steps(env, spec_path):
     stuck = env.runner.start_build(spec_path)
     stuck.next_action, stuck.status = None, RunStatus.RUNNING
-    stuck.steps = {"preflight": "succeeded", "provision_storage": "running", "provision_iam": "pending"}
+    stuck.steps = {"preflight": StepState.SUCCEEDED, "provision_storage": StepState.RUNNING, "provision_iam": StepState.PENDING}
     env.store.save(stuck)
     assert env.runner.recover() == []
     after = env.store.get(stuck.id)
@@ -217,7 +218,84 @@ def test_recover_fails_a_build_cut_short_and_settles_its_steps(env, spec_path):
 
 def test_recover_repairs_a_finished_run_left_with_running_steps(env, spec_path):
     old = env.runner.build(spec_path)
-    old.steps["provision_storage"] = "running"  # as the server left it before settle() existed
+    old.steps["provision_storage"] = StepState.RUNNING  # as the server left it before settle() existed
     env.store.save(old)
     env.runner.recover()
     assert env.store.get(old.id).steps["provision_storage"] == "failed"
+
+
+def _waiting_deploy(client, env):
+    """A Deploy blocked on approvals: Build and Rehearse pass, approvals stay pending in Jira."""
+    env.approvals.default = "pending"
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    reh = client.post(f"/api/mac/migrations/{NAME}/rehearse").json()
+    client.post(f"/api/mac/runs/{reh['id']}/steps/db_migrate/play")
+    deploy = client.post(f"/api/mac/migrations/{NAME}/deploy").json()
+    deploy = latest_run(client, deploy["id"])
+    assert deploy["status"] == "waiting" and "waiting for approval" in deploy["reason"]
+    return deploy
+
+
+def test_approvals_follow_jira_without_a_click(api):
+    client, env, state = api
+    deploy = _waiting_deploy(client, env)
+    detail = client.get(f"/api/mac/migrations/{NAME}").json()
+    by_id = {a["id"]: a for a in detail["approvals"]}
+    assert by_id["APPR-TR-001"]["status"] == "pending" and by_id["APPR-TR-001"]["checked"]
+    assert by_id["APPR-MCP-001"]["status"] == "pending" and by_id["APPR-MCP-001"]["ticket"] is None
+    assert detail["approvals_live"] is True  # the webhook is configured in this fixture
+
+    # Nothing changed in Jira: a poll is quiet.
+    assert all(not r["changed"] and not r["resumed"] for r in mac_api.poll_approvals_once(state))
+
+    # The manager approves in Jira: the poller raises the MCP team's ticket (the chain) by itself.
+    env.approvals.by_approval["APPR-MGR-001"] = "approved"
+    [result] = mac_api.poll_approvals_once(state)
+    assert result["changed"] == ["APPR-MGR-001"] and "APPR-MCP-001" in env.approvals.raised_ids()
+    by_id = {a["id"]: a for a in client.get(f"/api/mac/migrations/{NAME}").json()["approvals"]}
+    assert by_id["APPR-MGR-001"]["status"] == "approved" and by_id["APPR-MCP-001"]["ticket"]["key"]
+    assert latest_run(client, deploy["id"])["status"] == "waiting"  # Tech Risk still pending
+
+    # Everything approved: the waiting Deploy continues on its own, to the manual step.
+    env.approvals.by_approval.update({"APPR-TR-001": "approved", "APPR-MCP-001": "approved"})
+    [result] = mac_api.poll_approvals_once(state)
+    assert result["resumed"] == [deploy["id"]]
+    after = latest_run(client, deploy["id"])
+    assert after["status"] == "waiting" and "manual" in after["reason"]
+    messages = [e["message"] for e in client.get(f"/api/mac/runs/{deploy['id']}/events").json()]
+    assert any("approvals changed in Jira" in m for m in messages)
+
+
+def test_jira_webhook_syncs_the_ticket_owner(api):
+    client, env, state = api
+    deploy = _waiting_deploy(client, env)
+    key = next(k for k, a in env.approvals.key_to_approval.items() if a == "APPR-TR-001")
+    env.approvals.default = "approved"
+
+    assert client.post("/api/mac/jira/webhook", json={"issue": {"key": key}}).status_code == 401
+    assert client.post("/api/mac/jira/webhook?token=nope", json={"issue": {"key": key}}).status_code == 401
+    resp = client.post("/api/mac/jira/webhook?token=hook-secret", json={"issue": {"key": "OTHER-1"}})
+    assert resp.status_code == 200 and resp.json()["synced"] is None
+    resp = client.post("/api/mac/jira/webhook?token=hook-secret", json={"issue": {"key": key}})
+    assert resp.status_code == 200 and resp.json()["synced"] == NAME and resp.json()["resumed"] == [deploy["id"]]
+    assert "manual" in latest_run(client, deploy["id"])["reason"]
+
+    state.webhook_secret = None
+    assert client.post("/api/mac/jira/webhook?token=x", json={}).status_code == 404
+
+
+def test_manual_sync_endpoint(api):
+    client, env, _ = api
+    _waiting_deploy(client, env)
+    env.approvals.default = "approved"
+    resp = client.post(f"/api/mac/migrations/{NAME}/approvals/sync")
+    assert resp.status_code == 200 and resp.json()["changed"]
+
+
+def test_a_rejection_found_by_the_poller_fails_the_deploy_and_undoes_it(api):
+    client, env, state = api
+    deploy = _waiting_deploy(client, env)
+    env.approvals.by_approval["APPR-TR-001"] = "rejected"
+    mac_api.poll_approvals_once(state)
+    after = latest_run(client, deploy["id"])
+    assert after["status"] == "failed" and "rejected" in after["reason"]

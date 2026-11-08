@@ -79,8 +79,18 @@ Stages and steps come **in run order**. Draw stages as columns, left to right, a
 cards inside them.
 
 `approvals[].ticket` is the Jira ticket for **this version** of the spec, or `null` if it
-hasn't been raised yet: after a chain approval (`after`) or the design page. Ticket statuses
-come from the latest Build's `report.approvals`, or from a waiting Deploy's `reason`.
+hasn't been raised yet: after a chain approval (`after`) or the design page.
+`approvals[].status` (`approved` · `pending` · `rejected` · `unknown` · `not_requested`),
+`detail` and `checked` (Unix seconds) are the **live** state: the server asks Jira on its own
+(every `MAC_APPROVAL_POLL_SECONDS`, default 30) and Jira can push changes to the webhook, so
+the UI only has to re-fetch this endpoint. `approvals_checked` is the newest check;
+`approvals_live` is false when neither the poller nor the webhook is configured.
+
+When an approval is granted in Jira, MaC raises the next ticket in its `after` chain by itself
+and any Deploy waiting on it continues (or fails and undoes everything, on a rejection). The log
+of the migration's latest run gets a line like `approvals changed in Jira: APPR-MGR-001 approved`.
+`POST /api/mac/migrations/{name}/approvals/sync` asks Jira right now (needs sign-in on Fly) and
+returns `{changed, raised, resumed, statuses}`.
 `design_page.current` is false when the spec changed since the page was written; the next
 Build rewrites it.
 
@@ -135,7 +145,7 @@ didn't finish; needs a person) · `undone`. `active` is true for the first three
 | Request | When |
 |---|---|
 | `POST /api/mac/runs/{id}/steps/{step}/play` | that step's state is `waiting` (the ▶ button) |
-| `POST /api/mac/runs/{id}/resume` | the run is `waiting` on an approval (checks Jira again) |
+| `POST /api/mac/runs/{id}/resume` | the run is `waiting` on an approval (checks Jira again). Rarely needed now: the server does this itself when Jira changes |
 | `POST /api/mac/runs/{id}/undo` | the run is `waiting`, or a Deploy that `succeeded` |
 
 ### Logs and the live stream

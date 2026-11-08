@@ -29,6 +29,32 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Approvals follow Jira on their own (ob1-can-obi, with Claude Code)
+
+#### What changed
+- **No more "Check approvals".** The server asks Jira about every outstanding approval every 30 s
+  (`MAC_APPROVAL_POLL_SECONDS`), and Jira can push changes instantly to
+  `POST /api/mac/jira/webhook?token=<MAC_JIRA_WEBHOOK_SECRET>`. When a ticket is approved, MaC
+  raises the **next ticket in the `after` chain** by itself (manager approved → the MCP team's
+  ticket appears), and any Deploy waiting on that approval continues. A rejection fails the
+  Deploy and undoes everything.
+- `GET /api/mac/migrations/{name}` now carries the **live** state per approval: `status`,
+  `detail`, `checked`, plus `approvals_checked` and `approvals_live`. These no longer depend on
+  the last Build.
+- `POST /api/mac/migrations/{name}/approvals/sync` checks Jira right now.
+- The migration's latest run gets a log line when Jira changes: `approvals changed in Jira: …`.
+- Docs: `docs/api.md` (Migrations), `docs/runner.md` (Approvals), `docs/cloud-setup.md` (the
+  webhook setup, 1 minute in Jira).
+
+#### What you need to do
+- **Elathius (UI):** read `approvals[].status` / `detail` / `checked` from the migration detail
+  instead of the Build report, and re-fetch the detail on a timer (the console already polls
+  every 30 s when idle). Show `checked` as "as of …". The "Check approvals" button can call
+  `POST /migrations/{name}/approvals/sync` and is now a convenience, not a necessity. When a
+  run's log says `approvals changed in Jira`, re-fetch the detail too.
+- **ob1-can-obi:** optionally set `MAC_JIRA_WEBHOOK_SECRET` on Fly and create the Jira webhook
+  (`docs/cloud-setup.md`); without it, changes arrive within 30 s instead of instantly.
+
 ### 2026-11-08: Prod latency fixed: disk, SQLite, health check (ob1-can-obi, with Claude Code)
 
 #### What changed
