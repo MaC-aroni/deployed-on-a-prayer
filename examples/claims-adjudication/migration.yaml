@@ -1,0 +1,86 @@
+# The demo migration. Hand-written for now; later the Planner and Compliance agents generate it.
+# The three repos it uses are the "existing prod" repos from the design doc (not created yet).
+apiVersion: mac/v0.2
+kind: Migration
+metadata:
+  name: claims-adjudication-onprem-to-aws
+  service: ClaimsAdjudicationService
+  owner_team: claims-platform
+
+target:
+  provider: aws
+  account: "000000000000" # TODO: the AWS account ID once it exists
+  region: us-east-1
+
+# Columns in the pipeline view, left to right. Each stage starts when the one before finishes.
+stages: [check, infrastructure, data, release, verify]
+
+approvals:
+  - id: APPR-TR-001
+    type: tech_risk_cloud_migration
+    jira: MAC-1
+    justification: >
+      Moves ClaimsAdjudicationService off end-of-life on-prem hardware onto the approved
+      AWS landing zone. Every change is rehearsed first and fully reversible.
+  - id: APPR-SEC-001
+    type: iam_role_review
+    jira: MAC-2
+  - id: APPR-DBA-001
+    type: dba_db_migration
+    jira: MAC-3
+
+steps:
+  - id: preflight
+    stage: check
+    type: check
+    run:
+      repo: github.com/MaC-aroni/claims-smoke-tests
+      entrypoint: checks/preflight.py
+    rollback: none
+
+  - id: provision_network
+    stage: infrastructure
+    type: iac
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-service-iac
+      path: terraform/network
+
+  - id: provision_iam
+    stage: infrastructure
+    type: iac
+    needs: [provision_network]
+    requires_approval: [APPR-SEC-001]
+    run:
+      repo: github.com/MaC-aroni/claims-service-iac
+      path: terraform/iam
+
+  - id: db_migrate
+    stage: data
+    type: db_migration
+    when: manual
+    requires_approval: [APPR-DBA-001]
+    run:
+      repo: github.com/MaC-aroni/claims-db-migrate
+      entrypoint: migrate.py
+    verify:
+      entrypoint: verify.py
+    rollback:
+      entrypoint: rollback.py
+
+  - id: deploy_service
+    stage: release
+    type: script
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-service-iac
+      entrypoint: deploy.py
+    rollback:
+      entrypoint: undeploy.py
+
+  - id: smoke_test
+    stage: verify
+    type: check
+    run:
+      repo: github.com/MaC-aroni/claims-smoke-tests
+      entrypoint: checks/smoke.py
