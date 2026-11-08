@@ -81,14 +81,18 @@ export async function signOut() {
 }
 
 // Live events for a run (server-sent events). Returns a function that stops listening.
-export function follow(runId, after, onEvent, onEnd) {
+// onStatus gets "on" when connected, "retry" while the browser reconnects, "off" when closed.
+export function follow(runId, after, onEvent, onEnd, onStatus = () => {}) {
   const query = new URLSearchParams({ after: String(after ?? 0) });
   const source = new EventSource(`/api/mac/runs/${enc(runId)}/stream?${query}`);
+  source.onopen = () => onStatus("on");
+  source.onerror = () => onStatus(source.readyState === EventSource.CLOSED ? "off" : "retry");
   for (const kind of ["log", "step", "run", "diagnosis"]) {
     source.addEventListener(kind, (e) => onEvent(JSON.parse(e.data)));
   }
   source.addEventListener("end", () => {
     source.close();
+    onStatus("off");
     onEnd?.();
   });
   return () => source.close();
@@ -120,4 +124,17 @@ export function shortRepo(repo) {
 
 export function repoKey(repo) {
   return (repo ?? "").replace(/@.*$/, "");
+}
+
+// Deep links into the repo a step points at: the tree at the locked commit, or one file in it.
+export function githubUrl(repo, shas, path) {
+  const [slug, ref = "main"] = (repo ?? "").replace(/^github\.com\//, "").split("@");
+  const sha = shas?.[`github.com/${slug}`] || ref;
+  const base = `https://github.com/${slug}`;
+  return path ? `${base}/blob/${sha}/${path}` : `${base}/tree/${sha}`;
+}
+
+export function shortSha(repo, shas) {
+  const sha = shas?.[repoKey(repo)];
+  return sha ? sha.slice(0, 7) : null;
 }

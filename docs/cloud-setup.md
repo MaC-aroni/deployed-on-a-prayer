@@ -76,7 +76,8 @@ Replace `<account-id>` and `<state-bucket>`:
 ## NVIDIA (the LLM that writes the design page)
 
 Create an API key at build.nvidia.com and set `NVIDIA_API_KEY`. The default model is
-`nvidia/nemotron-3-super-120b-a12b`. Without the key, Build still works, but the design page
+`nvidia/nemotron-3-ultra-550b-a55b` (the older `nemotron-3-super-120b-a12b` is listed by NIM
+but returns 404 on chat calls). Override it with `MAC_LLM_MODEL`. Without the key, Build still works, but the design page
 isn't written and the Tech Risk ticket waits.
 
 ## Variables

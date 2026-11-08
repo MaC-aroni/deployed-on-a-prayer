@@ -195,7 +195,7 @@ Configuration comes from environment variables:
 | `JIRA_PROJECT` (default `MAC`), `JIRA_ISSUE_TYPE` (default `Task`) | where tickets go |
 | `MAC_JIRA_ASSIGNEES` | optional JSON, approver name → Jira accountId, e.g. `{"manager": "712020:…"}` |
 | `CONFLUENCE_SPACE_KEY` | the space for design pages. Without it, no page (Build still passes) |
-| `NVIDIA_API_KEY`, `MAC_LLM_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`), `MAC_LLM_BASE_URL` | the LLM that writes the design page |
+| `NVIDIA_API_KEY`, `MAC_LLM_MODEL` (default `nvidia/nemotron-3-ultra-550b-a55b`), `MAC_LLM_BASE_URL` | the LLM that writes the design page |
 | `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the S3 bucket for Terraform state |
 | AWS credentials | the usual `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
 | `MAC_DATA_DIR` | run history and logs (default `./.mac`) |

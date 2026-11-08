@@ -34,9 +34,9 @@ differently**. Keep it short; link to the docs instead of repeating them.
 ### 2026-11-08: The console at `/`, the Migrate flow, planning endpoints (Elathius, with Claude Code)
 
 #### What changed
-- **`/` is the full console** (`frontend/src/pages/`, `components/`), replacing the first
-  console from #12, which stays in `frontend/src/mac/Console.jsx` unrouted until the team agrees
-  to remove it. It keeps the rules in `UI.md`: every call goes through
+- **`/` is the full console** (`frontend/src/pages/`, `components/`), replacing the consoles from
+  #12 and #16, which stay in `frontend/src/mac/` unrouted as a reference until the team agrees to
+  remove them. Their step info panel is adopted here as the pipeline's step inspector. It keeps the rules in `UI.md`: every call goes through
   `frontend/src/mac/api.js`, `409` reasons are shown as they are, sign-in is the server's cookie
   (`GET /api/auth/me` drives the Sign-in button), the server decides.
   - Sidebar **Build → Migrate · Pipelines**, then Runs and a mock Pitch demo (`/demo`).
@@ -64,6 +64,45 @@ differently**. Keep it short; link to the docs instead of repeating them.
 - **Nemotron track:** the live site's `MAC_LLM_BASE_URL` / `MAC_LLM_MODEL` currently point at
   Grok. Point them at NVIDIA NIM (and set `NVIDIA_API_KEY`) before the pitch.
 - New step states or run statuses need a colour in `frontend/src/status.js`.
+### 2026-11-08: Console v2, GitLab-style (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The console was rebuilt to look and work like GitLab's pipeline pages: a job graph with stage
+  columns and status icons, tabs (**Pipeline · Jobs · Build report · Approvals · Runs**), a dark
+  job trace with line numbers and Terraform diff colouring, a job sidebar with deep links to the
+  locked commit, an approvals timeline that draws the `after` chain, and a runs table with stage
+  mini-graphs. Rehearse, Deploy and Undo open a confirmation dialog that states what will happen.
+- `frontend/src/mac/` is now split into `components/` plus `util.js`; see `UI.md` for the map.
+- The URL carries `?m=&run=&step=&tab=`, so a view can be shared or reloaded.
+- A rollback in progress shows a progress bar ("undoing 6 finished steps, newest first · 3 / 6").
+- Durations per step and per run come from the event timestamps; "requested by" is parsed from
+  the run log until the API has a field for it.
+
+#### What you need to do
+- **Elathius:** pull `main` and build on this structure. New screens go in `components/`; new
+  helpers in `util.js`; new API calls only in `api.js`. The long plan (screens, build order, API
+  gaps) is in the "MaC UI Plan" document.
+
+### 2026-11-08: Default Nemotron model changed to the 550B (Zafeer-R, with Claude Code)
+
+#### What changed
+- The default model is now `nvidia/nemotron-3-ultra-550b-a55b`. The old default,
+  `nvidia/nemotron-3-super-120b-a12b`, is listed by NIM's `/v1/models` but returns **HTTP 404**
+  on `/v1/chat/completions` (tested 2026-11-08 with a real key), so every default-model call
+  failed: the agents, and the design page, which then silently never appeared.
+- Tested through `NIMDesignWriter` with the 550B: 200 in about 9 seconds, all 7 design-page
+  headings, no `<think>` text.
+- `cli.py` no longer has its own copy of the default: it uses `DEFAULT_MODEL` and
+  `DEFAULT_BASE_URL` from `mac/llm.py`, the one place to change them.
+- `.env.example` now lists `MAC_LLM_MODEL` and `MAC_LLM_BASE_URL`.
+
+#### What you need to do
+- Nothing, if you already set `MAC_LLM_MODEL` (the live app uses Grok through it).
+- If you use Nemotron and had no override, pull `main`; the new default applies.
+- **ob1-can-obi:** to run Nemotron on Fly, set the secrets `NVIDIA_API_KEY` and
+  `MAC_LLM_MODEL=nvidia/nemotron-3-ultra-550b-a55b`, and clear `MAC_LLM_API_KEY` and
+  `MAC_LLM_BASE_URL` if they point at Grok (`MAC_LLM_API_KEY` wins over `NVIDIA_API_KEY`).
+- The 550B is larger than the old default, so expect slower calls and watch the rate limits.
 
 ### 2026-11-08: Sign in with GitHub replaces the MaC API token (ob1-can-obi, with Claude Code)
 
