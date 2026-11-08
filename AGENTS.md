@@ -7,19 +7,47 @@ against the live backend, and `mise run dev-local` runs both on this machine.
 
 **First-time setup or a broken local environment:** follow `.claude/skills/setup-dev/SKILL.md`.
 
+**The MaC runner** (`backend/mac/`) builds, rehearses and deploys `migration.yaml` pipelines.
+Read `docs/runner.md` before changing it or writing a repo it runs. It must stay deterministic:
+no model calls in `runner.py` or `executors.py`. Any step failing undoes everything. Run the
+tests with `mise run test`.
+
+**The company knowledge base** (the fictional Prayerwell Health's Confluence docs) is drafted
+in `demo-data/confluence/` and published with `mise run mac publish-knowledge demo-data/confluence`.
+The agents plan migrations from it and cite it, so it must agree with the demo pipeline;
+`backend/tests/test_knowledge.py` checks that. Change both together.
+
+**The agents** (graph, planner, guide writer, code writer) are in `docs/agents.md`. Keep their
+rules in code (citations, documented repos only, the code writer's limits), not only in prompts.
+
+**The UI talks to the runner only through `/api/mac`** (`backend/app/mac_api.py`), whose
+contract is `docs/api.md`. Keep that doc in sync when you change the API. The server enforces
+the run rules; the UI shows its answers instead of re-implementing them.
+
 ## Repo and team
 
 - Repo: https://github.com/MaC-aroni/deployed-on-a-prayer (public, in the MaC-aroni org).
   Clone with `gh repo clone MaC-aroni/deployed-on-a-prayer`.
-- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. Any of them can approve and
-  merge PRs (not their own) and run Deploy (Actions → Deploy → Run workflow on `main`).
-  The list lives in `.github/CODEOWNERS` and in `.github/workflows/deploy.yml`; change both together.
+- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. Only they can run Deploy
+  (Actions → Deploy → Run workflow on `main`); the list is in `.github/workflows/deploy.yml`.
+- PRs need no review: anyone with write access merges once CI passes.
 - Only ob1-can-obi has access to the Fly app, so API key values and Fly problems go to them.
 
 ## Rules
 
-- Never commit to `main`. Use a branch and open a PR (`gh pr create`); a maintainer
-  (ob1-can-obi, Elathius, Zafeer-R) approves and merges.
+- **HARD RULE, no exceptions: every change goes through a branch and a PR into `main`.**
+  This applies to everyone (humans and coding agents, maintainers included) and to every
+  change, however small (typos, docs, config, hotfixes).
+  - Never commit or push directly to `main`, and never force-push it.
+  - If you are on `main`, create a branch first (`git checkout -b <type>/<short-name>`),
+    commit there, push it, and open a PR with `gh pr create --base main`.
+  - If a direct push to `main` is attempted or has happened, stop and tell a maintainer
+    instead of "fixing" it with a force-push.
+  - No review is needed: merge the PR once CI passes.
+- **Read `plan.md` before starting work.** It logs every change the team needs to adapt to.
+  If your PR changes how others work (setup, commands, conventions, the spec or runner
+  behaviour, things removed), add an entry at the top of its "Entries" in the same PR,
+  and update its "Current state" table if that changed.
 - Don't add AI attribution to commits: no `Co-Authored-By: Claude ...` (or any other agent)
   trailer, and no "Generated with ..." lines in commit messages.
 - Never put API keys in code, and never commit `.env` files. New keys: add the name to

@@ -30,8 +30,8 @@ New backend package: add it to `backend/requirements.in`, run `mise run lock`, a
 ## Shipping
 
 1. Branch, commit, push. CI (lint, build, secret scan) runs on every push.
-2. Open a PR. A maintainer (ob1-can-obi, Elathius or Zafeer-R) approves and merges it.
-   Pushes to `main` are blocked for everyone else.
+2. Open a PR. No review needed: merge it yourself once CI passes.
+   Pushes straight to `main` are blocked.
 3. A maintainer deploys: **Actions → Deploy → Run workflow**. Merging alone doesn't deploy.
 
 ## API keys

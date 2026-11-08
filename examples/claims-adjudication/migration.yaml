@@ -1,0 +1,125 @@
+# The demo migration, written the way MaC's planner should write it: every step and approval
+# cites the knowledge-base sections it follows (demo-data/confluence).
+# The four repos it uses are the "existing prod" repos of four teams, in the MaC-aroni org.
+apiVersion: mac/v0.3
+kind: Migration
+metadata:
+  name: claims-adjudication-onprem-to-aws
+  service: ClaimsAdjudicationService
+  owner_team: claims-platform
+
+target:
+  provider: aws
+  account: "418056595238"
+  region: us-east-1
+
+# Columns in the pipeline view, left to right. Each stage starts when the one before finishes.
+stages: [check, infrastructure, data, release, access, verify]
+
+# MaC raises these as Jira tickets (once per version of this file) and Deploy waits for them.
+approvals:
+  - id: APPR-TR-001
+    sources: [techrisk-cloud-migration#what-needs-tech-risk-approval, techrisk-cloud-migration#what-tech-risk-needs-to-see, directory-approvers#approvers]
+    type: tech_risk_cloud_migration
+    approver: tech-risk
+    summary: "Tech Risk: move ClaimsAdjudicationService and the Claims MCP tool to AWS"
+    justification: >
+      Moves ClaimsAdjudicationService and the Claims MCP tool off end-of-life on-prem hardware
+      onto the approved AWS landing zone. Every change was rehearsed first and is fully
+      reversible; the design page linked here covers the architecture, risks and rollback.
+    design_doc: true
+  - id: APPR-MGR-001
+    sources: [access-mcp#approvals-in-order, directory-approvers#approvers]
+    type: access_request_manager
+    approver: manager
+    summary: "Manager approval: ClaimsAdjudicationService needs access to the Claims MCP tool"
+    justification: >
+      After the migration, the claims service calls the Claims MCP tool (check_eligibility)
+      for every claim it adjudicates. This grants the service's AWS role permission to call it.
+  - id: APPR-MCP-001
+    sources: [access-mcp#approvals-in-order, service-claims-mcp#consumers]
+    type: access_request_owner
+    approver: claims-mcp-team
+    after: [APPR-MGR-001] # the MCP team is only asked once the manager has said yes
+    summary: "Claims MCP team: allow ClaimsAdjudicationService to call the Claims MCP tool"
+    justification: >
+      The requester's manager approved this access. Granting it lets the claims service's role,
+      and only that role, invoke the Claims MCP tool in each environment.
+
+steps:
+  - id: preflight
+    sources: [qa-smoke-testing#before-a-migration-preflight]
+    stage: check
+    type: check
+    run:
+      repo: github.com/MaC-aroni/claims-smoke-tests
+      entrypoint: checks/preflight.py
+    rollback: none
+
+  - id: provision_storage
+    sources: [platform-landing-zone#approved-services, platform-naming#resource-names, platform-terraform#layout]
+    stage: infrastructure
+    type: iac
+    codegen: llm # the team trusts the LLM to write this step's Terraform (as a reviewed PR)
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-service-iac
+      path: terraform/storage
+
+  - id: provision_iam
+    sources: [platform-lambda#roles, platform-naming#resource-names]
+    stage: infrastructure
+    type: iac
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-service-iac
+      path: terraform/iam
+
+  - id: db_migrate
+    sources: [data-migration#claims-data-is-phi, data-migration#converting-the-data, data-migration#checking-the-copy, data-migration#undoing-a-copy]
+    stage: data
+    type: db_migration
+    when: manual
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-db-migrate
+      entrypoint: migrate.py
+    verify:
+      entrypoint: verify.py
+    rollback:
+      entrypoint: rollback.py
+
+  - id: deploy_mcp_server
+    sources: [platform-mcp#how-an-mcp-tool-is-hosted, service-claims-mcp#repository]
+    stage: release
+    type: iac
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-mcp-server
+      path: terraform/server
+
+  - id: deploy_service
+    sources: [platform-lambda#endpoints, service-claims-adjudication#target-aws]
+    stage: release
+    type: iac
+    requires_approval: [APPR-TR-001]
+    run:
+      repo: github.com/MaC-aroni/claims-service-iac
+      path: terraform/service
+
+  - id: grant_mcp_access
+    sources: [platform-mcp#how-access-is-granted, access-mcp#the-change-itself]
+    stage: access
+    type: iac
+    requires_approval: [APPR-MGR-001, APPR-MCP-001]
+    run:
+      repo: github.com/MaC-aroni/claims-mcp-server
+      path: terraform/access
+
+  - id: smoke_test
+    sources: [qa-smoke-testing#after-a-migration-smoke-test]
+    stage: verify
+    type: check
+    run:
+      repo: github.com/MaC-aroni/claims-smoke-tests
+      entrypoint: checks/smoke.py

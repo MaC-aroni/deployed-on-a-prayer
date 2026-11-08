@@ -8,6 +8,12 @@ anyio==4.16.0
     # via
     #   starlette
     #   watchfiles
+boto3==1.43.126
+    # via -r backend/requirements.in
+botocore==1.43.126
+    # via
+    #   boto3
+    #   s3transfer
 click==8.5.1
     # via uvicorn
 fastapi==0.162.0
@@ -18,18 +24,32 @@ httptools==0.9.0
     # via uvicorn
 idna==3.20
     # via anyio
+jmespath==1.1.0
+    # via
+    #   boto3
+    #   botocore
 opentelemetry-api==1.45.2
     # via fastapi
 pydantic==2.14.3
-    # via fastapi
+    # via
+    #   -r backend/requirements.in
+    #   fastapi
 pydantic-core==2.50.4
     # via pydantic
+python-dateutil==2.9.0.post0
+    # via botocore
 python-dotenv==1.2.4
     # via
     #   -r backend/requirements.in
     #   uvicorn
 pyyaml==6.0.3
-    # via uvicorn
+    # via
+    #   -r backend/requirements.in
+    #   uvicorn
+s3transfer==0.19.3
+    # via boto3
+six==1.17.0
+    # via python-dateutil
 starlette==1.10.0
     # via fastapi
 typing-extensions==4.16.0
@@ -45,6 +65,8 @@ typing-inspection==0.4.5
     # via
     #   fastapi
     #   pydantic
+urllib3==2.8.0
+    # via botocore
 uvicorn==0.54.0
     # via -r backend/requirements.in
 uvloop==0.23.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'

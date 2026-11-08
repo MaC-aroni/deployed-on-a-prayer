@@ -1,0 +1,199 @@
+# MaC runner and `migration.yaml` (schema `mac/v0.3`)
+
+The runner is deterministic: no model is in the execution path. The only LLM call MaC makes
+is during Build, to write the design page's prose (see below); nothing it writes is executed.
+Code: `backend/mac/`. Example: `examples/claims-adjudication/migration.yaml`.
+
+## The three buttons
+
+| | What it does | Changes anything? | Allowed when |
+|---|---|---|---|
+| **Build** | Validates the spec, locks every repo's `main` to a commit, checks guardrails on GitHub, writes the design page, raises the approval tickets that are due, runs `terraform plan` for `iac` steps and runs `check` steps that come before any change | Nothing in AWS (it does write to Confluence and Jira) | Always |
+| **Rehearse** | Runs every step in the **rehearsal** environment, then undoes all of it | Yes, then undone | The latest Build passed, on this exact `migration.yaml` |
+| **Deploy** | Runs every step in **production** | Yes | The latest Rehearse passed on this exact `migration.yaml`, and no repo's `main` has moved since |
+
+Deploy runs exactly the commits the passing Rehearse ran. If a repo's `main` moved since,
+Deploy refuses: run Build and Rehearse again. Only one Rehearse or Deploy per migration can be
+in progress at a time.
+
+## Failure means undo everything
+
+If any step fails, or its `verify` fails, the runner:
+
+1. undoes the failed step's own half-finished work, for `iac` and `db_migration` steps;
+2. undoes every finished step, newest first (`check` steps have nothing to undo);
+3. marks steps that never ran as `skipped`;
+4. asks the AI for help, in the run's mode (see below).
+
+The run ends `failed` if everything was undone, or `rollback_failed` if an undo itself failed.
+The runner keeps undoing the other steps either way. `rollback_failed` means a person has to look.
+**Undo** does the same for a finished Deploy, or for a run that's waiting.
+
+## Stages, manual steps and approvals
+
+- `stages` are the pipeline's columns, run left to right. Within a stage, `needs` decides the
+  order, then the order in the file. `needs` can't point at a later stage.
+- `when: manual` makes a step wait until someone presses **play**, in Rehearse and Deploy.
+- `requires_approval` makes a step wait in **Deploy** until those approvals' Jira tickets are
+  approved. A rejected ticket fails the run, which undoes everything. Rehearse doesn't wait for
+  approvals, since it only touches the rehearsal environment.
+- A waiting run continues with `play` (manual step) or `resume` (approvals checked again).
+
+## Approvals: tickets raised by MaC
+
+MaC raises the Jira tickets itself, in plain code from the spec (summary, justification, the
+steps each approval unblocks), never written by a model. Rules:
+
+- **One ticket per approval per version of `migration.yaml`.** Re-running never duplicates a
+  ticket; editing the plan raises fresh ones, because an approval covers a specific plan.
+- **Chains:** an approval with `after: [X]` isn't requested until X is approved. If X is
+  rejected, it counts as rejected too. Demo: the MCP team is only asked after the manager.
+- **`design_doc: true`:** the ticket links the design page and isn't raised until the page
+  exists for this version of the plan.
+- Tickets are raised when Build runs, and when Deploy (or `resume`) reaches a step that needs
+  them. Statuses map by name: `Approved` or `Done` approves; `Rejected`, `Declined` or
+  `Won't Do` rejects; anything else is pending.
+- Build's report lists every approval with its status, ticket and why it's waiting.
+
+## The design page (the one LLM call)
+
+During Build, MaC sends the migration's facts (every step, repo, locked commit, undo and
+approval, assembled by code) to an LLM (Nemotron on NVIDIA NIM by default), gets a design
+document back in Markdown, and publishes it to Confluence. The Tech Risk ticket links to it.
+
+- The model's output is only ever text on that page. Code converts it with everything escaped,
+  and appends an appendix generated from the spec, so the steps listed are exactly what runs.
+- The page is rewritten only when the spec changes, updating the same page in place.
+- If the LLM or Confluence fails or isn't configured, **Build still passes**. The design-doc
+  tickets just wait, and Build tries again next time.
+
+## The spec
+
+```yaml
+apiVersion: mac/v0.2
+kind: Migration
+metadata: { name: claims-adjudication-onprem-to-aws, service: ..., owner_team: ... }
+target:
+  provider: aws
+  account: "123456789012"
+  region: us-east-1
+  rehearsal: { account: "...", region: ... } # optional; defaults to the same account
+stages: [check, infrastructure, data, release, verify]
+approvals:
+  - id: APPR-MGR-001
+    type: access_request_manager
+    approver: manager # who signs off; mapped to a Jira assignee by MAC_JIRA_ASSIGNEES
+    summary: "Manager approval: the service needs the Claims MCP tool" # the ticket title
+    justification: ... # the ticket body
+  - id: APPR-MCP-001
+    type: access_request_owner
+    approver: claims-mcp-team
+    summary: ...
+    after: [APPR-MGR-001] # not requested until the manager approves
+  - id: APPR-TR-001
+    type: tech_risk_cloud_migration
+    approver: tech-risk
+    summary: ...
+    design_doc: true # link the design page; wait for it to exist
+steps:
+  - id: db_migrate
+    stage: data
+    type: db_migration # check | script | iac | db_migration
+    needs: []
+    requires_approval: [APPR-TR-001]
+    when: manual # auto (default) | manual
+    codegen: engineer # engineer (default) | llm: who writes this step's code from the migration guide
+    run: { repo: github.com/MaC-aroni/claims-db-migrate, entrypoint: migrate.py }
+    verify: { entrypoint: verify.py } # optional repo:, defaults to run.repo
+    rollback: { entrypoint: rollback.py }
+guardrails: { require_ci_green: true, require_protected_branch: true, require_review: true }
+diagnostics: { mode: explain } # default AI help; a run can override it
+```
+
+Rules `mac validate` enforces:
+- `repo` is `github.com/<owner>/<repo>`, optionally `@<branch>`. It defaults to `main`.
+- `iac` steps have `run.path`, a Terraform directory, and roll back with `terraform destroy`.
+- `script` and `db_migration` steps have a `rollback.entrypoint`. `check` steps have no rollback.
+- `db_migration` steps need `verify`, and get a warning if they aren't `when: manual`.
+- Approvals have an `approver` and a `summary`. `after` names other approvals, with no loops.
+- No duplicate ids, no unknown references, no loops.
+
+Changes in v0.3: approvals lost `jira:` (MaC raises the tickets) and gained `approver`,
+`summary`, `after` and `design_doc`. Steps gained `codegen`: the engineers decide, step by step
+and in review, which parts of the pipeline the LLM may write code for. LLM-written code always
+arrives as a pull request a person reviews.
+
+Changes from the design doc's v0.1: `stages` and `when` are new; `approvals[].blocks` is gone
+(use `requires_approval` on steps); repos follow `main` instead of pinned SHAs (Build locks
+them); `run.action` is gone (the button decides plan, apply or destroy); `on_failure` is gone
+(failure always undoes everything); there's no `approval_gate` step type.
+
+## Contract for the repos a pipeline runs
+
+Each action is a fresh checkout of the repo at the locked commit. `.py` entrypoints run with
+Python; anything else must be executable. Exit code 0 means success. Everything printed
+becomes the step's log. The runner sets these environment variables:
+
+| Variable | Value |
+|---|---|
+| `MAC_ENV` | `rehearsal` or `production`. **Name resources with it**, so a rehearsal never touches production |
+| `MAC_MODE` | `build`, `rehearse` or `deploy` |
+| `MAC_ACTION` | `run`, `verify`, `rollback` or `plan` |
+| `MAC_RUN_ID`, `MAC_STEP_ID`, `MAC_MIGRATION` | identifiers |
+| `MAC_RUN_DIR` | a directory kept for the whole run, for passing artifacts between steps |
+| `MAC_TARGET_ACCOUNT`, `MAC_TARGET_REGION`, `AWS_REGION` | the target for this environment |
+
+Rollback scripts must be safe to run when the step only partly happened. Entrypoints run with
+the runner's Python, which has `boto3`; anything else they need has to come from the stdlib.
+
+**Terraform** (`iac` steps): the runner writes `mac_backend_override.tf` into the Terraform
+directory, so state always lives in the S3 bucket at
+`mac/<migration>/<rehearsal|production>/<step>.tfstate`, with S3 locking. The module receives
+`TF_VAR_mac_env` and `TF_VAR_mac_run_id`. Declare `variable "mac_env" {}` and use it in
+resource names.
+
+## AI help when a run fails
+
+One selector: **Explain · Report · Auto-fix**. Each includes the one before it.
+
+- **Explain**: reads the logs and says what went wrong and the likely cause.
+- **Report**: also reads the failing repo's code and produces a `.md` report for the
+  developer's own coding agent.
+- **Auto-fix**: also changes code on a branch `mac/autofix/<run-id>` and re-runs Build and
+  Rehearse with that branch, up to 3 attempts. Then it opens a PR into `main`.
+
+Auto-fix guardrails, enforced in code (`mac/diagnostics.py`), not by the model:
+- It only acts on Rehearse. A Deploy asking for auto-fix gets Report.
+- Builds and rehearsals of an auto-fix branch report that branch's guardrails without blocking
+  on them. **Deploy refuses any rehearsal that used a branch**: the fix has to be merged into
+  `main` through the repo's normal PR rules first.
+- It can't change check or verify scripts, tests, `.github/`, `CODEOWNERS` or `.env` files,
+  and it can only touch repos the pipeline uses.
+
+The Nemotron agents plug in behind `Diagnostician` in `mac/diagnostics.py`. Until they do,
+failures record that AI help isn't connected yet.
+
+## CLI
+
+```
+mise run mac validate examples/claims-adjudication/migration.yaml
+mise run mac build    <spec> [--branch github.com/o/r=branch]
+mise run mac rehearse <spec> [--ai explain|report|autofix]
+mise run mac deploy   <spec> [--ai explain|report]
+mise run mac play <run-id> <step>   |  resume <run-id>  |  undo <run-id>
+mise run mac status <run-id>        |  logs <run-id> [--step id]  |  runs
+```
+
+Configuration comes from environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `GITHUB_TOKEN` | read access to the pipeline's repos |
+| `ATLASSIAN_SITE`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN` | one Atlassian site for Jira and Confluence, e.g. `https://<your-site>.atlassian.net`. Without them, approval steps wait |
+| `JIRA_PROJECT` (default `MAC`), `JIRA_ISSUE_TYPE` (default `Task`) | where tickets go |
+| `MAC_JIRA_ASSIGNEES` | optional JSON, approver name → Jira accountId, e.g. `{"manager": "712020:…"}` |
+| `CONFLUENCE_SPACE_KEY` | the space for design pages. Without it, no page (Build still passes) |
+| `NVIDIA_API_KEY`, `MAC_LLM_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`), `MAC_LLM_BASE_URL` | the LLM that writes the design page |
+| `MAC_TF_STATE_BUCKET`, `MAC_TF_STATE_REGION` | the S3 bucket for Terraform state |
+| AWS credentials | the usual `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
+| `MAC_DATA_DIR` | run history and logs (default `./.mac`) |

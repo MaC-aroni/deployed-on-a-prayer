@@ -1,0 +1,5 @@
+# Test-only dependencies, constrained to the same versions as the app.
+-c requirements.txt
+pytest>=8.0
+ruff>=0.6
+httpx2

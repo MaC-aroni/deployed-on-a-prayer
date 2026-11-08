@@ -1,0 +1,225 @@
+"""Run history and event logs, in SQLite. A run can wait at a manual gate for hours, so
+everything the runner needs to continue lives here, not in memory."""
+
+import sqlite3
+import threading
+import time
+import uuid
+from collections.abc import Callable
+from enum import StrEnum
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+
+
+class StepState(StrEnum):
+    PENDING = "pending"
+    BLOCKED = "blocked"  # waiting for an approval
+    WAITING = "waiting"  # manual step, waiting for someone to press play
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    ROLLED_BACK = "rolled_back"
+    ROLLBACK_FAILED = "rollback_failed"
+    SKIPPED = "skipped"  # never reached because an earlier step failed
+
+
+class RunStatus(StrEnum):
+    RUNNING = "running"
+    WAITING = "waiting"  # on an approval or a manual step
+    ROLLING_BACK = "rolling_back"
+    SUCCEEDED = "succeeded"  # Build passed / Rehearse passed and cleaned up / Deploy finished
+    FAILED = "failed"  # a step failed and everything was undone cleanly
+    ROLLBACK_FAILED = "rollback_failed"  # undo didn't finish; a person has to clean up
+    UNDONE = "undone"  # someone pressed undo
+
+    @property
+    def active(self) -> bool:
+        return self in (RunStatus.RUNNING, RunStatus.WAITING, RunStatus.ROLLING_BACK)
+
+
+class RunRecord(BaseModel):
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
+    migration: str
+    mode: str  # build | rehearse | deploy
+    spec_path: str
+    spec_digest: str
+    spec_text: str  # the exact migration.yaml this run used; undo and resume read this, not the file
+    status: RunStatus = RunStatus.RUNNING
+    next_action: str | None = None  # queued work for Runner.execute: build | advance | undo
+    shas: dict[str, str] = {}  # RepoRef.key -> commit this run uses
+    overrides: dict[str, str] = {}  # RepoRef.key -> ref used instead of the spec's (auto-fix branches)
+    steps: dict[str, StepState] = {}
+    completed: list[str] = []  # step ids in the order they succeeded; rollback reverses it
+    played: list[str] = []  # manual steps someone pressed play on
+    failed_step: str | None = None
+    reason: str | None = None
+    diagnostics_mode: str = "explain"
+    report: dict = {}  # Build: guardrails, approvals, plans, issues
+    based_on: str | None = None  # the Build (for Rehearse) or Rehearse (for Deploy) this relies on
+    created: float = Field(default_factory=time.time)
+    updated: float = Field(default_factory=time.time)
+
+
+class Event(BaseModel):
+    run_id: str
+    seq: int
+    ts: float
+    step: str | None
+    kind: str  # log | step | run | diagnosis
+    message: str
+
+
+class Ticket(BaseModel):
+    approval: str
+    key: str  # e.g. MAC-12
+    url: str
+
+
+class DesignPage(BaseModel):
+    page_id: str
+    url: str
+    digest: str  # the spec version the page was last written for
+
+
+class Store:
+    def __init__(self, path: Path | str):
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self.lock = threading.Lock()
+        self.listeners: list[Callable[[Event], None]] = []
+        with self.lock, self.db:
+            self.db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS runs (
+                    id TEXT PRIMARY KEY, migration TEXT NOT NULL, mode TEXT NOT NULL,
+                    created REAL NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS runs_by_migration ON runs (migration, mode, created);
+                CREATE TABLE IF NOT EXISTS events (
+                    run_id TEXT NOT NULL, seq INTEGER NOT NULL, ts REAL NOT NULL, step TEXT,
+                    kind TEXT NOT NULL, message TEXT NOT NULL, PRIMARY KEY (run_id, seq));
+                -- One Jira ticket per approval per version of the spec: a changed plan needs
+                -- fresh sign-off, and re-running never raises duplicates.
+                CREATE TABLE IF NOT EXISTS tickets (
+                    migration TEXT NOT NULL, digest TEXT NOT NULL, approval TEXT NOT NULL,
+                    key TEXT NOT NULL, url TEXT NOT NULL, created REAL NOT NULL,
+                    PRIMARY KEY (migration, digest, approval));
+                -- One design page per migration, updated in place for each new spec version.
+                -- The knowledge base as published: our page id -> Confluence page, for citations.
+                CREATE TABLE IF NOT EXISTS knowledge (
+                    id TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
+                    title TEXT NOT NULL, updated REAL NOT NULL);
+                -- The migration guide's pages, so re-writing updates them in place.
+                CREATE TABLE IF NOT EXISTS guide_pages (
+                    migration TEXT NOT NULL, key TEXT NOT NULL, page_id TEXT NOT NULL, url TEXT NOT NULL,
+                    PRIMARY KEY (migration, key));
+                CREATE TABLE IF NOT EXISTS designs (
+                    migration TEXT PRIMARY KEY, page_id TEXT NOT NULL, url TEXT NOT NULL,
+                    digest TEXT NOT NULL, updated REAL NOT NULL);
+                """
+            )
+
+    def save(self, run: RunRecord) -> None:
+        run.updated = time.time()
+        with self.lock, self.db:
+            self.db.execute(
+                "INSERT INTO runs (id, migration, mode, created, data) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+                (run.id, run.migration, run.mode, run.created, run.model_dump_json()),
+            )
+
+    def get(self, run_id: str) -> RunRecord:
+        with self.lock:
+            row = self.db.execute("SELECT data FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"no run {run_id!r}")
+        return RunRecord.model_validate_json(row[0])
+
+    def latest(self, migration: str, mode: str | None = None) -> RunRecord | None:
+        query = "SELECT data FROM runs WHERE migration = ?" + (" AND mode = ?" if mode else "")
+        params = (migration, mode) if mode else (migration,)
+        with self.lock:
+            row = self.db.execute(query + " ORDER BY created DESC, rowid DESC LIMIT 1", params).fetchone()
+        return RunRecord.model_validate_json(row[0]) if row else None
+
+    def runs(self, migration: str | None = None, limit: int = 50) -> list[RunRecord]:
+        query = "SELECT data FROM runs" + (" WHERE migration = ?" if migration else "")
+        params = (migration,) if migration else ()
+        with self.lock:
+            rows = self.db.execute(query + " ORDER BY created DESC, rowid DESC LIMIT ?", (*params, limit)).fetchall()
+        return [RunRecord.model_validate_json(r[0]) for r in rows]
+
+    def ticket(self, migration: str, digest: str, approval: str) -> Ticket | None:
+        with self.lock:
+            row = self.db.execute("SELECT key, url FROM tickets WHERE migration = ? AND digest = ? AND approval = ?",
+                                  (migration, digest, approval)).fetchone()
+        return Ticket(approval=approval, key=row[0], url=row[1]) if row else None
+
+    def save_ticket(self, migration: str, digest: str, ticket: "Ticket") -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?)",
+                            (migration, digest, ticket.approval, ticket.key, ticket.url, time.time()))
+
+    def tickets(self, migration: str, digest: str) -> dict[str, "Ticket"]:
+        with self.lock:
+            rows = self.db.execute("SELECT approval, key, url FROM tickets WHERE migration = ? AND digest = ?",
+                                   (migration, digest)).fetchall()
+        return {r[0]: Ticket(approval=r[0], key=r[1], url=r[2]) for r in rows}
+
+    def design(self, migration: str) -> "DesignPage | None":
+        with self.lock:
+            row = self.db.execute("SELECT page_id, url, digest FROM designs WHERE migration = ?",
+                                  (migration,)).fetchone()
+        return DesignPage(page_id=row[0], url=row[1], digest=row[2]) if row else None
+
+    def save_design(self, migration: str, page: "DesignPage") -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO designs VALUES (?, ?, ?, ?, ?) ON CONFLICT (migration) DO UPDATE SET "
+                            "page_id = excluded.page_id, url = excluded.url, digest = excluded.digest, "
+                            "updated = excluded.updated",
+                            (migration, page.page_id, page.url, page.digest, time.time()))
+
+    def guide_pages(self, migration: str) -> dict[str, tuple[str, str]]:
+        with self.lock:
+            rows = self.db.execute("SELECT key, page_id, url FROM guide_pages WHERE migration = ?",
+                                   (migration,)).fetchall()
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    def save_guide_page(self, migration: str, key: str, page_id: str, url: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO guide_pages VALUES (?, ?, ?, ?) ON CONFLICT (migration, key) DO UPDATE "
+                            "SET page_id = excluded.page_id, url = excluded.url", (migration, key, page_id, url))
+
+    def knowledge_pages(self) -> dict[str, tuple[str, str, str]]:
+        """Our page id -> (Confluence page id, url, title)."""
+        with self.lock:
+            rows = self.db.execute("SELECT id, page_id, url, title FROM knowledge").fetchall()
+        return {r[0]: (r[1], r[2], r[3]) for r in rows}
+
+    def save_knowledge_page(self, page: str, page_id: str, url: str, title: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO knowledge VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET "
+                            "page_id = excluded.page_id, url = excluded.url, title = excluded.title, "
+                            "updated = excluded.updated", (page, page_id, url, title, time.time()))
+
+    def add_event(self, run_id: str, kind: str, message: str, step: str | None = None) -> Event:
+        with self.lock, self.db:
+            seq = self.db.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?",
+                                  (run_id,)).fetchone()[0]
+            event = Event(run_id=run_id, seq=seq, ts=time.time(), step=step, kind=kind, message=message)
+            self.db.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)",
+                            (run_id, seq, event.ts, step, kind, message))
+        for listener in self.listeners:
+            listener(event)
+        return event
+
+    def events(self, run_id: str, after: int = 0, step: str | None = None) -> list[Event]:
+        query = "SELECT run_id, seq, ts, step, kind, message FROM events WHERE run_id = ? AND seq > ?"
+        params: tuple = (run_id, after)
+        if step is not None:
+            query += " AND step = ?"
+            params += (step,)
+        with self.lock:
+            rows = self.db.execute(query + " ORDER BY seq", params).fetchall()
+        return [Event(run_id=r[0], seq=r[1], ts=r[2], step=r[3], kind=r[4], message=r[5]) for r in rows]

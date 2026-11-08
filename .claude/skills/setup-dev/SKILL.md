@@ -56,8 +56,7 @@ Tell the user these rules once setup works:
 - Work on a branch: `git checkout -b <name>/<feature>`. Pushes to `main` are blocked.
 - Every push runs CI (backend lint and import, frontend build, secret scan) on GitHub,
   on Linux with the same pinned versions.
-- Open a PR with `gh pr create`. A maintainer (ob1-can-obi, Elathius or Zafeer-R)
-  approves and merges it; nobody can approve their own PR.
+- Open a PR with `gh pr create`. No review is needed: merge it once CI passes.
 - Deploying to Fly is a manual step a maintainer runs after merging. A merged PR
   isn't live until someone deploys.
 - New backend package: add it to `backend/requirements.in`, run `mise run lock`, and

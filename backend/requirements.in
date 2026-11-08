@@ -2,3 +2,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-dotenv>=1.0
+pydantic>=2.7
+pyyaml>=6.0
+# Pipeline entrypoints run with the runner's Python and use boto3 for AWS.
+boto3>=1.35
