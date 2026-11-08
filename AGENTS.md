@@ -32,6 +32,10 @@ tests with `mise run test`.
   - If a direct push to `main` is attempted or has happened, stop and tell a maintainer
     instead of "fixing" it with a force-push.
   - No review is needed: merge the PR once CI passes.
+- **Read `plan.md` before starting work.** It logs every change the team needs to adapt to.
+  If your PR changes how others work (setup, commands, conventions, the spec or runner
+  behaviour, things removed), add an entry at the top of its "Entries" in the same PR,
+  and update its "Current state" table if that changed.
 - Don't add AI attribution to commits: no `Co-Authored-By: Claude ...` (or any other agent)
   trailer, and no "Generated with ..." lines in commit messages.
 - Never put API keys in code, and never commit `.env` files. New keys: add the name to
