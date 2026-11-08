@@ -224,6 +224,28 @@ so `page_url` is set from then on. `409` when Confluence isn't configured; `404`
 page. For a repository with no page at all, `POST /learn` is the agent that writes and
 publishes one.
 
+## Describe: the Confluence page that introduces a migration
+
+`POST /api/mac/migrations/{name}/page` (sign-in on Fly) starts an agent run (`mode: "ingest"`,
+`migration: "page/<name>"`) and answers `202` with the run; follow it like Learn
+(`GET /runs/{id}`, `/events`, `/stream`, the console's `/agents/{id}`). `404` for an unknown
+migration, `409` while a Describe for it is still running.
+
+What it does, in agent events (`step: "describe"`): the **Director** states the facts (steps,
+approvals, repositories); the **Reader** reads each repository's README on GitHub and the
+knowledge-base sections the spec cites (`sources:` on steps and approvals, `metadata.source_docs`);
+the **Writer** (the LLM) turns those facts into the page, with the headings Summary · What moves
+and why · How it runs · Approvals · Risks and rollback; code appends the authoritative appendix
+(exactly what will run, from `migration.yaml`) and publishes.
+
+The page is saved as `migration-<name>.md` in the generated-pages folder with labels
+`migration, generated`, so `GET /knowledge/migration-<name>` shows it, and published to
+Confluence under the knowledge base's root page when Confluence is configured (updating the
+same page on a rerun). Without an LLM the page is the facts alone; without Confluence it stays
+in the console. Either way the run succeeds and `GET /migrations` shows it as `page`
+(`url`, `local`, `generated`, `written`, `model`, `summary`); `report` has `page`, `title`,
+`confluence_url`, `summary`, `model`, `repos`, `sections`.
+
 ## Review of a page MaC wrote
 
 A generated page carries the label `needs-review` until a person signs it off. Its review state

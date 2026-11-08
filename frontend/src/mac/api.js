@@ -34,8 +34,11 @@ async function call(method, path, body) {
 const enc = encodeURIComponent;
 
 export const api = {
-  // Reviewed migrations (examples/) and their runs
+  // The migrations (mirrored from mac-migrations, plus the bundled examples) and their runs
   migrations: () => call("GET", "/migrations"),
+  migrationsSource: () => call("GET", "/migrations-source"),
+  // An agent writes the Confluence page that describes a migration (follow it at /agents/{id})
+  describe: (name) => call("POST", `/migrations/${enc(name)}/page`),
   migration: (name) => call("GET", `/migrations/${enc(name)}`),
   start: (name, mode, body = {}) => call("POST", `/migrations/${enc(name)}/${mode}`, body),
   runs: (migration, limit = 50) => {

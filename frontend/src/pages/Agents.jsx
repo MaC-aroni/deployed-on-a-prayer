@@ -63,6 +63,7 @@ function titleOf(run) {
   if (run.mode === "plan") return (run.migration ?? "").replace(/^plan\//, "").replaceAll("-", " ").replace(/^approvals$/, "raise approvals in Jira");
   if (run.mode === "diagnose") return `Diagnose ${run.failed_step ?? run.report?.step ?? "the failure"}`;
   if ((run.migration ?? "").startsWith("knowledge/")) return `Learn ${run.migration.slice("knowledge/".length)}`;
+  if ((run.migration ?? "").startsWith("page/")) return `Describe ${run.migration.slice("page/".length)}`;
   if ((run.migration ?? "").startsWith("repo/")) return `Licence check · ${run.migration.slice("repo/".length)}`;
   return "Learn the knowledge base";
 }
@@ -238,8 +239,13 @@ export default function Agents({ runId }) {
             </Link>
             {rep.page && (
               <Link to={`/knowledge/${rep.page}`} className="btn">
-                <BookOpen size={14} /> Knowledge page
+                <BookOpen size={14} /> {rep.migration ? "The page" : "Knowledge page"}
               </Link>
+            )}
+            {rep.confluence_url && (
+              <a className="btn btn-primary" href={rep.confluence_url} target="_blank" rel="noreferrer">
+                Open in Confluence <ExternalLink size={12} />
+              </a>
             )}
             {rep.ticket && (
               <a className="btn" href={rep.ticket_url ?? "#"} target="_blank" rel="noreferrer">

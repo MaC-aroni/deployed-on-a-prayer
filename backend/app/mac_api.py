@@ -28,6 +28,8 @@ from pydantic import BaseModel
 
 from mac import probe as probes
 from mac.cli import make_runner
+from mac.integrations import IntegrationError
+from mac.migrations_sync import file_url, read_manifest, sync_migrations
 from mac.runner import GateError, Runner
 from mac.spec import Spec, SpecError, Step, load_spec, parse_spec
 from mac.store import RunRecord, RunStatus
@@ -52,6 +54,12 @@ class State:
     webhook_secret: str | None = None  # MAC_JIRA_WEBHOOK_SECRET; None = the Jira webhook is off
     prober: Callable = probes.send  # (url, probe, region) -> result; tests swap it
     assistant: Callable | None = None  # () -> mac.assistant.Assistant, or None when no LLM is set
+    # Where the migrations come from. `sync` mirrors migrations/*/migration.yaml from the
+    # mac-migrations repo into migrations_dir every `seconds`; `fallback_dirs` are read too (the
+    # bundled examples/) so the console never goes empty while GitHub is slow or the repo is new.
+    sync: dict | None = None  # {"repo", "branch", "seconds"} or None = migrations_dir is read as is
+    fallback_dirs: tuple[Path, ...] = ()
+    project_repo: str = "MaC-aroni/deployed-on-a-prayer"  # where the bundled examples live
 
 
 _state: State | None = None
@@ -67,9 +75,21 @@ def _default_state() -> State:
     data_dir = Path(os.environ.get("MAC_DATA_DIR", ROOT / ".mac"))  # the same history as `mise run mac`
     pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mac-run")
     runner = make_runner(data_dir, submit=pool.submit)  # auto-fix's re-runs go through the same pool
+    # MAC_MIGRATIONS_DIR set: read that folder, nothing else. Otherwise mirror the mac-migrations
+    # repo into the data dir (MAC_MIGRATIONS_SYNC_SECONDS=0 turns that off) with examples/ as backup.
+    explicit = os.environ.get("MAC_MIGRATIONS_DIR")
+    repo = os.environ.get("MAC_MIGRATIONS_REPO", "MaC-aroni/mac-migrations").strip()
+    seconds = int(os.environ.get("MAC_MIGRATIONS_SYNC_SECONDS", "60"))
+    sync, fallback, migrations_dir = None, (), Path(explicit) if explicit else ROOT / "examples"
+    if not explicit and repo and seconds > 0:
+        sync = {"repo": repo, "branch": os.environ.get("MAC_MIGRATIONS_BRANCH", "main"), "seconds": seconds}
+        fallback, migrations_dir = (ROOT / "examples",), data_dir / "migrations"
     return State(
         runner=runner,
-        migrations_dir=Path(os.environ.get("MAC_MIGRATIONS_DIR", ROOT / "examples")),
+        migrations_dir=migrations_dir,
+        sync=sync,
+        fallback_dirs=fallback,
+        project_repo=os.environ.get("MAC_GITHUB_REPO", "MaC-aroni/deployed-on-a-prayer"),
         submit=pool.submit,
         poll_seconds=int(os.environ.get("MAC_APPROVAL_POLL_SECONDS", "10")),
         webhook_secret=os.environ.get("MAC_JIRA_WEBHOOK_SECRET") or None,
@@ -87,8 +107,62 @@ def get_state() -> State:
             state.submit(lambda r=run_id: _execute(state, r))
         if state.poll_seconds > 0:
             threading.Thread(target=_poll_loop, args=(state,), name="mac-approvals", daemon=True).start()
+        if state.sync:
+            threading.Thread(target=_sync_loop, args=(state,), name="mac-migrations-sync", daemon=True).start()
         _state = state
     return _state
+
+
+# ---- The migrations repo, mirrored --------------------------------------------------------------
+
+
+def sync_migrations_once(state: State) -> dict | None:
+    """Mirror mac-migrations into migrations_dir now. Never raises; the manifest carries `error`."""
+    if not state.sync:
+        return None
+    return sync_migrations(state.sync["repo"], state.sync["branch"], state.migrations_dir,
+                           os.environ.get("GITHUB_TOKEN"), api=state.sync.get("api", "https://api.github.com"))
+
+
+def _sync_loop(state: State) -> None:
+    while True:
+        try:
+            sync_migrations_once(state)
+        except Exception:  # noqa: BLE001
+            log.exception("migrations sync crashed; will try again")
+        time.sleep(state.sync["seconds"])
+
+
+def migrations_source(state: State) -> dict:
+    """Where the list comes from, for the page header: the repo, its branch, the last sync."""
+    if not state.sync:
+        return {"repo": None, "branch": None, "url": None, "synced": None, "error": None,
+                "dir": state.migrations_dir.name}
+    manifest = read_manifest(state.migrations_dir)
+    return {"repo": state.sync["repo"], "branch": state.sync["branch"],
+            "url": f"https://github.com/{state.sync['repo']}/tree/{state.sync['branch']}/migrations",
+            "synced": manifest.get("synced"), "checked": manifest.get("checked"), "commit": manifest.get("commit"),
+            "error": manifest.get("error"), "dir": state.migrations_dir.name}
+
+
+def _file_source(state: State, path: Path) -> dict:
+    """The GitHub file a migration.yaml on disk came from, so the console can link to it."""
+    try:
+        rel = path.resolve().relative_to(state.migrations_dir.resolve()).as_posix()
+        if state.sync:
+            manifest = read_manifest(state.migrations_dir)
+            entry = manifest.get("files", {}).get(path.parent.name) or {}
+            repo_path = entry.get("path") or f"migrations/{rel}"
+            return {"repo": state.sync["repo"], "path": repo_path,
+                    "url": file_url(state.sync["repo"], state.sync["branch"], repo_path), "bundled": False}
+        return {"repo": None, "path": rel, "url": None, "bundled": False}
+    except ValueError:
+        pass
+    try:  # a bundled example: the file in this project's repo
+        rel = path.resolve().relative_to(ROOT.resolve()).as_posix()
+        return {"repo": state.project_repo, "path": rel, "url": file_url(state.project_repo, "main", rel), "bundled": True}
+    except ValueError:
+        return {"repo": None, "path": path.as_posix(), "url": None, "bundled": True}
 
 
 # ---- Approvals that follow Jira on their own ------------------------------------------------
@@ -180,14 +254,20 @@ def _run_view(run: RunRecord) -> dict:
 
 
 def _find(state: State) -> dict[str, tuple[Path, Spec | None, list[str]]]:
-    """name -> (path, spec or None, problems). Invalid files are listed under their folder name."""
+    """name -> (path, spec or None, problems). Invalid files are listed under their folder name.
+    The migrations dir first (the mirror of mac-migrations), then the fallback dirs for names it
+    doesn't have."""
     found = {}
-    for path in sorted(state.migrations_dir.glob("*/migration.yaml")):
-        try:
-            spec = load_spec(path)
-            found[spec.metadata.name] = (path, spec, [str(i) for i in validate(spec)])
-        except SpecError as e:
-            found[path.parent.name] = (path, None, e.problems)
+    for directory in (state.migrations_dir, *state.fallback_dirs):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*/migration.yaml")):
+            try:
+                spec = load_spec(path)
+                name, entry = spec.metadata.name, (path, spec, [str(i) for i in validate(spec)])
+            except SpecError as e:
+                name, entry = path.parent.name, (path, None, e.problems)
+            found.setdefault(name, entry)
     return found
 
 
@@ -206,17 +286,101 @@ def _latest(state: State, name: str) -> dict:
     return {mode: _summary(store.latest(name, mode)) for mode in ("build", "rehearse", "deploy")}
 
 
+def generated_dir(state: State) -> Path:
+    """Pages MaC wrote itself (Learn, Describe), beside the hand-written knowledge base."""
+    return state.runner.data_dir / "knowledge"
+
+
+_page_lookups: dict[str, float] = {}  # page id -> when Confluence was last asked for it
+
+
+def lookup_confluence_page(state: State, page_id: str, title: str) -> str | None:
+    """The Confluence URL for one of our pages: the publish record, else (when Confluence is
+    configured) a page with that exact title, asked at most every 10 minutes and remembered."""
+    store = state.runner.store
+    known = store.knowledge_pages().get(page_id)
+    if known:
+        return known[1]
+    conf = state.runner.pages
+    if conf is None or not hasattr(conf, "call") or not hasattr(conf, "space_id"):
+        return None
+    if time.time() - _page_lookups.get(page_id, 0) < 600:
+        return None
+    _page_lookups[page_id] = time.time()
+    try:
+        import urllib.parse
+        query = urllib.parse.urlencode({"space-id": conf.space_id(), "title": title})
+        found = conf.call(f"/wiki/api/v2/pages?{query}")["results"]
+    except (IntegrationError, KeyError, TypeError):
+        return None
+    if not found:
+        return None
+    url = f"{conf.site}/wiki{found[0]['_links']['webui']}"
+    store.save_knowledge_page(page_id, found[0]["id"], url, title)
+    return url
+
+
+def migration_page(state: State, name: str, spec: Spec) -> dict | None:
+    """The Confluence page that describes this migration, if MaC wrote one (or a person did,
+    under the same title), plus the Describe run in flight if any."""
+    from mac.describe import page_id as describe_id, page_title
+
+    page_id, title = describe_id(spec), page_title(spec)
+    store = state.runner.store
+    writing = next((r.id for r in store.runs(f"page/{name}", limit=5) if r.status.active), None)
+    url = lookup_confluence_page(state, page_id, title)
+    local = (generated_dir(state) / f"{page_id}.md").is_file()
+    if not url and not local and not writing:
+        return None
+    meta = {}
+    sidecar = generated_dir(state) / f"{page_id}.json"
+    if sidecar.is_file():
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            meta = {}
+    return {"id": page_id if local or url else None, "title": title, "url": url, "local": local,
+            "generated": local or bool(meta), "written": meta.get("written"), "model": meta.get("model"),
+            "run_id": meta.get("run_id"), "summary": meta.get("summary"), "writing": writing}
+
+
+def _migration_description(spec: Spec, page: dict | None) -> str:
+    if page and page.get("summary"):
+        return page["summary"]
+    return (f"Moves {spec.metadata.service} to {spec.target.provider.upper()} {spec.target.region}: "
+            f"{len(spec.steps)} steps across {len(spec.stages)} stages, {len(spec.approvals)} approval(s). "
+            "Rehearsed and undone before production.")
+
+
 @router.get("/migrations")
 def list_migrations(state: State = Depends(get_state)):
+    """Every migration the console shows: the migration.yaml files mirrored from mac-migrations
+    (plus the bundled examples), each with where it came from, its Confluence page, its design
+    page and its latest runs."""
     result = []
+    store = state.runner.store
     for name, (path, spec, problems) in _find(state).items():
-        item = {"name": name, "path": path.relative_to(state.migrations_dir).as_posix(), "problems": problems,
+        item = {"name": name, "path": f"{path.parent.name}/{path.name}", "problems": problems, "source": _file_source(state, path),
                 "valid": spec is not None and not any(p.startswith("error") for p in problems)}
         if spec is not None:
+            page = migration_page(state, name, spec)
+            design = store.design(name)
+            active = next((r for r in store.runs(name) if r.status.active), None)
             item |= {"service": spec.metadata.service, "owner_team": spec.metadata.owner_team,
-                     "stages": list(spec.stages), "latest": _latest(state, name)}
+                     "stages": list(spec.stages), "steps": len(spec.steps), "approvals": len(spec.approvals),
+                     "breakpoints": [s.id for s in spec.steps if s.when == "manual"],
+                     "target": spec.target.model_dump(mode="json", exclude={"rehearsal"}),
+                     "description": _migration_description(spec, page), "page": page,
+                     "design_page": {"url": design.url, "current": design.digest == spec.digest()} if design else None,
+                     "latest": _latest(state, name), "active_run": _summary(active)}
         result.append(item)
     return result
+
+
+@router.get("/migrations-source")
+def get_migrations_source(state: State = Depends(get_state)):
+    """Where the list comes from and when it was last mirrored."""
+    return migrations_source(state)
 
 
 @router.get("/migrations/{name}")
