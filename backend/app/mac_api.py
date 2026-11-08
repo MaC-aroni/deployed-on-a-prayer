@@ -76,14 +76,18 @@ def _default_state() -> State:
     pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mac-run")
     runner = make_runner(data_dir, submit=pool.submit)  # auto-fix's re-runs go through the same pool
     # MAC_MIGRATIONS_DIR set: read that folder, nothing else. Otherwise mirror the mac-migrations
-    # repo into the data dir (MAC_MIGRATIONS_SYNC_SECONDS=0 turns that off) with examples/ as backup.
+    # repo into the data dir (MAC_MIGRATIONS_SYNC_SECONDS=0 turns that off). What's merged there is
+    # the whole list: the bundled examples/ only join it with MAC_MIGRATIONS_FALLBACK=1 (local demos),
+    # because a bundled spec would also count as "already planned" for its service.
     explicit = os.environ.get("MAC_MIGRATIONS_DIR")
     repo = os.environ.get("MAC_MIGRATIONS_REPO", "MaC-aroni/mac-migrations").strip()
     seconds = int(os.environ.get("MAC_MIGRATIONS_SYNC_SECONDS", "60"))
     sync, fallback, migrations_dir = None, (), Path(explicit) if explicit else ROOT / "examples"
     if not explicit and repo and seconds > 0:
         sync = {"repo": repo, "branch": os.environ.get("MAC_MIGRATIONS_BRANCH", "main"), "seconds": seconds}
-        fallback, migrations_dir = (ROOT / "examples",), data_dir / "migrations"
+        migrations_dir = data_dir / "migrations"
+        if os.environ.get("MAC_MIGRATIONS_FALLBACK", "0").lower() in ("1", "true", "yes"):
+            fallback = (ROOT / "examples",)
     return State(
         runner=runner,
         migrations_dir=migrations_dir,

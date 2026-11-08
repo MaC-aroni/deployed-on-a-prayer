@@ -54,8 +54,9 @@ Then follow the run, either live with the stream (best) or by polling `GET /runs
 `migrations/<name>/migration.yaml` files of the **mac-migrations repo** (`MAC_MIGRATIONS_REPO`,
 default `MaC-aroni/mac-migrations`, branch `MAC_MIGRATIONS_BRANCH`), which the server mirrors
 into `MAC_DATA_DIR/migrations` every `MAC_MIGRATIONS_SYNC_SECONDS` (default 60; 0 turns the
-mirror off), plus the bundled `examples/` for any name the mirror doesn't have. Set
-`MAC_MIGRATIONS_DIR` to read one folder and nothing else.
+mirror off). What's merged there is the whole list; `MAC_MIGRATIONS_FALLBACK=1` adds the bundled
+`examples/` for names the mirror doesn't have (local demos). Set `MAC_MIGRATIONS_DIR` to read one
+folder and nothing else.
 ```json
 [{"name": "claims-adjudication-onprem-to-aws", "valid": true, "problems": [],
   "path": "claims-adjudication/migration.yaml",

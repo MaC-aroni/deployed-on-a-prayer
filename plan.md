@@ -39,7 +39,8 @@ differently**. Keep it short; link to the docs instead of repeating them.
   and every repo in the org. The cards come from `GET /api/mac/migrations`, which the server fills
   from the **mac-migrations repo**: it mirrors `migrations/*/migration.yaml` from `main` into
   `MAC_DATA_DIR/migrations` every 60 s (`MAC_MIGRATIONS_REPO`, `MAC_MIGRATIONS_BRANCH`,
-  `MAC_MIGRATIONS_SYNC_SECONDS`; the bundled `examples/` fill in for names the repo lacks).
+  `MAC_MIGRATIONS_SYNC_SECONDS`). The bundled `examples/` are **not** listed unless
+  `MAC_MIGRATIONS_FALLBACK=1` (local demos): in prod the page is empty until a migration is merged.
   `GET /api/mac/migrations-source` says when it last synced.
 - Each card has three attachments: the **Confluence page that describes the migration** (or a
   "Generate Confluence page" door), the **design review page** Build wrote, and the
@@ -56,8 +57,8 @@ differently**. Keep it short; link to the docs instead of repeating them.
 #### What you need to do
 - **Everyone:** a migration shows in the console once its `migration.yaml` is **merged into
   `MaC-aroni/mac-migrations`** under `migrations/<name>/`. The planner's "Plan a new migration"
-  opens such a PR. Until the demo spec is merged there, the console shows the bundled copy from
-  `examples/` (same content, same digest, so existing Builds and tickets still apply).
+  opens such a PR. The planner also treats a merged spec for a service as "already planned"
+  (it renders that instead of generating), so an empty repo means a fresh plan.
 - **Elathius (UI):** `src/pages/Migrate.jsx` was rewritten around `GET /migrations`; `/services`
   (knowledge-base services and org repos) still exists for the planner and Chat but no page lists
   repos any more. Describe runs are followed on `/agents/{id}` like Learn (title "Describe <name>").
