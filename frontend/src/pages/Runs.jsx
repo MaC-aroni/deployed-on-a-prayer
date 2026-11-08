@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { EmptyState } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
+import CancelButton from "../components/CancelButton.jsx";
 import { api, fmtAgo, fmtTime } from "../mac/api.js";
 import { SkeletonPage } from "../components/Skeleton.jsx";
 import { Link, navigate } from "../router.jsx";
@@ -15,6 +16,7 @@ const linkFor = runHref;
 export default function Runs() {
   const [runs, setRuns] = useState(null);
   const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0); // bumped after a row action so the list refreshes at once
 
   useEffect(() => {
     let alive = true;
@@ -29,7 +31,7 @@ export default function Runs() {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [tick]);
 
   if (error) return <EmptyState title="Backend unreachable" body={error.detail} />;
   if (!runs) return <SkeletonPage rows={6} cols={5} />;
@@ -47,6 +49,7 @@ export default function Runs() {
           <div>Reason</div>
           <div>Started</div>
           <div>Updated</div>
+          <div />
         </div>
         {runs.map((r) => {
           const m = runMeta(r.status, r.mode);
@@ -71,6 +74,7 @@ export default function Runs() {
                 {fmtTime(r.created)} <span className="muted">· {fmtAgo(r.created)}</span>
               </div>
               <div className="small">{fmtTime(r.updated)}</div>
+              <div className="cell-actions">{!AGENT_MODES.has(r.mode) && <CancelButton run={r} onDone={() => setTick((n) => n + 1)} />}</div>
             </button>
           );
         })}

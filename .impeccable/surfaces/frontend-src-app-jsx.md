@@ -2,7 +2,7 @@
 version: 1
 slug: "frontend-src-app-jsx"
 primary_target: "frontend/src/App.jsx"
-related_targets: ["frontend/src/styles.css","frontend/src/components/Shell.jsx","frontend/src/pages/Migrations.jsx"]
+related_targets: ["frontend/src/dial.css","frontend/src/components/Shell.jsx","frontend/src/pages/Migrations.jsx"]
 ---
 
 # Surface: the MaC console (every route under /)
@@ -19,12 +19,14 @@ THESIS: a migration console as a fine instrument you glance at and trust: silver
 one blued-steel accent and a trace of gilt on the single primary action. It refuses the
 category's dark-mode dashboard of glowing cards and the stacked hero-metric tiles.
 
-OWN-WORLD: silvered dial ground (#f5f4ef) with a faint sunburst, graphite ink (#1c1e24), muted
-(#5d6170), blued-steel accent (#2b4bb7) for selection, links and the running hand, gilt
-(#b89a5a) only on the primary action and the brand mark. One-device-pixel hairline rules replace
-surfaces; cards are flat, no shadows, no borders thicker than a hairline. Didone numerals
-(Bodoni Moda) for figures and headings, Albert Sans for UI text, JetBrains Mono for ids only.
-Generous space: 32px gutters, 72px row height, one headline per screen.
+OWN-WORLD: plain silvered ground (#ecebe7, no texture: the user asked for plain grounds in both
+themes), graphite ink (#1c1e24), muted (#5d6170), blued-steel accent (#2b4bb7) for selection,
+links and the running hand, gilt (#b89a5a) only on the primary action and the brand ring.
+One-device-pixel hairline rules replace surfaces; panels are transparent on the ground, no
+shadows, no borders thicker than a hairline. Didone numerals (Bodoni Moda) for figures and
+counts only; Source Serif 4 (500) for titles, since the Didone was hard to read at title sizes;
+Albert Sans for UI text; JetBrains Mono for ids only. Generous space: 32px gutters, rows at least 72px
+(a title line and up to two meta lines), one headline per screen. The night dial is the same ink logic inverted (#15161a).
 
 STORY: the engineer sees the state of every migration as a quiet instrument, finds the one next
 action, and trusts that the hand only moves when the runner does.

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Cloud, Search, Sparkles, Users, Wand2 } from "lucide-react";
 import { EmptyState, markPipelinesSeen } from "../components/Shell.jsx";
 import Gauge from "../components/Gauge.jsx";
+import CancelButton from "../components/CancelButton.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
 import { api, fmtAgo } from "../mac/api.js";
 import { SkeletonPage } from "../components/Skeleton.jsx";
@@ -36,6 +37,7 @@ function MiniRun({ mode, run }) {
 export default function Migrations() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const [tick, setTick] = useState(0); // bumped after a row action so the list refreshes at once
   const [q, setQ] = useState("");
 
   useEffect(() => {
@@ -57,7 +59,7 @@ export default function Migrations() {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [tick]);
 
   if (error) {
     return (
@@ -124,7 +126,7 @@ export default function Migrations() {
           return (
             <button type="button" className="tr row-btn" key={m.key} onClick={() => navigate(m.href)}>
               <div className="cell-status">
-                <Gauge size={44} active={Boolean(head && ACTIVE.has(head.status))} runStatus={head?.status ?? null} stages={(m.stages ?? []).map((name) => ({ name, status: head?.status === "succeeded" ? "succeeded" : "pending" }))} title={head ? `${MODE_LABEL[head.mode]} ${hm.label.toLowerCase()}` : "no runs yet"} />
+                <Gauge size={44} active={Boolean(head && ACTIVE.has(head.status))} runStatus={head?.status ?? null} stages={(m.stages ?? []).map((name) => ({ name, status: head?.status === "succeeded" ? "succeeded" : "pending" }))} title={head ? `${MODE_LABEL[head.mode]} ${hm.label.toLowerCase()}${head.failed_step ? ` at ${head.failed_step}` : ""}` : "no runs yet"} />
                 {m.valid === false ? (
                   <Pill tone="red">
                     <StatusIcon status="failed" size={14} /> Invalid spec
@@ -176,6 +178,7 @@ export default function Migrations() {
                 ))}
               </div>
               <div className="cell-actions">
+                <CancelButton run={m.active_run} onDone={() => setTick((n) => n + 1)} />
                 <span className="btn btn-ghost row-action">Open</span>
               </div>
             </button>

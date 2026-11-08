@@ -45,7 +45,7 @@ export default function Gauge({ stages = [], size = 56, active = false, tone = "
       <circle className="gauge-ring" cx={c} cy={c} r={r} />
       {stages.map((s, i) => {
         const [x1, y1] = polar(c, c, r, at(i));
-        const [x2, y2] = polar(c, c, r - (i === idx ? size * 0.16 : size * 0.1), at(i));
+        const [x2, y2] = polar(c, c, r - (i === idx ? size * 0.2 : size * 0.14), at(i));
         return <line key={s.name ?? i} className={cx("gauge-mark", `is-${s.status}`, { current: i === idx })} x1={x1} y1={y1} x2={x2} y2={y2} />;
       })}
       {idx >= 0 && (

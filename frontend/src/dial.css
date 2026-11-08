@@ -975,11 +975,11 @@ a {
 
 /* ---------- tables that fit their width ---------- */
 .migrations-table .tr {
-  grid-template-columns: 200px minmax(0, 1.5fr) 160px minmax(0, 1fr) 72px;
+  grid-template-columns: 200px minmax(0, 2fr) 170px minmax(0, 1fr) auto;
 }
 @media (max-width: 1400px) {
   .migrations-table .tr {
-    grid-template-columns: 190px minmax(0, 1fr) 170px 72px;
+    grid-template-columns: 190px minmax(0, 1fr) 170px auto;
   }
   .migrations-table .cell-stages,
   .migrations-table .th > div:nth-child(4) {
@@ -988,7 +988,7 @@ a {
 }
 @media (max-width: 1100px) {
   .migrations-table .tr {
-    grid-template-columns: 190px minmax(0, 1fr) 72px;
+    grid-template-columns: 190px minmax(0, 1fr) auto;
   }
   .migrations-table .cell-runs,
   .migrations-table .th > div:nth-child(3) {
@@ -1354,4 +1354,193 @@ h2,
   .toolbar .btn-primary {
     margin-left: 0;
   }
+}
+
+
+/* =====================================================================================
+   Second-pass fixes
+   ===================================================================================== */
+
+/* no filled panels on the ground: hairlines only */
+.card,
+.dag-frame,
+.table,
+.inspector,
+.report,
+.metrics,
+.chat-main,
+.knowledge-page,
+.fix-card,
+.endpoint-card {
+  background: transparent;
+}
+.inspector-main,
+.job-side {
+  background: transparent;
+}
+
+/* the rail's hints wrap instead of truncating */
+.nav-hint {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.25;
+}
+.nav-item {
+  height: auto;
+  min-height: 44px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.nav-item.primary {
+  min-height: 58px;
+}
+
+/* pipeline rows: 72px. Three runs on one line; meta wraps rather than truncates. */
+.migrations-table .cell-runs {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+}
+.migrations-table .cell-runs .mini {
+  white-space: nowrap;
+}
+.migrations-table .row-meta {
+  gap: 2px 12px;
+}
+.migrations-table .row-meta > span,
+.migrations-table .row-meta > a {
+  white-space: nowrap;
+}
+.migrations-table .row-meta > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.migrations-table .cell-title {
+  gap: 2px;
+}
+.migrations-table .row-title {
+  line-height: 1.2;
+}
+.tr {
+  padding: 12px 32px;
+}
+
+/* small gauges: marks you can see; a failed run with an unknown stage shows no hand */
+.gauge-mark,
+.gauge.run-failed .gauge-mark,
+.gauge.run-rollback_failed .gauge-mark {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+@media (min-resolution: 2dppx) {
+  .gauge-mark {
+    stroke-width: 1;
+  }
+}
+/* the list row says name, origin and owner; the file path lives on the pipeline page */
+.migrations-table .row-meta > span:last-child {
+  display: none;
+}
+.gauge.run-failed .gauge-hand,
+.gauge.run-rollback_failed .gauge-hand {
+  display: none;
+}
+.gauge.run-failed .gauge-ring,
+.gauge.run-rollback_failed .gauge-ring {
+  stroke-width: 1.5;
+}
+
+/* hints and captions that read on the ground, not just on a surface */
+:root,
+:root[data-theme="light"] {
+  --faint: #5f6478;
+}
+
+/* cancel from a row: the two-press button sits beside Open; the error reads below it */
+.all-runs .tr {
+  grid-template-columns: 170px minmax(0, 1fr) minmax(0, 1.3fr) 150px 100px auto;
+}
+@media (max-width: 1280px) {
+  .all-runs .tr {
+    grid-template-columns: 160px minmax(0, 1fr) minmax(0, 1fr) 110px auto;
+  }
+}
+.cell-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 72px;
+}
+.cancel-run {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.cancel-run .row-action {
+  opacity: 1;
+  color: var(--muted);
+}
+.cancel-run .row-action.btn-danger {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: transparent;
+}
+.cancel-run .row-action.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.cancel-run .row-action {
+  cursor: pointer;
+  user-select: none;
+}
+.cancel-error {
+  max-width: 220px;
+  text-align: right;
+  white-space: normal;
+}
+.sidebar-foot .env .avatar {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+}
+.row-btn:hover .cancel-run .row-action {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+.row-btn:hover .cancel-run .row-action.btn-danger {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+.all-runs .tr {
+  grid-template-columns: 170px minmax(0, 1.4fr) minmax(0, 1fr) 150px 100px auto;
+}
+.all-runs .row-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.cancel-run,
+.cancel-run .row-action {
+  pointer-events: auto;
+}
+/* the armed label is longer than "Cancel": a fixed width keeps the control in place */
+.cancel-run .row-action {
+  white-space: nowrap;
+  min-width: 140px;
+  justify-content: center;
 }
