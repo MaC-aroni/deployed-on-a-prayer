@@ -30,8 +30,10 @@ the run rules; the UI shows its answers instead of re-implementing them.
 
 - Repo: https://github.com/MaC-aroni/deployed-on-a-prayer (public, in the MaC-aroni org).
   Clone with `gh repo clone MaC-aroni/deployed-on-a-prayer`.
-- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. Only they can run Deploy
-  (Actions → Deploy → Run workflow on `main`); the list is in `.github/workflows/deploy.yml`.
+- Maintainers (repo admins): ob1-can-obi, Elathius, Zafeer-R. **Every merge to `main` deploys to
+  prod** (`.github/workflows/deploy.yml`); maintainers can also re-run it by hand (Actions → Deploy).
+  The deploy restarts the machine at once: runs in flight are cut off (pipelines are undone, agent
+  runs fail), so merge between runs.
 - PRs need no review: anyone with write access merges once CI passes.
 - Only ob1-can-obi has access to the Fly app, so API key values and Fly problems go to them.
 

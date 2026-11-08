@@ -19,7 +19,7 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
 | Demo pipeline | `migrations/claims-adjudication/migration.yaml` in `MaC-aroni/mac-migrations` (mirrored by the server; [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml) is the bundled copy): 8 steps, 4 repos, 3 approvals |
 | Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` on GitHub in `MaC-aroni`, protected and reviewed |
-| How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
+| How to ship | branch → PR → CI passes → merge (no review). **The merge deploys to Fly** |
 | Knowledge base | 16 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
 | Migrations repo | `MaC-aroni/mac-migrations`: every `migrations/<name>/migration.yaml` merged there is what the console shows (mirrored every 60 s); the Planner's PRs go there |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
@@ -32,6 +32,15 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Every merge to main deploys, without waiting (ob1-can-obi, with Claude Code)
+
+#### What changed
+- `.github/workflows/deploy.yml` runs on every push to `main` (and still by hand). The "wait for
+  running work" step is gone: the deploy restarts the machine at once.
+
+#### What you need to do
+- **Everyone:** merging is shipping. Don't merge while a Rehearse or Deploy is running in prod: it is
+  cut off and undone when the server comes back (agent runs are marked failed).
 ### 2026-11-08: Grok means grok-4.20 non-reasoning (ob1-can-obi, with Claude Code)
 
 #### What changed
