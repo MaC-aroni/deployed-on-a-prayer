@@ -1,4 +1,5 @@
 import "./styles.css";
+import "./dial.css";
 import Shell, { EmptyState } from "./components/Shell.jsx";
 import Agents from "./pages/Agents.jsx";
 import Chat from "./pages/Chat.jsx";

@@ -285,9 +285,18 @@ export default function Shell({ crumbs = [], actions, children }) {
               {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
               <span>{theme === "light" ? "Dark theme" : "Light theme"}</span>
             </button>
-            <div className="env">
-              <span className="env-dot" />
-              <span>Prayerwell Health · AWS</span>
+            <div className="env" title={me?.login ? `Signed in as @${me.login}` : "Running locally without sign-in"}>
+              {me?.login ? (
+                <>
+                  <span className="avatar">{me.login[0].toUpperCase()}</span>
+                  <span>@{me.login}</span>
+                </>
+              ) : (
+                <>
+                  <span className="env-dot" />
+                  <span>Local session</span>
+                </>
+              )}
             </div>
           </div>
         </aside>

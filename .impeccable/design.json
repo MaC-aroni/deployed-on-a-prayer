@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-08T00:00:00Z",
+  "title": "Design System: MaC · Migration as Code",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Silvered Ground",
+        "canonical": "#ecebe7",
+        "tonalRamp": ["oklch(18% 0.004 90)", "oklch(30% 0.005 90)", "oklch(44% 0.006 90)", "oklch(58% 0.007 90)", "oklch(72% 0.007 90)", "oklch(84% 0.006 90)", "oklch(93.5% 0.005 90)", "oklch(97.5% 0.003 90)"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#f6f5f2",
+        "tonalRamp": ["oklch(18% 0.003 85)", "oklch(30% 0.004 85)", "oklch(44% 0.005 85)", "oklch(58% 0.005 85)", "oklch(72% 0.005 85)", "oklch(84% 0.005 85)", "oklch(96.8% 0.004 85)", "oklch(98.5% 0.002 85)"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Graphite Ink",
+        "canonical": "#1c1e24",
+        "tonalRamp": ["oklch(15% 0.008 275)", "oklch(22% 0.012 275)", "oklch(32% 0.014 275)", "oklch(45% 0.014 275)", "oklch(58% 0.013 275)", "oklch(72% 0.011 275)", "oklch(86% 0.007 275)", "oklch(95% 0.003 275)"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#5d6170",
+        "tonalRamp": ["oklch(16% 0.010 275)", "oklch(26% 0.014 275)", "oklch(36% 0.018 275)", "oklch(48% 0.020 275)", "oklch(60% 0.018 275)", "oklch(73% 0.014 275)", "oklch(86% 0.008 275)", "oklch(95% 0.004 275)"]
+      },
+      "faint": {
+        "role": "neutral",
+        "displayName": "Faint",
+        "canonical": "#5f6478"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgba(28, 30, 36, 0.12)"
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "rgba(28, 30, 36, 0.22)"
+      },
+      "ink-wash": {
+        "role": "neutral",
+        "displayName": "Ink Wash (hover)",
+        "canonical": "rgba(28, 30, 36, 0.035)"
+      },
+      "selection-wash": {
+        "role": "neutral",
+        "displayName": "Selection Wash",
+        "canonical": "#e6e3f3"
+      },
+      "blued-steel": {
+        "role": "primary",
+        "displayName": "Blued Steel",
+        "canonical": "#2b4bb7",
+        "tonalRamp": ["oklch(18% 0.08 268)", "oklch(28% 0.13 268)", "oklch(38% 0.17 268)", "oklch(44% 0.17 268)", "oklch(56% 0.15 268)", "oklch(70% 0.11 268)", "oklch(84% 0.06 268)", "oklch(95% 0.02 268)"]
+      },
+      "gilt": {
+        "role": "secondary",
+        "displayName": "Gilt",
+        "canonical": "#b89a5a",
+        "tonalRamp": ["oklch(18% 0.03 85)", "oklch(30% 0.06 85)", "oklch(44% 0.09 85)", "oklch(58% 0.10 85)", "oklch(69% 0.09 85)", "oklch(80% 0.07 85)", "oklch(90% 0.04 85)", "oklch(96% 0.02 85)"]
+      },
+      "gilt-deep": {
+        "role": "secondary",
+        "displayName": "Gilt Deep",
+        "canonical": "#9a7d3f"
+      },
+      "bad": {
+        "role": "status",
+        "displayName": "Failed Red",
+        "canonical": "#b3263f",
+        "tonalRamp": ["oklch(18% 0.07 14)", "oklch(30% 0.12 14)", "oklch(42% 0.17 14)", "oklch(50% 0.18 14)", "oklch(62% 0.15 14)", "oklch(74% 0.10 14)", "oklch(86% 0.06 14)", "oklch(95% 0.02 14)"]
+      },
+      "warn": {
+        "role": "status",
+        "displayName": "Breakpoint Amber",
+        "canonical": "#b7791f",
+        "tonalRamp": ["oklch(18% 0.04 70)", "oklch(30% 0.08 70)", "oklch(44% 0.12 70)", "oklch(60% 0.14 70)", "oklch(70% 0.12 70)", "oklch(80% 0.09 70)", "oklch(90% 0.05 70)", "oklch(96% 0.02 70)"]
+      },
+      "log-ground": { "role": "neutral", "displayName": "Log Ground", "canonical": "#1c1e24" },
+      "log-ink": { "role": "neutral", "displayName": "Log Ink", "canonical": "#e6e4dc" },
+      "night-ground": { "role": "neutral", "displayName": "Night Ground", "canonical": "#15161a" },
+      "night-surface": { "role": "neutral", "displayName": "Night Surface", "canonical": "#1b1c21" },
+      "night-ink": { "role": "neutral", "displayName": "Night Ink", "canonical": "#ebe9e2" },
+      "night-muted": { "role": "neutral", "displayName": "Night Muted", "canonical": "#a1a4b0" },
+      "night-faint": { "role": "neutral", "displayName": "Night Faint", "canonical": "#868b9b" },
+      "night-blued-steel": { "role": "primary", "displayName": "Night Blued Steel", "canonical": "#8fa6ff" },
+      "night-gilt": { "role": "secondary", "displayName": "Night Gilt", "canonical": "#c9ad6c" },
+      "night-bad": { "role": "status", "displayName": "Night Failed Red", "canonical": "#e2667c" },
+      "night-warn": { "role": "status", "displayName": "Night Amber", "canonical": "#e0a84a" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Bodoni Moda)", "purpose": "Figures only: metric values at 48px; nav, tab and column counts at 14px. Never a word." },
+      "headline": { "displayName": "Headline (Source Serif 4)", "purpose": "The one page title per screen, 36px; 30px run header; 32px under 820px." },
+      "title": { "displayName": "Title (Source Serif 4)", "purpose": "Row titles, card heads, brand word, metric noun (20px), inspector h2." },
+      "body": { "displayName": "Body (Albert Sans)", "purpose": "Everything operated: nav items, buttons, node names, row titles outside the pipelines table." },
+      "meta": { "displayName": "Meta (Albert Sans)", "purpose": "Row and run meta, metric captions, crumbs, node subtitles." },
+      "label": { "displayName": "Label (Albert Sans, tracked caps)", "purpose": "Table heads, column heads, nav section names, live-state word." },
+      "stage": { "displayName": "Stage (Albert Sans small caps)", "purpose": "Bare uppercase stage names in rows: no border, fill or padding." },
+      "mono": { "displayName": "Mono (JetBrains Mono)", "purpose": "Ids, commit refs, repository names, logs; run id inside the run header at 0.72em." }
+    },
+    "fonts": {
+      "googleFontsHref": "https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;600&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap",
+      "cssVariables": { "--font": "Albert Sans", "--display": "Bodoni Moda", "--title": "Source Serif 4", "--mono": "JetBrains Mono" }
+    },
+    "shadows": [],
+    "shadowPolicy": "None. --shadow and --inset are none; every base-sheet box-shadow is cancelled. The only remaining box-shadow values are 1px inset rings standing in for borders on circles, the 1px inset underline on the active tab, and the 1px gilt ring outside the primary button.",
+    "motion": [
+      { "name": "t", "value": "180ms cubic-bezier(0.2, 0.7, 0.2, 1)", "purpose": "Background, border and colour settle on rows, nodes, nav items and buttons." },
+      { "name": "gauge-hand", "value": "transform 600ms cubic-bezier(0.2, 0.8, 0.2, 1)", "purpose": "The hand turns to the current stage when the runner moves." },
+      { "name": "gauge-sweep", "value": "sweep 6s linear infinite (opacity 0.9)", "purpose": "The gilt seconds hand while a run is active; the one authored moment. Removed under prefers-reduced-motion." },
+      { "name": "entrances", "value": "none", "purpose": "Every entrance animation from the base sheet (tab panels, cards, toasts, inspector, probes, review bar, gate, status dots) is cancelled." }
+    ],
+    "breakpoints": [
+      { "name": "pipelines-drop-stages", "value": "1400px" },
+      { "name": "runs-drop-column-5", "value": "1280px" },
+      { "name": "pipelines-drop-runs", "value": "1100px" },
+      { "name": "stack", "value": "820px" }
+    ],
+    "layout": {
+      "sidebarWidth": "288px",
+      "sidebarCollapsed": "64px",
+      "topbarHeight": "56px",
+      "contentPadding": "8px 48px 72px",
+      "contentPaddingNarrow": "8px 20px 48px",
+      "contentMaxWidth": "1560px",
+      "rowMinHeight": "72px",
+      "rowPadding": "12px 32px",
+      "statementGrid": "repeat(auto-fit, minmax(240px, 1fr)) / gap 0 48px / padding 22px 0 20px",
+      "dagColumn": "272px / gap 52px / node 76px",
+      "inspectorGrid": "minmax(0, 1fr) 340px"
+    },
+    "browser": {
+      "selection": "background: var(--gilt-soft)",
+      "caret": "caret-color: var(--accent)",
+      "focusVisible": "outline: 1px solid var(--accent); outline-offset: 3px; border-radius: 1px",
+      "focusVisibleControls": "outline-offset: -1px on .btn, .row-btn, .nav-item, .tab",
+      "denseDisplays": "@media (min-resolution: 2dppx): borders 0.5px; gauge ring/marks 0.75 (current/failed 1.25); edges 0.75"
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action per screen: ink fill, 1px gilt ring, gilt icon.",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72\"/><path d=\"m14 7 3 3\"/><path d=\"M5 6v4\"/><path d=\"M19 14v4\"/><path d=\"M10 2v2\"/><path d=\"M7 8H3\"/><path d=\"M21 16h-4\"/><path d=\"M11 3H9\"/></svg>Migrate a service</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 2px; font: 500 14px/1 'Albert Sans', system-ui, sans-serif; letter-spacing: 0.01em; color: var(--fg, #1c1e24); background: transparent; border: 1px solid var(--line-strong, rgba(28,30,36,0.22)); cursor: pointer; transition: background 180ms cubic-bezier(0.2,0.7,0.2,1), border-color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-btn-primary { background: var(--fg, #1c1e24); color: var(--bg, #ecebe7); border-color: var(--bg, #ecebe7); box-shadow: 0 0 0 1px var(--gilt, #b89a5a); } .ds-btn-primary svg { color: var(--gilt, #b89a5a); } .ds-btn-primary:hover { background: #2a2d36; } .ds-btn:focus-visible { outline: 1px solid var(--accent, #2b4bb7); outline-offset: -1px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "The default button: ink on a hairline-strong outline; ink wash and ink border on hover.",
+      "html": "<button class=\"ds-btn ds-btn-ghost\">Open</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 2px; font: 500 14px/1 'Albert Sans', system-ui, sans-serif; letter-spacing: 0.01em; color: var(--fg, #1c1e24); background: transparent; border: 1px solid var(--line-strong, rgba(28,30,36,0.22)); cursor: pointer; transition: background 180ms cubic-bezier(0.2,0.7,0.2,1), border-color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-btn-ghost:hover { background: var(--surface-3, rgba(28,30,36,0.035)); border-color: var(--fg, #1c1e24); } .ds-btn:focus-visible { outline: 1px solid var(--accent, #2b4bb7); outline-offset: -1px; }"
+    },
+    {
+      "name": "Two-press Cancel (rest and armed)",
+      "kind": "button",
+      "refersTo": "cancel-run",
+      "description": "Row-level cancel: a 140px span with role=button; first press arms it red as 'Stop and undo?', second press sends.",
+      "html": "<span class=\"ds-cancel-run\"><span role=\"button\" tabindex=\"0\" class=\"ds-btn ds-row-action\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m15 9-6 6\"/><path d=\"M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z\"/><path d=\"m9 9 6 6\"/></svg>Cancel</span></span> <span class=\"ds-cancel-run\"><span role=\"button\" tabindex=\"0\" aria-pressed=\"true\" class=\"ds-btn ds-row-action ds-armed\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m15 9-6 6\"/><path d=\"M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z\"/><path d=\"m9 9 6 6\"/></svg>Stop and undo?</span></span>",
+      "css": ".ds-cancel-run { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; width: 140px; } .ds-btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 2px; font: 500 13px/1 'Albert Sans', system-ui, sans-serif; letter-spacing: 0.01em; background: transparent; cursor: pointer; user-select: none; transition: color 180ms, border-color 180ms; } .ds-row-action { height: 34px; width: 140px; min-width: 140px; padding: 0; justify-content: center; white-space: nowrap; color: var(--muted, #5d6170); border: 1px solid var(--line, rgba(28,30,36,0.12)); } .ds-row-action:hover { color: var(--fg, #1c1e24); border-color: var(--line-strong, rgba(28,30,36,0.22)); } .ds-row-action.ds-armed, .ds-row-action.ds-armed:hover { color: var(--bad, #b3263f); border-color: var(--bad, #b3263f); } .ds-row-action:focus-visible { outline: 1px solid var(--accent, #2b4bb7); outline-offset: -1px; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Hairline outline with a tone border and text; never filled. The 'green' tone is blued steel.",
+      "html": "<span class=\"ds-pill ds-pill-bad\">Build failed</span> <span class=\"ds-pill ds-pill-steel\">running</span> <span class=\"ds-pill ds-pill-warn\">waiting</span> <span class=\"ds-pill ds-pill-ok\">succeeded</span> <span class=\"ds-pill ds-pill-grey\">undone</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 1px; border: 1px solid var(--line-strong, rgba(28,30,36,0.22)); background: transparent; color: var(--fg, #1c1e24); font: 500 11.5px/1.3 'Albert Sans', system-ui, sans-serif; letter-spacing: 0.04em; } .ds-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; } .ds-pill-bad { border-color: var(--bad, #b3263f); color: var(--bad, #b3263f); } .ds-pill-warn { border-color: var(--warn, #b7791f); color: var(--warn, #b7791f); } .ds-pill-steel { border-color: var(--accent, #2b4bb7); color: var(--accent, #2b4bb7); } .ds-pill-ok { border-color: var(--accent-2, #2b4bb7); color: var(--fg, #1c1e24); } .ds-pill-grey { border-color: var(--line, rgba(28,30,36,0.12)); color: var(--muted, #5d6170); }"
+    },
+    {
+      "name": "Stage Chips",
+      "kind": "chip",
+      "refersTo": "stage-chip",
+      "description": "Stages as bare small caps: 10.5px uppercase sans, 0.1em, muted, no chrome; wraps in 4px 14px gaps.",
+      "html": "<div class=\"ds-stages\"><span class=\"ds-stage\">check</span><span class=\"ds-stage\">infrastructure</span><span class=\"ds-stage\">data</span><span class=\"ds-stage\">release</span><span class=\"ds-stage\">access</span><span class=\"ds-stage\">verify</span></div>",
+      "css": ".ds-stages { display: flex; flex-wrap: wrap; gap: 4px 14px; max-width: 200px; } .ds-stage { font: 500 10.5px/1.4 'Albert Sans', system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted, #5d6170); background: transparent; border: 0; padding: 0; }"
+    },
+    {
+      "name": "Rail Item (rest and active)",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Sidebar item: 44px minimum, muted with a faint wrapping hint; active is ink text with a 1px gilt rule on the left and a Bodoni count ring.",
+      "html": "<nav class=\"ds-rail\"><div class=\"ds-nav-section\">Build</div><a class=\"ds-nav-item\" href=\"#\"><span class=\"ds-nav-text\"><span>Migration</span><span class=\"ds-nav-hint\">the migration.yaml files in mac-migrations</span></span></a><a class=\"ds-nav-item ds-active\" href=\"#\"><span class=\"ds-nav-text\"><span>Pipelines</span><span class=\"ds-nav-hint\">generated by migrations</span></span><span class=\"ds-nav-count\">1</span></a></nav>",
+      "css": ".ds-rail { width: 248px; display: flex; flex-direction: column; font-family: 'Albert Sans', system-ui, sans-serif; } .ds-nav-section { padding: 22px 10px 10px; font-size: 11px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted, #5d6170); } .ds-nav-item { position: relative; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 10px; border-radius: 1px; color: var(--muted, #5d6170); font-size: 14px; font-weight: 500; text-decoration: none; transition: background 180ms cubic-bezier(0.2,0.7,0.2,1), color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-nav-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; } .ds-nav-hint { font-size: 12px; font-weight: 400; color: var(--faint, #5f6478); line-height: 1.25; white-space: normal; } .ds-nav-item:hover { background: var(--surface-3, rgba(28,30,36,0.035)); color: var(--fg, #1c1e24); } .ds-nav-item.ds-active { color: var(--fg, #1c1e24); background: transparent; } .ds-nav-item.ds-active::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--gilt, #b89a5a); } .ds-nav-count { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line-strong, rgba(28,30,36,0.22)); font: 500 14px/1 'Bodoni Moda', Didot, Georgia, serif; color: var(--fg, #1c1e24); } .ds-nav-item:focus-visible { outline: 1px solid var(--accent, #2b4bb7); outline-offset: -1px; }"
+    },
+    {
+      "name": "Statement Metric",
+      "kind": "custom",
+      "refersTo": "metric",
+      "description": "Figure and noun on one baseline inside a ruled row; no tiles, fills or dividers.",
+      "html": "<div class=\"ds-statement\"><div class=\"ds-metric\"><span class=\"ds-metric-value\">1</span><span class=\"ds-metric-label\">Pipelines</span><span class=\"ds-metric-sub\">1 reviewed · 0 planned by Nemotron</span></div><div class=\"ds-metric\"><span class=\"ds-metric-value\">0</span><span class=\"ds-metric-label\">Active runs</span><span class=\"ds-metric-sub\">Build, Rehearse or Deploy in progress</span></div></div>",
+      "css": ".ds-statement { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 48px; padding: 22px 0 20px; border-top: 1px solid var(--line-strong, rgba(28,30,36,0.22)); border-bottom: 1px solid var(--line, rgba(28,30,36,0.12)); } .ds-metric { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 6px 0; } .ds-metric-value { font: 400 48px/0.95 'Bodoni Moda', Didot, Georgia, serif; letter-spacing: -0.01em; font-feature-settings: 'lnum', 'tnum'; color: var(--fg, #1c1e24); } .ds-metric-label { font: 500 20px/1.2 'Source Serif 4', Georgia, serif; letter-spacing: -0.012em; color: var(--fg, #1c1e24); } .ds-metric-sub { flex-basis: 100%; margin-top: 2px; font: 400 12.5px/1.4 'Albert Sans', system-ui, sans-serif; color: var(--muted, #5d6170); }"
+    },
+    {
+      "name": "Table Row",
+      "kind": "card",
+      "refersTo": "table-row",
+      "description": "A ruled 72px row: hairline on top, ink wash on hover, title plus meta, no box.",
+      "html": "<div class=\"ds-table\"><div class=\"ds-tr ds-th\"><div>Status</div><div>Pipeline</div><div></div></div><div class=\"ds-tr\"><div><span class=\"ds-pill ds-pill-bad\">Build failed</span></div><div class=\"ds-cell-title\"><span class=\"ds-row-title\">ClaimsAdjudicationService</span><span class=\"ds-row-meta\"><span>reviewed</span><span class=\"ds-mono\">claims-adjudication-onprem-to-aws</span><span>claims-platform</span></span></div><div><button class=\"ds-btn ds-btn-ghost\">Open</button></div></div></div>",
+      "css": ".ds-table { border: 1px solid var(--line, rgba(28,30,36,0.12)); border-radius: 2px; background: transparent; font-family: 'Albert Sans', system-ui, sans-serif; } .ds-tr { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; align-items: center; gap: 28px; min-height: 72px; padding: 12px 32px; border-top: 1px solid var(--line, rgba(28,30,36,0.12)); transition: background 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-tr.ds-th { border-top: 0; min-height: 0; padding: 18px 32px 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted, #5d6170); } .ds-tr:not(.ds-th):hover { background: var(--surface-3, rgba(28,30,36,0.035)); } .ds-cell-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .ds-row-title { font: 500 18px/1.2 'Source Serif 4', Georgia, serif; letter-spacing: -0.012em; color: var(--fg, #1c1e24); } .ds-row-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12.5px; color: var(--muted, #5d6170); } .ds-mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; } .ds-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 1px; border: 1px solid var(--bad, #b3263f); color: var(--bad, #b3263f); font-size: 11.5px; letter-spacing: 0.04em; font-weight: 500; } .ds-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; } .ds-btn { display: inline-flex; align-items: center; height: 38px; padding: 0 16px; border-radius: 2px; font: 500 14px/1 'Albert Sans', system-ui, sans-serif; color: var(--fg, #1c1e24); background: transparent; border: 1px solid var(--line-strong, rgba(28,30,36,0.22)); cursor: pointer; } .ds-btn:hover { background: var(--surface-3, rgba(28,30,36,0.035)); border-color: var(--fg, #1c1e24); }"
+    },
+    {
+      "name": "DAG Node",
+      "kind": "card",
+      "refersTo": "dag-node",
+      "description": "A 76px hairline-strong card in the pipeline graph; steel when selected or running, amber left rule at a breakpoint, red when broke.",
+      "html": "<div class=\"ds-nodes\"><div class=\"ds-node\"><div class=\"ds-node-name\">provision_network</div><div class=\"ds-node-sub\">iac · terraform apply</div></div><div class=\"ds-node ds-selected\"><div class=\"ds-node-name\">db_migrate</div><div class=\"ds-node-sub\">db_migration · breakpoint</div></div><div class=\"ds-node ds-broke\"><div class=\"ds-node-name\">smoke_test</div><div class=\"ds-node-sub\">check · failed</div></div></div>",
+      "css": ".ds-nodes { display: flex; flex-direction: column; gap: 16px; width: 272px; font-family: 'Albert Sans', system-ui, sans-serif; } .ds-node { box-sizing: border-box; height: 76px; padding: 14px 16px; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: transparent; border: 1px solid var(--line-strong, rgba(28,30,36,0.22)); border-radius: 2px; cursor: pointer; transition: border-color 180ms cubic-bezier(0.2,0.7,0.2,1), background 180ms cubic-bezier(0.2,0.7,0.2,1), opacity 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-node:hover { background: var(--surface-3, rgba(28,30,36,0.035)); border-color: var(--fg, #1c1e24); } .ds-node.ds-selected { border-color: var(--accent, #2b4bb7); background: var(--accent-soft, rgba(43,75,183,0.1)); } .ds-node.ds-breakpoint { border-left: 1px solid var(--warn, #b7791f); } .ds-node.ds-broke { border-color: var(--bad, #b3263f); } .ds-node-name { font-size: 15px; font-weight: 500; color: var(--fg, #1c1e24); } .ds-node-sub { font-size: 12px; color: var(--muted, #5d6170); }"
+    },
+    {
+      "name": "Filter Input",
+      "kind": "input",
+      "refersTo": "filter",
+      "description": "Transparent hairline field, 40px; the border turns steel on focus, no glow.",
+      "html": "<label class=\"ds-filter\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input class=\"ds-filter-input\" placeholder=\"Filter pipelines\" /></label>",
+      "css": ".ds-filter { display: flex; align-items: center; gap: 10px; height: 40px; max-width: 440px; padding: 0 14px; border: 1px solid var(--line, rgba(28,30,36,0.12)); border-radius: 2px; background: transparent; color: var(--muted, #5d6170); transition: border-color 180ms cubic-bezier(0.2,0.7,0.2,1); } .ds-filter:focus-within { border-color: var(--accent, #2b4bb7); box-shadow: none; } .ds-filter-input { flex: 1; border: 0; outline: 0; background: transparent; font: 400 14px/1 'Albert Sans', system-ui, sans-serif; color: var(--fg, #1c1e24); caret-color: var(--accent, #2b4bb7); } .ds-filter-input::placeholder { color: var(--muted, #5d6170); } .ds-filter-input::selection { background: var(--gilt-soft, rgba(184,154,90,0.16)); }"
+    },
+    {
+      "name": "Stage Gauge",
+      "kind": "custom",
+      "refersTo": "gauge",
+      "description": "The signature: a 300° ring with one index mark per stage, a blued hand at the current stage and a gilt seconds hand sweeping every 6s while the run is active.",
+      "html": "<svg class=\"ds-gauge ds-active\" width=\"56\" height=\"56\" viewBox=\"0 0 56 56\" role=\"img\" aria-label=\"data · running\"><title>data · running</title><circle class=\"ds-gauge-ring\" cx=\"28\" cy=\"28\" r=\"25\"/><line class=\"ds-gauge-mark ds-is-succeeded\" x1=\"15.5\" y1=\"6.35\" x2=\"19.42\" y2=\"13.14\"/><line class=\"ds-gauge-mark ds-is-succeeded\" x1=\"3.16\" y1=\"23.66\" x2=\"10.88\" y2=\"25.02\"/><line class=\"ds-gauge-mark ds-current\" x1=\"6.42\" y1=\"44.6\" x2=\"14.6\" y2=\"38.36\"/><line class=\"ds-gauge-mark\" x1=\"49.58\" y1=\"44.6\" x2=\"41.4\" y2=\"38.36\"/><line class=\"ds-gauge-mark\" x1=\"52.84\" y1=\"23.66\" x2=\"45.12\" y2=\"25.02\"/><line class=\"ds-gauge-mark\" x1=\"40.5\" y1=\"6.35\" x2=\"36.58\" y2=\"13.14\"/><g class=\"ds-gauge-hand\" style=\"transform: rotate(-30deg); transform-origin: 28px 28px;\"><line x1=\"28\" y1=\"32.48\" x2=\"28\" y2=\"14.2\"/><circle cx=\"28\" cy=\"28\" r=\"2.52\"/></g><g class=\"ds-gauge-sweep\" style=\"transform-origin: 28px 28px;\"><line x1=\"28\" y1=\"28\" x2=\"28\" y2=\"18.68\"/></g></svg>",
+      "css": ".ds-gauge { display: block; color: var(--fg, #1c1e24); } .ds-gauge-ring { fill: var(--surface, #f6f5f2); stroke: var(--line-strong, rgba(28,30,36,0.22)); stroke-width: 1; } .ds-gauge-mark { stroke: var(--muted, #5d6170); stroke-width: 1; stroke-linecap: butt; } .ds-gauge-mark.ds-is-succeeded { stroke: var(--fg, #1c1e24); } .ds-gauge-mark.ds-is-failed { stroke: var(--bad, #b3263f); stroke-width: 2; } .ds-gauge-mark.ds-current { stroke: var(--accent, #2b4bb7); stroke-width: 1.5; } .ds-gauge-hand line { stroke: var(--accent, #2b4bb7); stroke-width: 1.5; stroke-linecap: round; } .ds-gauge-hand circle { fill: var(--accent, #2b4bb7); } .ds-gauge-hand { transition: transform 600ms cubic-bezier(0.2, 0.8, 0.2, 1); } .ds-gauge-sweep line { stroke: var(--gilt, #b89a5a); stroke-width: 1; stroke-linecap: round; } .ds-gauge-sweep { animation: ds-sweep 6s linear infinite; opacity: 0.9; } @keyframes ds-sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { .ds-gauge-sweep { animation: none; } } @media (min-resolution: 2dppx) { .ds-gauge-ring, .ds-gauge-mark { stroke-width: 0.75; } .ds-gauge-mark.ds-current, .ds-gauge-mark.ds-is-failed { stroke-width: 1.25; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Haute-Horlogerie Dial",
+    "overview": "The console is a fine instrument you glance at and trust. A plain silvered ground carries graphite ink, hairline rules at one device pixel, and nothing else: no filled panels, no shadows, no texture. One blued-steel accent does every job that means \"live\" (the running hand, the selected row, the link, the focused field), and a trace of gilt sits on the single primary action, the brand ring and the active mark on the rail. The dark theme is the same ink logic inverted onto a graphite ground (the night dial); gilt and steel lighten, nothing else changes.\n\nType divides by job. A Didone (Bodoni Moda) sets figures only: metric values, counts, tallies. A sturdy serif (Source Serif 4 at 500) sets every word that is a title. A humanist sans (Albert Sans) sets everything you operate, and JetBrains Mono sets identifiers. Density is generous: 32px row gutters, rows of at least 72px (a title line and up to two meta lines), one headline per screen, and a statement row of figures where a dashboard would have put tiles.\n\nMotion is almost absent on purpose. Every entrance animation the base sheet owned is cancelled. The one authored moment is the stage gauge: its hand turns in 600ms when the runner moves, and a thin gilt seconds hand sweeps once every six seconds while a run is active. Hover and colour changes settle in 180ms.",
+    "keyCharacteristics": [
+      "Hairlines instead of surfaces; panels are transparent on the ground.",
+      "One gilt primary action per screen; everything else is ink on hairline.",
+      "Bodoni Moda for figures only; Source Serif 4 for titles; Albert Sans for UI; JetBrains Mono for ids.",
+      "Stable state colours: blued steel = active/selected/link, ink = succeeded, red = failed, faint = cancelled/undone/skipped, amber = breakpoint/awaiting review.",
+      "One authored motion (the gauge hand and sweep); the rest settles in 180ms or does not move.",
+      "Generous rhythm: 72px rows, 32px gutters, a 288px rail, one headline per screen."
+    ],
+    "rules": [
+      { "name": "The One Gilt Rule", "body": "Gilt appears on the single primary action, the brand and agent rings, the active rail mark, the sweep and the selection highlight. It is never a surface and never a fill, except the `new` count.", "section": "colors" },
+      { "name": "The Stable Meaning Rule", "body": "Blued steel means active, selected or a link; ink means succeeded; red means failed; faint means cancelled, undone or skipped; amber means a breakpoint or a pending review. A colour never changes meaning between the gauge, the pill, the node and the edge.", "section": "colors" },
+      { "name": "The Night Inversion Rule", "body": "The dark theme inverts the ink logic onto `night-ground`; steel lifts to `night-blued-steel`, gilt to `night-gilt`, red to `night-bad`. Hairline alphas move to white. No other rule changes between themes.", "section": "colors" },
+      { "name": "The Figures-Only Didone Rule", "body": "Bodoni Moda sets numbers and never a word. If a string contains letters it is set in Source Serif 4 or Albert Sans.", "section": "typography" },
+      { "name": "The One Headline Rule", "body": "One 36px headline per screen. Everything else on the page is title size (18–20px) or smaller.", "section": "typography" },
+      { "name": "The Small-Caps Stage Rule", "body": "Stage names are bare uppercase sans at 10.5px with 0.1em tracking, muted, with no border, fill or padding. They read as engraving, not as chips.", "section": "typography" },
+      { "name": "The Hairline Rule", "body": "A rule is one device pixel: 1px, 0.5px at 2dppx. Nothing is thicker; the only 2px stroke in the system is a failed gauge mark.", "section": "elevation" },
+      { "name": "The Transparent Panel Rule", "body": "Cards, frames, tables, the inspector, the metrics row, the chat main and the knowledge page have no background. They are hairline outlines on the ground.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do draw every rule as a hairline: 1px, 0.5px at 2dppx, in `hairline` or `hairline-strong`.",
+      "Do keep panels transparent on the ground; outline them, never fill them.",
+      "Do set figures in Bodoni Moda and words in Source Serif 4 (titles) or Albert Sans (UI).",
+      "Do give each screen one primary action: an ink fill with a 1px gilt ring and a gilt icon.",
+      "Do keep table rows at 72px or taller, padded 12px 32px, with a title line and up to two meta lines.",
+      "Do present page figures as one ruled statement, figure and noun on one baseline, stacked with rules between under 820px.",
+      "Do use the stage gauge wherever a run's progress is shown: large in the run header, small in every row.",
+      "Do keep state colours stable across gauge, pill, node and edge."
+    ],
+    "donts": [
+      "Don't add shadows, glows or entrance animations; nothing moves but the gauge hand and sweep.",
+      "Don't fill pills or chips; status is an outline and stages are bare small caps.",
+      "Don't set a word in Bodoni Moda or a headline larger than 36px.",
+      "Don't thicken a border past a hairline; the only 2px stroke is a failed gauge mark.",
+      "Don't reintroduce the sunburst or any ground texture; both themes are plain.",
+      "Don't use gilt as a surface or on anything but the primary action, the brand and agent rings, the active rail mark and the sweep.",
+      "Don't introduce a green; the \"ok\" tone is blued steel."
+    ]
+  },
+  "gaps": [
+    "No capture of the signed-in footer (18px ink avatar initial + @login); recorded from Shell.jsx and dial.css only.",
+    "desktop.jpg shows the active rail item on a pale lavender fill, while dial.css declares the active item transparent with a 1px gilt left rule; the CSS is recorded, the capture's fill is flagged as drift."
+  ]
+}
