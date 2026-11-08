@@ -178,7 +178,8 @@ didn't finish; needs a person) · `undone`. `active` is true for the first three
 |---|---|
 | `POST /api/mac/runs/{id}/steps/{step}/play` | that step's state is `waiting` (the ▶ button) |
 | `POST /api/mac/runs/{id}/resume` | the run is `waiting` on an approval (checks Jira again). Rarely needed now: the server does this itself when Jira changes |
-| `POST /api/mac/runs/{id}/undo` | the run is `waiting`, or a Deploy that `succeeded` |
+| `POST /api/mac/runs/{id}/undo` | the run is `waiting`, a Deploy that `succeeded`, or any run that ended `rollback_failed` (retries only what wasn't undone) |
+| `GET /api/mac/runs/{id}/report.md` | the AI's Markdown report (Report and Auto-fix modes); 404 when there is none. The run view's `ai_report` says whether one exists |
 
 ### Logs and the live stream
 
@@ -187,7 +188,11 @@ didn't finish; needs a person) · `undone`. `active` is true for the first three
 - `log`: a line of output; `step` says which card it belongs to
 - `step`: a step changed state
 - `run`: a run-level message, like started, waiting, failed or undoing
-- `diagnosis`: the AI's take after a failure
+- `diagnosis`: the AI's take after a failure. In Explain mode it's Markdown with the headings
+  "What went wrong / Likely cause / Where / What to do"; Report adds a link to `report.md`;
+  Auto-fix adds what it changed, the branch, and the attempt number. An auto-fix run has
+  `autofix: {parent, branch, attempt, repo, pr?}` on the run view, and its passing rehearsal
+  gets a `diagnosis` event with the pull request URL
 
 `GET /api/mac/runs/{id}/stream` sends server-sent events: everything so far, then every new
 event as it happens, then `event: end` once the run stops moving. Reconnects resume
@@ -207,8 +212,4 @@ es.addEventListener("end", () => { es.close(); refreshRun(); });
 
 ## Not there yet
 
-- The `.md` download for the **Report** mode. The AI agents aren't connected yet; until then,
-  failures add a `diagnosis` event saying so.
-- **Run history on Fly is wiped on every deploy,** because the disk isn't persistent. A Fly
-  volume will fix that before the demo.
 - Steps run one at a time. No parallel cards are running at once.

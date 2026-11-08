@@ -50,8 +50,9 @@ class Runner:
 
     # ---- One-call versions (CLI, tests) ----------------------------------------------------
 
-    def build(self, spec_path: Path, overrides: dict[str, str] | None = None) -> RunRecord:
-        return self.execute(self.start_build(spec_path, overrides).id)
+    def build(self, spec_path: Path, overrides: dict[str, str] | None = None,
+              autofix: dict | None = None) -> RunRecord:
+        return self.execute(self.start_build(spec_path, overrides, autofix).id)
 
     def rehearse(self, spec_path: Path, diagnostics_mode: str | None = None,
                  overrides: dict[str, str] | None = None) -> RunRecord:
@@ -71,16 +72,19 @@ class Runner:
 
     # ---- Starting runs (quick: rule checks only) ---------------------------------------------
 
-    def start_build(self, spec_path: Path, overrides: dict[str, str] | None = None) -> RunRecord:
+    def start_build(self, spec_path: Path, overrides: dict[str, str] | None = None,
+                    autofix: dict | None = None) -> RunRecord:
         """overrides: RepoRef.key -> branch, used by auto-fix to test its own branch. Guardrails
-        on an overridden repo are reported but don't block, and Deploy never accepts the result."""
+        on an overridden repo are reported but don't block, and Deploy never accepts the result.
+        autofix: {parent, branch, attempt, repo} when this Build is one of auto-fix's attempts."""
         with self._lock:
             spec, text = self._load(spec_path)
             overrides = overrides or {}
             unknown = sorted(set(overrides) - set(spec.repos()))
             if unknown:
                 raise GateError(f"overrides name repos this pipeline doesn't use: {', '.join(unknown)}")
-            run = self._new_run(spec, text, spec_path, "build", overrides=overrides, next_action="build")
+            run = self._new_run(spec, text, spec_path, "build", overrides=overrides, autofix=autofix or {},
+                                next_action="build")
             self._event(run, "run", "Build started")
             return run
 
@@ -96,7 +100,8 @@ class Runner:
                 raise GateError("The last Build used different branches than this Rehearse. "
                                 "Build again with the same ones.")
             run = self._new_run(spec, text, spec_path, "rehearse", overrides=build.overrides, shas=build.shas,
-                                based_on=build.id, diagnostics_mode=diagnostics_mode, next_action="advance")
+                                autofix=build.autofix, based_on=build.id, diagnostics_mode=diagnostics_mode,
+                                next_action="advance")
             self._event(run, "run", "Rehearse started in the rehearsal environment; everything is undone at the end")
             return run
 
@@ -143,12 +148,16 @@ class Runner:
             return self._queue(run, "advance", "Resumed: checking approvals again")
 
     def request_undo(self, run_id: str) -> RunRecord:
+        """Undo a waiting run, a finished Deploy, or retry the undo of a run whose undo didn't finish
+        (rollback scripts are safe to run again; Terraform destroy is idempotent)."""
         with self._lock:
             run, _ = self._existing(run_id)
-            if run.mode == "build" or run.status not in (RunStatus.WAITING, RunStatus.SUCCEEDED) \
+            allowed = (RunStatus.WAITING, RunStatus.SUCCEEDED, RunStatus.ROLLBACK_FAILED)
+            if run.mode == "build" or run.status not in allowed \
                     or (run.mode == "rehearse" and run.status == RunStatus.SUCCEEDED):
                 raise GateError(f"nothing to undo: {run.mode} run {run_id} is {run.status}")
-            return self._queue(run, "undo", "Undo requested")
+            message = "Retrying the undo" if run.status == RunStatus.ROLLBACK_FAILED else "Undo requested"
+            return self._queue(run, "undo", message)
 
     # ---- Doing the work (slow) ----------------------------------------------------------------
 
@@ -183,7 +192,8 @@ class Runner:
             elif run.status in (RunStatus.RUNNING, RunStatus.ROLLING_BACK):
                 self.settle(run, RunStatus.ROLLBACK_FAILED)
                 self._finish(run, RunStatus.ROLLBACK_FAILED,
-                             "the runner restarted in the middle of this run; check what it left behind")
+                             "the runner restarted in the middle of this run; undoing what it left behind")
+                queued.append(self.request_undo(run.id).id)  # the caller executes it, like other queued work
             elif not run.status.active and self._unsettled(run):
                 self.settle(run, run.status)  # a finished run from before this repair existed
         return queued
@@ -271,8 +281,11 @@ class Runner:
         if run.mode == "rehearse":
             self._event(run, "run", "Every step passed. Undoing the rehearsal.")
             ok = self._rollback(run, spec, failed=None)
-            return self._finish(run, RunStatus.SUCCEEDED if ok else RunStatus.ROLLBACK_FAILED,
-                                None if ok else "the rehearsal passed, but cleaning it up didn't finish")
+            run = self._finish(run, RunStatus.SUCCEEDED if ok else RunStatus.ROLLBACK_FAILED,
+                               None if ok else "the rehearsal passed, but cleaning it up didn't finish")
+            if ok and run.autofix:
+                self._autofix_passed(run, spec)
+            return run
         return self._finish(run, RunStatus.SUCCEEDED)
 
     def _fail(self, run: RunRecord, spec: Spec, step: Step, reason: str, ran: bool) -> RunRecord:
@@ -290,8 +303,11 @@ class Runner:
     def _rollback(self, run: RunRecord, spec: Spec, failed: Step | None) -> bool:
         run.status = RunStatus.ROLLING_BACK
         self.store.save(run)
-        targets = [spec.step(i) for i in reversed(run.completed)]
-        if failed is not None and failed.type in SELF_ROLLBACK_ON_FAILURE:
+        targets = [spec.step(i) for i in reversed(run.completed)
+                   if run.steps.get(i) != StepState.ROLLED_BACK]  # a retried undo skips what's done
+        if failed is None and run.failed_step and run.steps.get(run.failed_step) == StepState.ROLLBACK_FAILED:
+            failed = spec.step(run.failed_step)  # a retried undo redoes the failed step's own cleanup
+        if failed is not None and failed.type in SELF_ROLLBACK_ON_FAILURE and failed not in targets:
             targets.insert(0, failed)  # its half-finished work goes first
         ok = True
         for step in targets:
@@ -304,7 +320,7 @@ class Runner:
                 self._event(run, "log", f"rollback failed: {_reason(e)}", step.id)
                 self._set(run, step, StepState.ROLLBACK_FAILED)
                 continue
-            if step is not failed:
+            if step is not failed or run.steps.get(step.id) == StepState.ROLLBACK_FAILED:
                 self._set(run, step, StepState.ROLLED_BACK)
             else:
                 self._event(run, "log", "undid this step's partial changes", step.id)
@@ -571,12 +587,30 @@ class Runner:
         logs = [e.message for e in self.store.events(run.id, step=step.id) if e.kind == "log"][-200:]
         repo = step.run.repo.key
         failure = Failure(run_id=run.id, mode=run.mode, step_id=step.id, reason=reason, logs=logs,
-                          repo=repo, sha=run.shas.get(repo, ""))
+                          repo=repo, sha=run.shas.get(repo, ""), spec_path=run.spec_path,
+                          attempt=int(run.autofix.get("attempt", 0)), branch=run.autofix.get("branch"),
+                          parent=run.autofix.get("parent"))
         try:
             summary = self.diagnostician.diagnose(spec, failure, Mode(run.diagnostics_mode))
         except Exception as e:  # noqa: BLE001 - AI help failing must never change the run's outcome
             summary = f"AI help failed: {_reason(e)}"
         self._event(run, "diagnosis", summary, step.id)
+
+    def _autofix_passed(self, run: RunRecord, spec: Spec) -> None:
+        """An auto-fix branch rehearsed cleanly: the diagnostician opens the PR. People merge it."""
+        hook = getattr(self.diagnostician, "autofix_passed", None)
+        if hook is None:
+            return
+        try:
+            url = hook(spec, run.autofix, run.id)
+        except Exception as e:  # noqa: BLE001
+            self._event(run, "diagnosis", f"auto-fix passed, but opening its pull request failed: {_reason(e)}")
+            return
+        if url:
+            run.autofix = {**run.autofix, "pr": url}
+            self.store.save(run)
+            self._event(run, "diagnosis", f"Auto-fix passed: every step ran and was undone with the fix on "
+                        f"{run.autofix.get('branch')}. Pull request: {url}. Merge it, then Build and Rehearse main.")
 
 
 class _BuildStepFailed(Exception):

@@ -192,3 +192,11 @@ def test_script_outputs_come_from_the_mac_outputs_file(setup, tmp_path):
     (workspace.repos[DB] / "migrate.py").write_text(
         "import os\nopen(os.environ['MAC_OUTPUTS'], 'w').write('rows=5\\nnote=ok\\n')\n", encoding="utf-8")
     assert executor.execute(ctx("db_migrate"), "run") == {"rows": "5", "note": "ok"}
+
+
+def test_scripts_get_the_region_the_way_boto3_reads_it(setup, tmp_path):
+    executor, workspace, ctx, lines, _ = setup
+    (workspace.repos[DB] / "migrate.py").write_text(
+        "import os\nprint(os.environ['AWS_DEFAULT_REGION'], os.environ['AWS_REGION'])\n", encoding="utf-8")
+    executor.execute(ctx("db_migrate"), "run")
+    assert "us-east-1 us-east-1" in lines

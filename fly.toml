@@ -1,6 +1,11 @@
 app = "deployed-on-a-prayer"
 primary_region = "lax" # min_machines_running only applies to the primary region
 
+# A deploy or stop waits this long for the app to exit, so a Terraform step in flight can finish
+# instead of leaving half-made resources and a stale state lock behind.
+kill_signal = "SIGINT"
+kill_timeout = "300s"
+
 [env]
   APP_ENV = "production"
   MAC_DATA_DIR = "/data" # run history, tickets and page ids; on the volume so deploys keep them

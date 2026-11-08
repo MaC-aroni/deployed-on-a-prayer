@@ -42,6 +42,10 @@ class Failure:
     logs: list[str]
     repo: str  # RepoRef.key of the failing step
     sha: str
+    spec_path: str = ""  # so auto-fix can start the next Build and Rehearse
+    attempt: int = 0  # 0: the original failure; n: the n-th auto-fix attempt failed
+    branch: str | None = None  # the auto-fix branch, once one exists
+    parent: str | None = None  # the run whose failure started the auto-fix
 
 
 class Diagnostician(Protocol):
@@ -50,10 +54,11 @@ class Diagnostician(Protocol):
 
 
 class NotConfigured:
-    """Until the Nemotron agents exist: records that a diagnosis was asked for."""
+    """No LLM key on this server: records that a diagnosis was asked for, and how to turn it on."""
 
     def diagnose(self, spec: Spec, failure: Failure, mode: Mode) -> str:
-        return f"AI help ({mode}) isn't connected yet. Failure in {failure.step_id}: {failure.reason}"
+        return (f"AI help ({mode}) is off: set MAC_LLM_API_KEY (or NVIDIA_API_KEY) on the server. "
+                f"Failure in {failure.step_id}: {failure.reason}")
 
 
 def autofix_branch(run_id: str) -> str:
