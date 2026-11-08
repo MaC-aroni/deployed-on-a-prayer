@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from mac import probe as probes
@@ -61,8 +61,9 @@ def configure(state: State) -> None:
 def _default_state() -> State:
     data_dir = Path(os.environ.get("MAC_DATA_DIR", ROOT / ".mac"))  # the same history as `mise run mac`
     pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mac-run")
+    runner = make_runner(data_dir, submit=pool.submit)  # auto-fix's re-runs go through the same pool
     return State(
-        runner=make_runner(data_dir),
+        runner=runner,
         migrations_dir=Path(os.environ.get("MAC_MIGRATIONS_DIR", ROOT / "examples")),
         submit=pool.submit,
         poll_seconds=int(os.environ.get("MAC_APPROVAL_POLL_SECONDS", "30")),
@@ -391,7 +392,20 @@ def list_runs(migration: str | None = None, limit: int = Query(default=50, le=20
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, state: State = Depends(get_state)):
-    return _run_view(_get_run(state, run_id))
+    view = _run_view(_get_run(state, run_id))
+    view["ai_report"] = state.runner.store.report(run_id) is not None
+    return view
+
+
+@router.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
+def get_report(run_id: str, state: State = Depends(get_state)):
+    """The AI's Markdown report for a failed run (Report and Auto-fix modes), for a coding agent."""
+    _get_run(state, run_id)
+    report = state.runner.store.report(run_id)
+    if report is None:
+        raise HTTPException(404, "this run has no AI report (it passed, or its AI mode was Explain)")
+    return PlainTextResponse(report["markdown"], media_type="text/markdown; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="mac-report-{run_id}.md"'})
 
 
 @router.post("/runs/{run_id}/steps/{step_id}/play", status_code=202)

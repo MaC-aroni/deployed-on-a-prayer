@@ -192,8 +192,10 @@ def test_recover_after_restart(env, spec_path):
     stuck.next_action = None  # it had been picked up and was mid-work when the server died
     env.store.save(stuck)
     queued_build = env.runner.start_build(spec_path)  # queued, never picked up
-    assert env.runner.recover() == [queued_build.id]
-    assert env.store.get(stuck.id).status == RunStatus.ROLLBACK_FAILED
+    queued = env.runner.recover()
+    assert set(queued) == {queued_build.id, stuck.id}  # the cut-off run's undo is queued too
+    assert any("the runner restarted" in e.message for e in env.store.events(stuck.id))
+    assert env.runner.execute(stuck.id).status == RunStatus.UNDONE
     assert env.runner.execute(queued_build.id).status == RunStatus.SUCCEEDED
 
 
@@ -370,3 +372,17 @@ def test_probe_needs_no_sign_in_but_only_hits_recorded_urls(api):
     auth.configure(auth.AuthConfig(required=True, repo="x", github=None, key=b"k" * 32))
     assert client.post(f"/api/mac/runs/{dep}/outputs/deploy_service/url/probes/health").status_code == 200
     assert client.post(f"/api/mac/migrations/{NAME}/build").status_code == 503  # buttons still locked
+
+
+def test_report_download(api):
+    client, env, _ = api
+    client.post(f"/api/mac/migrations/{NAME}/build")
+    env.executor.fail[("db_migrate", "run")] = "boom"
+    run = client.post(f"/api/mac/migrations/{NAME}/rehearse", json={"ai": "report"}).json()
+    client.post(f"/api/mac/runs/{run['id']}/steps/db_migrate/play")
+    assert client.get(f"/api/mac/runs/{run['id']}/report.md").status_code == 404  # NotConfigured: no LLM
+    assert client.get(f"/api/mac/runs/{run['id']}").json()["ai_report"] is False
+    env.store.save_report(run["id"], "db_migrate", "report", "# Root cause\nraw dates")
+    resp = client.get(f"/api/mac/runs/{run['id']}/report.md")
+    assert resp.status_code == 200 and resp.text.startswith("# Root cause") and "markdown" in resp.headers["content-type"]
+    assert client.get(f"/api/mac/runs/{run['id']}").json()["ai_report"] is True

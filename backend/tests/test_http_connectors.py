@@ -190,3 +190,31 @@ def test_slow_responses_become_integration_errors(http):
     with pytest.raises(IntegrationError, match="timed out"):
         NIMChat("k", "m", base_url=f"{http.url}/v1", timeout=1).complete("s", "u")
     assert NIMChat("k", "m", base_url=f"{http.url}/v1", timeout=5).complete("s", "u") == "x"  # timeout is honoured
+
+
+def test_reads_retry_transient_failures_but_writes_never_do(monkeypatch):
+    from mac import integrations
+
+    calls = []
+
+    def flaky(url, headers, *, method="GET", body=None, timeout=30):
+        calls.append(method)
+        if len(calls) < 3:
+            raise integrations.IntegrationError(f"{method} {url} -> HTTP 504: gateway", status=504)
+        return {"ok": True}
+
+    monkeypatch.setattr(integrations, "_request_once", flaky)
+    monkeypatch.setattr(integrations, "RETRY_DELAY", 0)
+    assert integrations._request("https://x/y", {}) == {"ok": True}
+    assert calls == ["GET", "GET", "GET"]
+
+    calls.clear()
+    with pytest.raises(integrations.IntegrationError):
+        integrations._request("https://x/y", {}, method="POST", body={})
+    assert calls == ["POST"]  # a repeated POST could raise a second ticket
+
+    calls.clear()
+    monkeypatch.setattr(integrations, "_request_once",
+                        lambda *a, **k: (_ for _ in ()).throw(integrations.IntegrationError("GET x -> HTTP 404: nope", status=404)))
+    with pytest.raises(integrations.IntegrationError):
+        integrations._request("https://x/y", {})  # a 404 is an answer, not a flake: no retry

@@ -208,8 +208,23 @@ Auto-fix guardrails, enforced in code (`mac/diagnostics.py`), not by the model:
 - It can't change check or verify scripts, tests, `.github/`, `CODEOWNERS` or `.env` files,
   and it can only touch repos the pipeline uses.
 
-The Nemotron agents plug in behind `Diagnostician` in `mac/diagnostics.py`. Until they do,
-failures record that AI help isn't connected yet.
+The AI behind the selector is `mac/aihelp.py`, on whatever LLM `MAC_LLM_API_KEY` (or
+`NVIDIA_API_KEY`) points at; without a key, failures record that AI help is off. What it does:
+- **Explain** sends the step, the last log lines and the company standards the step cites
+  (numbered sources) to the model, and puts its answer on the run as a `diagnosis` event: what
+  went wrong, likely cause, where, what to do.
+- **Report** also reads the step's code **at the exact commit that ran** (only the step's own
+  files; never data, tests or CI) and writes a Markdown report for a coding agent:
+  `GET /api/mac/runs/{id}/report.md`.
+- **Auto-fix** also asks for the changed files, keeps only what the guardrails above allow,
+  pushes them to `mac/autofix/<run-id>` in the failing repo, and re-runs Build and Rehearse with
+  that branch (`autofix` on those runs: parent, branch, attempt). A passing rehearsal opens the
+  pull request; after 3 failed attempts the branch is handed over in a PR for a person. A check
+  step (`smoke_test`) is explained but never patched: checks are what prove a fix.
+
+**Undo retries and restarts.** `undo` also works on a `rollback_failed` run: it redoes only the
+steps that weren't undone (and the failed step's own cleanup). After a server restart, a Rehearse
+or Deploy that was cut off mid-work is settled and its undo is queued automatically.
 
 ## CLI
 
