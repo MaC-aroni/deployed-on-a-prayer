@@ -13,21 +13,36 @@ differently**. Keep it short; link to the docs instead of repeating them.
 | | |
 |---|---|
 | Repo | https://github.com/MaC-aroni/deployed-on-a-prayer (public, org `MaC-aroni`) |
-| Live app | https://deployed-on-a-prayer.fly.dev (placeholder pages, plus `/excuses`) |
+| Live app | https://deployed-on-a-prayer.fly.dev: the MaC console at `/` (paste the MaC API token top right; ask ob1-can-obi). Real AWS, Jira and Confluence behind it. Run history on the Fly volume `mac_data` |
 | Stack | FastAPI backend (`backend/`), React + Vite frontend (`frontend/`), one Fly.io app |
 | MaC runner | `backend/mac/`, spec `mac/v0.3`, rules in [`docs/runner.md`](docs/runner.md) |
 | Runner API (for the UI) | `/api/mac/...` in `backend/app/mac_api.py`, contract in [`docs/api.md`](docs/api.md) |
 | Demo pipeline | [`examples/claims-adjudication/migration.yaml`](examples/claims-adjudication/migration.yaml): 8 steps, 4 repos, 3 approvals |
-| Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` (built and tested; waiting to be created on GitHub) |
+| Demo repos | `claims-service-iac`, `claims-db-migrate`, `claims-mcp-server`, `claims-smoke-tests` on GitHub in `MaC-aroni`, protected and reviewed |
 | How to ship | branch → PR → CI passes → merge (no review). Deploy to Fly is manual and maintainers-only |
 | Knowledge base | 14 Confluence pages for the fictional Prayerwell Health in [`demo-data/confluence/`](demo-data/confluence/); publish with `mise run mac publish-knowledge demo-data/confluence` |
-| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review (set up locally, waiting to be created) |
+| Migrations repo | `MaC-aroni/mac-migrations`: AI-generated `migration.yaml` PRs that engineers review |
 | Agents | Knowledge graph, planner, guide writer, code writer: [`docs/agents.md`](docs/agents.md) (tested with a scripted LLM; not yet run against real Nemotron or Confluence) |
 | Not built yet | Real credentials (Zafeer), UI, API endpoints for the agents |
 
 ---
 
 ## Entries
+
+### 2026-11-08: The console is live on Fly (ob1-can-obi, with Claude Code)
+
+#### What changed
+- https://deployed-on-a-prayer.fly.dev now serves the MaC console, backed by the real runner:
+  AWS (account …5238), Jira project `MAC`, Confluence space `CLAIMS`, Grok for the design page.
+- Run history, tickets and page ids live on a Fly volume (`MAC_DATA_DIR=/data`), so deploys keep them.
+- A crashed Build now ends `failed`, not `rollback_failed` (a Build changes nothing).
+- The console's AI setting (Explain / Report / Auto-fix) moved off the action row, and Rehearse
+  and Deploy now ask for confirmation.
+
+#### What you need to do
+- **Elathius:** build the UI on top of this; read `UI.md` first. Develop against your local copy
+  (`mise run dev-local`): buttons on the live site make real AWS, Jira and Confluence changes.
+- Ask ob1-can-obi for the MaC API token to use the live console.
 
 ### 2026-11-08: The MaC console UI, and Grok for testing (ob1-can-obi, with Claude Code)
 
