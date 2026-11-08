@@ -31,6 +31,17 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: The knowledge base ships in the Docker image (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The first real prod Rehearse ran end to end (table, roles, data copy, both Lambdas, access
+  grant, smoke test failing on the planted date bug, full rollback, Grok's explanation), but the
+  explanation couldn't cite the date rule because `demo-data/confluence` wasn't in the image.
+  It is now, so diagnoses on Fly cite the standards like they do locally.
+
+#### What you need to do
+- Nothing.
+
 ### 2026-11-08: Migration flow with agents: Learn, detect-or-plan, breakpoints, investigate (Elathius, with Claude Code)
 
 #### What changed
