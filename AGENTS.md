@@ -12,6 +12,10 @@ Read `docs/runner.md` before changing it or writing a repo it runs. It must stay
 no model calls in `runner.py` or `executors.py`. Any step failing undoes everything. Run the
 tests with `mise run test`.
 
+**The UI talks to the runner only through `/api/mac`** (`backend/app/mac_api.py`), whose
+contract is `docs/api.md`. Keep that doc in sync when you change the API. The server enforces
+the run rules; the UI shows its answers instead of re-implementing them.
+
 ## Repo and team
 
 - Repo: https://github.com/MaC-aroni/deployed-on-a-prayer (public, in the MaC-aroni org).

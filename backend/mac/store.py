@@ -46,6 +46,7 @@ class RunRecord(BaseModel):
     spec_digest: str
     spec_text: str  # the exact migration.yaml this run used; undo and resume read this, not the file
     status: RunStatus = RunStatus.RUNNING
+    next_action: str | None = None  # queued work for Runner.execute: build | advance | undo
     shas: dict[str, str] = {}  # RepoRef.key -> commit this run uses
     overrides: dict[str, str] = {}  # RepoRef.key -> ref used instead of the spec's (auto-fix branches)
     steps: dict[str, StepState] = {}
