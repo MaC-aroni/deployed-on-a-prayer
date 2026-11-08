@@ -98,6 +98,18 @@ differently**. Keep it short; link to the docs instead of repeating them.
    Confluence space. Set the `ATLASSIAN_*` and `CONFLUENCE_SPACE_KEY` variables listed in
    `docs/runner.md`. Add a "Rejected" status to the Jira workflow, or use "Won't Do".
 
+### 2026-11-07: Cloud setup guide for AWS, Jira and Confluence (Zafeer-R, with Claude Code)
+
+#### What changed
+- New [`docs/cloud-setup.md`](docs/cloud-setup.md): the AWS layout (one organization, management,
+  rehearsal and production accounts, teammates through Identity Center), the Jira project
+  `MAC` and the statuses the runner reads, the Confluence space, and every variable.
+- `backend/.env.example` lists the runner's variable names.
+
+#### How to adapt
+- Nothing changes in code yet. Zafeer-R is creating the accounts; send AWS, Jira and
+  state-bucket values to ob1-can-obi privately for the Fly secrets.
+
 ### 2026-11-07: Runner API for the UI (ob1-can-obi, with Claude Code)
 
 **For Elathius and the UI agent: build the pipeline screens against [`docs/api.md`](docs/api.md).**
