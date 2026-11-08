@@ -14,7 +14,7 @@ from .integrations import IntegrationError, _request
 
 DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"  # the 120b "super" model 404s on NIM's chat API
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
-GROK_MODEL = "grok-4.7"
+GROK_MODEL = "grok-4.20-0309-non-reasoning"  # 30x faster than grok-4.7 on extraction; plans first try
 GROK_BASE_URL = "https://api.x.ai/v1"
 ROOT = Path(__file__).resolve().parents[2]
 

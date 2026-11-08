@@ -32,6 +32,16 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Grok means grok-4.20 non-reasoning (ob1-can-obi, with Claude Code)
+
+#### What changed
+- The Grok option defaults to `grok-4.20-0309-non-reasoning` (was `grok-4.7`, a reasoning model). Measured on the
+  knowledge base: the slowest page went from about 4.5 min to 8 s, all 16 pages from about 12 min to 22 s, and
+  the planner wrote a valid 8-step, 3-approval migration.yaml on its first attempt in 13 s. `GROK_MODEL` overrides.
+
+#### What you need to do
+- Nothing.
+
 ### 2026-11-08: Knowledge base is read six pages at a time (ob1-can-obi, with Claude Code)
 
 #### What changed
