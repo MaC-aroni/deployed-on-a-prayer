@@ -543,8 +543,9 @@ def test_describe_without_an_llm_or_confluence_still_writes_the_page(api):
     assert body.startswith("## Summary") and "| 1 | preflight |" in body
 
 
-def test_cancel_stops_an_agent_run_before_its_next_model_call(api):
+def test_cancel_stops_an_agent_run_before_its_next_model_call(api, monkeypatch):
     client, env, holder = api
+    monkeypatch.setenv("MAC_INGEST_WORKERS", "1")  # one page at a time, so the cancel lands between pages
     calls = []
 
     def reply(user):
