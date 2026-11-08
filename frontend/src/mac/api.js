@@ -59,6 +59,8 @@ export const api = {
   resume: (id) => call("POST", `/runs/${enc(id)}/resume`),
   undo: (id) => call("POST", `/runs/${enc(id)}/undo`),
   cancel: (id) => call("POST", `/runs/${enc(id)}/cancel`),
+  // Run AI help again on a failed Rehearse/Deploy from its stored logs (explain | report | autofix)
+  retryAi: (id, mode) => call("POST", `/runs/${enc(id)}/ai`, { mode }),
   approvalsSync: (name) => call("POST", `/migrations/${enc(name)}/approvals/sync`),
   // Outputs and probes: proof the deployed service answers from AWS
   probe: (id, step, output, probe) => call("POST", `/runs/${enc(id)}/outputs/${enc(step)}/${enc(output)}/probes/${enc(probe)}`),

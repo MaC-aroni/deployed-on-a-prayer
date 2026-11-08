@@ -7,8 +7,7 @@ export const SUPER = "nemotron-super-49b";
 
 export const STAGES = [
   { id: "knowledge", name: "Knowledge" },
-  { id: "agents", name: "Nemotron agents" },
-  { id: "repo", name: "MaC repo" },
+  { id: "plan", name: "Plan" },
   { id: "approvals", name: "Approvals" },
   { id: "build", name: "Build" },
   { id: "deploy", name: "Deploy" },
@@ -23,47 +22,43 @@ export const RUN = {
   service: "claims-adjudication-service",
   branch: "mac/claims-adjudication",
   pr: 12,
+  jira: "MAC-14",
   startedAt: "19:08",
   generatedBy: "nemotron-planner",
   target: "aws · 418240011 · us-east-1",
 };
 
-export const NOW = 2041;
+export const NOW = 1530;
 
 function s(id, name, stage, type, extra = {}) {
   return { id, name, stage, type, needs: [], start: null, end: null, result: "succeeded", ...extra };
 }
 
+// One story, one step after another. `ai` marks where an agent did more than run a script:
+// it read, decided or wrote something a person then reviews. `aiWhy` is the tooltip.
 export const STEPS = [
-  s("ingest_confluence", "Ingest Confluence", "knowledge", "agent", { model: NANO, start: 0, end: 38, sub: "CLAIMS space · 10 pages" }),
-  s("ingest_github", "Ingest GitHub repos", "knowledge", "agent", { model: NANO, start: 0, end: 29, sub: "3 repos · pinned SHAs" }),
-  s("build_kg", "Build knowledge graph", "knowledge", "agent", { model: NANO, needs: ["ingest_confluence", "ingest_github"], start: 38, end: 51, sub: "41 nodes · 67 edges" }),
+  s("learn_kb", "Learn knowledge base", "knowledge", "agent", { model: NANO, start: 0, end: 40, sub: "15 Confluence pages → graph", ai: true, aiWhy: "read every page and built the knowledge graph, each fact cited" }),
 
-  s("plan_migration", "Plan migration DAG", "agents", "agent", { model: SUPER, needs: ["build_kg"], start: 51, end: 112, sub: "ReAct · 3 iterations" }),
-  s("compliance", "Map required approvals", "agents", "agent", { model: SUPER, needs: ["plan_migration"], start: 112, end: 141, sub: "3 policies matched" }),
-  s("review_dag", "Review DAG vs standards", "agents", "agent", { model: SUPER, needs: ["compliance"], start: 141, end: 163, sub: "2 comments · approved" }),
+  s("plan", "Plan migration.yaml", "plan", "agent", { model: SUPER, needs: ["learn_kb"], start: 40, end: 120, sub: "ReAct · 3 attempts vs validator", ai: true, aiWhy: "wrote the pipeline from the graph; the validator sent two drafts back" }),
+  s("approvals_plan", "Raise approvals in Jira", "plan", "agent", { model: SUPER, needs: ["plan"], start: 120, end: 150, sub: "3 policies → 3 tickets", ai: true, aiWhy: "matched the policies and wrote each ticket's justification" }),
+  s("open_pr", "Open PR #12", "plan", "git", { needs: ["approvals_plan"], start: 150, end: 156, sub: "mac-migrations · CI: mac validate" }),
+  s("merge", "Review & merge", "plan", "human", { needs: ["open_pr"], start: 156, end: 600, sub: "CODEOWNER review" }),
 
-  s("open_pr", "Open PR #12", "repo", "git", { needs: ["review_dag"], start: 163, end: 166, sub: "mac-migrations" }),
-  s("mac_validate", "CI · mac validate", "repo", "ci", { needs: ["open_pr"], start: 166, end: 190, sub: "schema · acyclic · rollbacks" }),
-  s("merge", "Merge to main", "repo", "human", { needs: ["mac_validate"], start: 190, end: 1420, sub: "CODEOWNER review" }),
+  s("appr_tr", "APPR-TR-001", "approvals", "approval", { jira: "MAC-14", needs: ["approvals_plan"], start: 150, end: 900, sub: "Tech Risk · cloud migration" }),
+  s("appr_sec", "APPR-SEC-001", "approvals", "approval", { jira: "MAC-16", needs: ["approvals_plan"], start: 150, end: 700, sub: "Security · IAM role review" }),
+  s("appr_dba", "APPR-DBA-001", "approvals", "approval", { jira: "MAC-15", needs: ["approvals_plan"], start: 150, end: 1000, sub: "DBA · CLAIMS_DB (PHI)" }),
 
-  s("appr_tr", "APPR-TR-001", "approvals", "approval", { jira: "MAC-14", needs: ["compliance"], start: 141, end: 1300, sub: "Tech Risk · cloud migration" }),
-  s("appr_dba", "APPR-DBA-001", "approvals", "approval", { jira: "MAC-15", needs: ["compliance"], start: 141, end: 1380, sub: "DBA · CLAIMS_DB (PHI)" }),
-  s("appr_sec", "APPR-SEC-001", "approvals", "approval", { jira: "MAC-16", needs: ["compliance"], start: 141, end: 980, sub: "Security · IAM role review" }),
+  s("build", "Build", "build", "check", { needs: ["merge"], start: 600, end: 680, sub: "4 repos pinned · guardrails · terraform plan +14" }),
 
-  s("preflight", "Preflight checks", "build", "check", { needs: ["merge"], start: 1420, end: 1436, sub: "checks/preflight.py" }),
-  s("guardrails", "Verify inherited guardrails", "build", "check", { needs: ["merge"], start: 1420, end: 1449, sub: "CI green · protected · CODEOWNERS" }),
-  s("tf_plan", "terraform plan", "build", "iac", { needs: ["preflight", "guardrails"], start: 1449, end: 1502, sub: "+14 to add · 0 to change" }),
+  s("provision_network", "Provision network", "deploy", "iac", { needs: ["build", "appr_tr"], start: 1000, end: 1180, rollbackAt: 1500, sub: "terraform-aws-vpc@v4.2" }),
+  s("provision_iam", "Provision IAM roles", "deploy", "iac", { needs: ["provision_network", "appr_sec"], start: 1180, end: 1230, rollbackAt: 1485, sub: "terraform-aws-iam-role@v2.0" }),
+  s("db_migrate", "Migrate CLAIMS_DB", "deploy", "db_migration", { needs: ["provision_network", "appr_dba"], start: 1180, gateUntil: 1260, end: 1380, rollbackAt: 1470, gate: "manual", sub: "PHI · breakpoint" }),
+  s("deploy_service", "Deploy claims-adjudication", "deploy", "script", { needs: ["provision_iam", "db_migrate"], start: 1380, end: 1420, rollbackAt: 1455, sub: "deploy.py @ 4a1f9c2" }),
+  s("smoke_test", "Smoke test", "deploy", "check", { needs: ["deploy_service"], start: 1420, end: 1440, result: "failed", sub: "checks/smoke.py" }),
 
-  s("provision_network", "Provision network", "deploy", "iac", { needs: ["tf_plan", "appr_tr"], start: 1502, end: 1688, rollbackAt: 2010, sub: "terraform-aws-vpc@v4.2" }),
-  s("provision_iam", "Provision IAM roles", "deploy", "iac", { needs: ["provision_network", "appr_sec"], start: 1688, end: 1740, rollbackAt: 1995, sub: "terraform-aws-iam-role@v2.0" }),
-  s("db_migrate", "Migrate CLAIMS_DB", "deploy", "db_migration", { needs: ["provision_network", "appr_dba"], start: 1688, gateUntil: 1760, end: 1890, rollbackAt: 1980, gate: "manual", sub: "PHI · manual gate" }),
-  s("deploy_service", "Deploy claims-adjudication", "deploy", "script", { needs: ["provision_iam", "db_migrate"], start: 1890, end: 1932, rollbackAt: 1962, sub: "deploy.py @ 4a1f9c2" }),
-  s("smoke_test", "Smoke test", "deploy", "check", { needs: ["deploy_service"], start: 1932, end: 1951, result: "failed", sub: "checks/smoke.py" }),
-
-  s("rollback", "Rollback in reverse order", "recover", "runner", { needs: ["smoke_test"], start: 1951, end: 2010, sub: "4 compensating steps" }),
-  s("diagnose", "Diagnose root cause", "recover", "agent", { model: SUPER, needs: ["rollback"], start: 2010, end: null, sub: "/think · reading 1,412 log lines" }),
-  s("fix_pr", "Open fix PR", "recover", "git", { needs: ["diagnose"], sub: "mac-migrations" }),
+  s("rollback", "Undo, newest first", "recover", "runner", { needs: ["smoke_test"], start: 1440, end: 1500, sub: "4 steps undone · state clean" }),
+  s("diagnose", "Diagnose root cause", "recover", "agent", { model: SUPER, needs: ["rollback"], start: 1500, end: null, sub: "/think · reading 1,412 log lines", ai: true, aiWhy: "read the logs and the code at the failing commit; proposes the fix a person approves" }),
+  s("fix_pr", "Open fix PR", "recover", "git", { needs: ["diagnose"], sub: "a person approves it", ai: true, aiWhy: "the fix is written by the Diagnostician; merging stays with a person" }),
 ];
 
 export const STEP_BY_ID = Object.fromEntries(STEPS.map((st) => [st.id, st]));
@@ -109,7 +104,13 @@ export function runStatusAt(t = NOW) {
 // ---- Agent traces: observation → reasoning → action → outcome -------------
 
 export const TRACES = {
-  plan_migration: [
+  learn_kb: [
+    { k: "observation", text: "15 pages in the CLAIMS space: service, runbook, data dictionary, landing-zone and approval standards." },
+    { k: "reasoning", text: "One Reader per page keeps every fact cited to its section; the Compiler merges them and drops anything uncited." },
+    { k: "action", text: "extract(pages) → 41 nodes, 67 edges; 3 facts dropped for missing citations" },
+    { k: "outcome", text: "graph.json saved. ClaimsAdjudicationService → CLAIMS_DB (PHI), Claims MCP tool, 4 repositories, 3 approver roles." },
+  ],
+  plan: [
     { k: "observation", text: "Request: migrate claims-adjudication-service to AWS. Service node found in KG with two dependencies: CLAIMS_DB (Oracle 12c, pii=true) and eligibility-service." },
     { k: "reasoning", text: "CLAIMS_DB is tagged PII. The Tech Risk PHI/PII Standard puts a manual gate and a DBA sign-off on any step that moves it. The landing zone needs network and IAM before the database, so the order is network → iam → db → service → smoke." },
     { k: "action", text: 'kg.neighbors("svc:claims-adjudication", depth=2)' },
@@ -122,19 +123,13 @@ export const TRACES = {
     { k: "action", text: "mac validate migration.yaml   (draft v3)" },
     { k: "outcome", text: "Valid. 6 steps, 3 approvals required, DAG acyclic." },
   ],
-  compliance: [
+  approvals_plan: [
     { k: "observation", text: "Draft DAG v3 has one iac network step, one iac IAM step, one PHI database step and one deploy step." },
     { k: "action", text: 'kg.policies_for(["provision_network", "provision_iam", "db_migrate", "deploy_service"])' },
     { k: "outcome", text: "3 policies triggered: Cloud Migration Approval (Tech Risk), DBA Migration Sign-off, IAM Role Review (Security)." },
     { k: "reasoning", text: "Each ticket needs a justification an approver can act on without reading the YAML: what changes, why, the risk, the mitigation and the rollback. Attach the generated design doc so Tech Risk has one artifact to review." },
     { k: "action", text: "jira.create_issue(project=MAC, type=Approval) × 3" },
     { k: "outcome", text: "MAC-14, MAC-15, MAC-16 created. requires_approval wired into 4 steps." },
-  ],
-  review_dag: [
-    { k: "observation", text: "Reviewing migration.yaml v3 against Platform AWS Landing Zone Standards and Approved Terraform Modules." },
-    { k: "reasoning", text: "All modules are on the approved list. Every mutating step has a rollback. The PHI step is gated. Two things worth a comment: the smoke test should also check eligibility reachability, and the IAM role name should follow the lz- prefix convention." },
-    { k: "action", text: "github.create_review(pr=12, event=APPROVE, comments=2)" },
-    { k: "outcome", text: "Approved with 2 non-blocking comments. Waiting for a CODEOWNER to merge." },
   ],
   diagnose: [
     { k: "observation", text: "smoke_test failed at 19:41:19. Last error: connect ECONNREFUSED eligibility-service.internal:8443, retried 3 times. All four deploy steps were rolled back; terraform state is clean." },
@@ -180,7 +175,7 @@ export const LOGS = {
 export const SPECS = {
   provision_network: `- id: provision_network
   type: iac
-  needs: [tf_plan]
+  needs: [build]
   requires_approval: [APPR-TR-001]
   run:
     repo: MaC-aroni/claims-service-iac@4a1f9c2
@@ -294,42 +289,86 @@ export const MIGRATIONS = [
   },
 ];
 
-// ---- The agent view's pitch replay: a mock Learn run (/agents/demo) ----------------------------
-// Shaped like the API's events (kind "agent", message JSON; docs/planning-api.md).
+// ---- Agent hierarchies for the pitch (/agents/demo?for=<step>) ---------------------------------
+// Each is a list of API-shaped `agent` events; the Agents page replays them one by one.
 
-const T0 = Math.floor(Date.now() / 1000) - 90;
-const agentEvent = (seq, step, data) => ({ run_id: "demo", seq, ts: T0 + seq * 4, step, kind: "agent", message: JSON.stringify(data) });
-
-export const DEMO_AGENT_RUN = {
-  id: "demo",
-  mode: "ingest",
-  migration: "knowledge/eligibility-sync",
-  status: "running",
-  active: true,
-  created: T0,
-  updated: T0,
-  report: { page: null, ticket: "MAC-21", ticket_url: "#" },
-};
+function hierarchy(director, workers, compiler, opts = {}) {
+  const t0 = Math.floor(Date.now() / 1000) - 120;
+  let seq = 0;
+  const ev = (step, data) => ({ run_id: "demo", seq: ++seq, ts: t0 + seq * 3, step, kind: "agent", message: JSON.stringify(data) });
+  const out = [
+    ev(opts.step ?? "agent", { agent: "director", role: "Director", model: SUPER, phase: "observation", status: "running", text: director.observation }),
+    ev(opts.step ?? "agent", { agent: "director", phase: "reasoning", text: director.reasoning }),
+    ev(opts.step ?? "agent", { agent: "director", phase: "action", text: `dispatching ${workers.map((w) => w.role).join(", ")}` }),
+  ];
+  for (const w of workers) out.push(ev(opts.step ?? "agent", { agent: w.id, role: w.role, parent: "director", model: w.model ?? NANO, phase: "action", status: "running", text: w.action }));
+  for (const w of workers) {
+    if (w.observation) out.push(ev(opts.step ?? "agent", { agent: w.id, parent: "director", phase: "observation", text: w.observation }));
+    out.push(ev(opts.step ?? "agent", { agent: w.id, parent: "director", phase: "outcome", status: w.failed ? "failed" : "succeeded", text: w.outcome }));
+  }
+  out.push(ev(opts.step ?? "agent", { agent: "compiler", role: "Compiler", parent: "director", model: SUPER, phase: "action", status: "running", text: compiler.action }));
+  if (compiler.reasoning) out.push(ev(opts.step ?? "agent", { agent: "compiler", parent: "director", phase: "reasoning", text: compiler.reasoning }));
+  out.push(ev(opts.step ?? "agent", { agent: "compiler", parent: "director", phase: "outcome", status: "succeeded", text: compiler.outcome }));
+  out.push(ev(opts.step ?? "agent", { agent: "director", phase: "outcome", status: "succeeded", text: director.outcome }));
+  return out;
+}
 
 const PAGES = ["00-handbook", "10-landing-zone", "11-terraform", "12-naming", "13-lambda", "20-mcp-access", "30-data-migration", "50-claims-service"];
 
-export const DEMO_AGENT_EVENTS = [
-  agentEvent(1, "knowledge", { agent: "director", role: "Director", model: SUPER, phase: "observation", status: "running", text: "MaC-aroni/eligibility-sync has no page in the 15-page knowledge base; nothing in the graph names it" }),
-  agentEvent(2, "knowledge", { agent: "director", phase: "reasoning", text: "a Reader compresses the repository; one Reader per Confluence page re-reads the standards it must follow; References cross-checks names; the Compiler writes the page and raises a review ticket, because a generated page is a draft until a person signs it off" }),
-  agentEvent(3, "knowledge", { agent: "director", phase: "action", text: "dispatching Reader, 8 page Readers and References" }),
-  agentEvent(4, "knowledge", { agent: "reader", role: "Repository reader", parent: "director", model: NANO, phase: "action", status: "running", text: "reading eligibility-sync: README, 41 files, Python" }),
-  ...PAGES.map((p, i) => agentEvent(5 + i, "knowledge", { agent: `reader:${p}`, role: "Reader", parent: "director", model: NANO, phase: "observation", status: "pending", text: `will read “${p}”` })),
-  agentEvent(13, "knowledge", { agent: "reader", parent: "director", phase: "observation", text: "README 2.1k chars · nightly cron · writes CLAIMS_DB.ELIGIBILITY (PHI)" }),
-  agentEvent(14, "knowledge", { agent: "reader", parent: "director", phase: "outcome", status: "succeeded", text: "it is EligibilitySyncService: syncs member eligibility from MemberDB into CLAIMS_DB nightly" }),
-  ...PAGES.flatMap((p, i) => [
-    agentEvent(15 + i * 2, "knowledge", { agent: `reader:${p}`, parent: "director", phase: "action", status: "running", text: `compressing ${p} into cited facts` }),
-    agentEvent(16 + i * 2, "knowledge", { agent: `reader:${p}`, parent: "director", phase: "outcome", status: "succeeded", text: "facts extracted, every one cited to a section" }),
-  ]),
-  agentEvent(31, "knowledge", { agent: "references", role: "References", parent: "director", phase: "action", status: "running", text: "searching 15 pages and the graph for eligibility-sync" }),
-  agentEvent(32, "knowledge", { agent: "references", parent: "director", phase: "observation", text: "“Data migration standard” names CLAIMS_DB.ELIGIBILITY; the DBA sign-off policy applies to it" }),
-  agentEvent(33, "knowledge", { agent: "references", parent: "director", phase: "outcome", status: "succeeded", text: "2 pages mention it; the graph has no node yet; approvals: dba_db_migration applies" }),
-  agentEvent(34, "knowledge", { agent: "compiler", role: "Compiler", parent: "director", model: SUPER, phase: "action", status: "running", text: "writing “Services: EligibilitySyncService” and merging 9 facts into the graph" }),
-  agentEvent(35, "knowledge", { agent: "compiler", parent: "director", phase: "reasoning", text: "a new page needs a reviewer: raising MAC-21 for claims-platform with the unknowns listed" }),
-  agentEvent(36, "knowledge", { agent: "compiler", parent: "director", phase: "outcome", status: "succeeded", text: "page generated-eligibility-sync written, 9 facts merged, review ticket MAC-21" }),
-  agentEvent(37, "knowledge", { agent: "director", phase: "outcome", status: "succeeded", text: "EligibilitySyncService learned from MaC-aroni/eligibility-sync; a person reviews the page next" }),
-];
+export const DEMO_AGENT_SETS = {
+  learn_kb: {
+    run: { id: "demo", mode: "ingest", migration: "knowledge", report: {} },
+    events: hierarchy(
+      { observation: "15 pages in the CLAIMS space; no graph yet", reasoning: "one Reader per page keeps every fact cited to its section; References checks names across pages; the Compiler merges and drops anything uncited", outcome: "41 facts, 67 relations; the Planner can start" },
+      [
+        ...PAGES.map((p) => ({ id: `reader:${p}`, role: "Reader", action: `compressing ${p} into cited facts`, outcome: "facts extracted, every one cited" })),
+        { id: "references", role: "References", action: "checking repositories and services named across pages", observation: "4 repositories named; all have nodes", outcome: "no gaps" },
+      ],
+      { action: "merging 41 facts into graph.json", outcome: "graph saved" },
+      { step: "knowledge" },
+    ),
+  },
+  plan: {
+    run: { id: "demo", mode: "plan", migration: "plan/migrate-claimsadjudicationservice-to-aws", report: {} },
+    events: hierarchy(
+      { observation: "Migrate ClaimsAdjudicationService to AWS; no migration.yaml exists yet", reasoning: "the Planner drafts from the graph's 2-hop neighbourhood and the cited sections; the validator is its tool, so every draft is checked before anyone sees it", outcome: "valid plan in 3 attempts: 8 steps, 3 approvals, 1 breakpoint" },
+      [
+        { id: "knowledge", role: "Knowledge", action: "loading the graph neighbourhood of ClaimsAdjudicationService", observation: "7 nodes, 9 edges; CLAIMS_DB is PHI", outcome: "14 relevant sections picked, all cited" },
+        { id: "planner", role: "Planner", model: SUPER, action: "attempt 1: writing migration.yaml", observation: "validator: deploy_service has no rollback; claims-service-iac@main isn't pinned", outcome: "attempt 3 valid after two rounds of validator feedback" },
+        { id: "validator", role: "Validator", action: "mac validate on each draft: schema, acyclic, rollbacks, citations, documented repos", outcome: "draft 3 passes" },
+      ],
+      { action: "writing migration.yaml and opening PR #12 into mac-migrations", reasoning: "a person merges; the runner only ever runs what was reviewed", outcome: "PR #12 open · CI mac validate green" },
+      { step: "plan" },
+    ),
+  },
+  approvals_plan: {
+    run: { id: "demo", mode: "plan", migration: "plan/approvals", report: {} },
+    events: hierarchy(
+      { observation: "the plan has an IaC network step, an IAM step, a PHI database step and a deploy step", reasoning: "each policy in the knowledge base names a trigger and an approver; the Compliance agent matches them and writes a justification an approver can act on without reading YAML", outcome: "3 tickets raised; the pipeline waits on them at Deploy" },
+      [
+        { id: "policies", role: "Policy matcher", action: "kg.policies_for(provision_network, provision_iam, db_migrate, deploy_service)", outcome: "Cloud Migration Approval (Tech Risk), DBA Sign-off, IAM Role Review (Security)" },
+        { id: "writer:tr", role: "Justification writer", model: SUPER, action: "APPR-TR-001: what changes, why, risk, mitigation, rollback", outcome: "draft ready, design page linked" },
+        { id: "writer:dba", role: "Justification writer", model: SUPER, action: "APPR-DBA-001: 1.2M rows of PHI, checksum verify, breakpoint before copy", outcome: "draft ready" },
+        { id: "writer:sec", role: "Justification writer", model: SUPER, action: "APPR-SEC-001: least-privilege task role, no wildcards", outcome: "draft ready" },
+      ],
+      { action: "raising MAC-14, MAC-15, MAC-16 in Jira and wiring requires_approval into 4 steps", outcome: "3 tickets raised · MAC-15 chained after MAC-14" },
+      { step: "approvals" },
+    ),
+  },
+  diagnose: {
+    run: { id: "demo", mode: "diagnose", migration: "claims-adjudication-onprem-to-aws", failed_step: "smoke_test", report: {} },
+    events: hierarchy(
+      { observation: "Deploy 142 failed at smoke_test: connect ECONNREFUSED eligibility-service.internal:8443; everything was undone", reasoning: "Logs reads the trace; Code reads the repository at the commit that ran; the Fixer proposes the smallest change; a person approves before it becomes a pull request", outcome: "root cause: the new VPC has no route to the on-prem eligibility service" },
+      [
+        { id: "logs", role: "Logs", action: "reading smoke_test's 1,412 log lines", observation: "3 retries to eligibility-service.internal:8443, all refused", outcome: "the failing call leaves the VPC and never arrives" },
+        { id: "code", role: "Code", action: "reading claims-service-iac @ 4a1f9c2 · network/", observation: "no Transit Gateway attachment to 10.40.0.0/16", outcome: "route missing, not a code bug in the service" },
+        { id: "fixer", role: "Fixer", model: SUPER, action: "proposing the smallest fix", observation: "the landing-zone standard approves terraform-aws-tgw@v1.3 for on-prem reach", outcome: "add a TGW attachment to the on-prem CIDR; stubbing the check would hide it" },
+      ],
+      { action: "recording the proposal and raising the approval ticket", reasoning: "a person approves; only then does the fix become a pull request", outcome: "MAC-17 raised · fix ready for approval" },
+      { step: "diagnose" },
+    ),
+  },
+};
+DEMO_AGENT_SETS.fix_pr = DEMO_AGENT_SETS.diagnose;
+export const DEMO_AGENT_RUN = DEMO_AGENT_SETS.learn_kb.run;
+export const DEMO_AGENT_EVENTS = DEMO_AGENT_SETS.learn_kb.events;

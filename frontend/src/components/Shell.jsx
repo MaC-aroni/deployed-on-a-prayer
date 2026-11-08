@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Activity, ChevronRight, Github, Hammer, MessageSquare, PanelLeft, Presentation, Radio, Search, Sparkles, Workflow, Wand2 } from "lucide-react";
+import { Activity, ChevronRight, Github, Hammer, MessageSquare, PanelLeft, Presentation, Radio, Search, Workflow, Wand2 } from "lucide-react";
+import logo from "../assets/maclogo.png";
 import { SIGN_IN_URL, api, signOut } from "../mac/api.js";
 import { Link, usePath } from "../router.jsx";
 import { cx } from "../lib.js";
@@ -160,8 +161,8 @@ export default function Shell({ crumbs = [], actions, children }) {
       <div className={cx("shell", { collapsed })}>
         <aside className="sidebar">
           <Link to="/" className="brand" title="MaC · Migration as Code">
-            <span className="brand-mark">
-              <Sparkles size={16} strokeWidth={2.5} />
+            <span className="brand-mark brand-logo">
+              <img src={logo} alt="MaC" width={36} height={36} />
             </span>
             <span className="brand-text">
               <strong>MaC</strong>

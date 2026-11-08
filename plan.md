@@ -31,6 +31,26 @@ differently**. Keep it short; link to the docs instead of repeating them.
 
 ## Entries
 
+### 2026-11-08: Pitch demo retold, logo, chat polish, Retry AI help (Elathius, with Claude Code)
+
+#### What changed
+- **Pitch demo** (`/demo`): one story in six columns (Knowledge → Plan → Approvals → Build →
+  Deploy → Recover, 17 steps instead of 23), lines are the real order of events, a green robot
+  marks every step where AI did more than run a script (tooltip says what), the replay runs at a
+  quarter speed while an agent works so its icon can be clicked, and clicking it opens the
+  matching agent hierarchy (`/agents/demo?for=<step>`: learn, plan, raise approvals, diagnose).
+  The header's primary is the Jira ticket instead of the PR.
+- **Logo:** `frontend/src/assets/maclogo.png` (256px) is the sidebar brand and the chat marks;
+  `frontend/public/maclogo-64.png` is the favicon; the 512px original is in `public/`.
+- **Chat:** the composer keeps focus after each answer; the waiting bubble is three loading dots
+  with the lookups listed under it.
+- **Retry AI help** (PR #36's ask): on a failed Rehearse or Deploy the ··· menu offers Explain ·
+  Report · Auto-fix again (`POST /runs/{id}/ai`).
+- Repository rows no longer overflow: actions wrap and the doors shrink to fit.
+
+#### What you need to do
+- Nothing.
+
 ### 2026-11-08: Retry AI help on a failed run; sturdier culprit matching (ob1-can-obi, with Claude Code)
 
 #### What changed
