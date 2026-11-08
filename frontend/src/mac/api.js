@@ -65,6 +65,10 @@ export const api = {
   // Run AI help again on a failed Rehearse/Deploy from its stored logs (explain | report | autofix)
   retryAi: (id, mode) => call("POST", `/runs/${enc(id)}/ai`, { mode }),
   approvalsSync: (name) => call("POST", `/migrations/${enc(name)}/approvals/sync`),
+  // The cost estimate (docs/api.md, "Cost estimate"): recalculated from the last Build, and the
+  // usage reader (an AI run, mode "usage") that finds the figures it needs in Confluence
+  cost: (name) => call("GET", `/migrations/${enc(name)}/cost`),
+  readUsage: (name) => call("POST", `/migrations/${enc(name)}/usage`),
   // Outputs and probes: proof the deployed service answers from AWS
   probe: (id, step, output, probe) => call("POST", `/runs/${enc(id)}/outputs/${enc(step)}/${enc(output)}/probes/${enc(probe)}`),
   probes: (id) => call("GET", `/runs/${enc(id)}/probes`),

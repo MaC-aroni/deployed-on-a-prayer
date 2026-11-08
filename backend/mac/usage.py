@@ -341,6 +341,16 @@ def ask_owners(migration: str, service: str, missing: list[tuple[Subject, Metric
     return questions
 
 
+def asked_note(missing: list[dict]) -> str:
+    """How the missing figures were followed up: only tickets that exist count as asked."""
+    if not missing:
+        return ""
+    asked = sum(1 for m in missing if (m.get("question") or {}).get("ticket"))
+    if asked == len(missing):
+        return " (asked in Jira)"
+    return f" ({asked} asked in Jira, {len(missing) - asked} not raised)" if asked else " (not raised in Jira)"
+
+
 def usage_path(data_dir: Path, migration: str) -> Path:
     return Path(data_dir) / "usage" / f"{migration}.json"
 
@@ -383,5 +393,5 @@ def run_usage(migration: str, service: str, resources: dict[str, list[dict]], se
     path.write_text(json.dumps(usage, indent=2) + "\n", encoding="utf-8")
     if trace:
         trace("usage", "outcome", f"{len(result['facts'])} figures found and checked, {len(result['rejected'])} "
-              f"rejected, {len(missing)} missing" + (" (asked in Jira)" if missing else ""), status="succeeded")
+              f"rejected, {len(missing)} missing" + asked_note(usage["missing"]), status="succeeded")
     return usage

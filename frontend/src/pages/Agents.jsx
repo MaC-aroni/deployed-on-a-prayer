@@ -62,6 +62,7 @@ function titleOf(run) {
   if (!run) return "";
   if (run.mode === "plan") return (run.migration ?? "").replace(/^plan\//, "").replaceAll("-", " ").replace(/^approvals$/, "raise approvals in Jira");
   if (run.mode === "diagnose") return `Diagnose ${run.failed_step ?? run.report?.step ?? "the failure"}`;
+  if (run.mode === "usage") return "Read usage figures for the cost estimate";
   if ((run.migration ?? "").startsWith("knowledge/")) return `Learn ${run.migration.slice("knowledge/".length)}`;
   if ((run.migration ?? "").startsWith("page/")) return `Describe ${run.migration.slice("page/".length)}`;
   if ((run.migration ?? "").startsWith("repo/")) return `Licence check · ${run.migration.slice("repo/".length)}`;
@@ -73,6 +74,7 @@ function backLink(run) {
   if (run.mode === "plan") return { to: `/migrate/${run.id}`, label: "planning run" };
   if (run.id === "demo") return { to: "/demo", label: "the run" };
   if (run.mode === "diagnose") return { to: `/migrations/${encodeURIComponent(run.migration)}?run=${run.based_on ?? ""}`, label: "pipeline" };
+  if (run.mode === "usage") return { to: `/migrations/${encodeURIComponent(run.migration)}?tab=cost`, label: "cost estimate" };
   return { to: "/migrate", label: "Migration" };
 }
 

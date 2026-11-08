@@ -552,8 +552,8 @@ p {
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 38px;
-  padding: 0 12px;
+  min-height: 38px;
+  padding: 6px 12px;
   border-radius: 8px;
   color: var(--fg);
   text-align: left;
@@ -571,12 +571,18 @@ p {
 .menu-item.danger {
   color: var(--bad);
 }
+/* The label stays on one line; a long description wraps beside it instead of squeezing it. */
 .menu-label {
-  flex: 1;
+  flex: none;
+  white-space: nowrap;
 }
 .menu-detail {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
+  line-height: 1.35;
   color: var(--faint);
+  text-align: right;
 }
 .menu-pop .segmented {
   margin: 4px 8px 8px;
@@ -3313,6 +3319,137 @@ a.row-title:hover {
   font-size: 13px;
   max-width: 420px;
   text-align: center;
+/* ---------- cost estimate (components/CostPanel.jsx) ---------- */
+.cost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-2);
+  font-weight: 500;
+}
+.cost-chip:hover {
+  color: var(--fg);
+}
+.cost .report-head {
+  flex-wrap: wrap;
+}
+.cost .report-head > .muted {
+  flex: 1;
+  min-width: 260px;
+}
+.cost-actions {
+  margin: 0;
+}
+.cost-metrics {
+  margin-bottom: 0;
+}
+.cost-metrics .metric-value {
+  font-size: 34px;
+}
+.metric-held .metric-pending {
+  font-size: 18px;
+  color: var(--faint);
+  padding: 8px 0 7px;
+}
+.cost-missing {
+  align-items: flex-start;
+  color: var(--fg);
+  background: var(--warn-soft);
+  margin: 0;
+}
+.cost-missing ul {
+  margin: 6px 0 0;
+}
+.cost-missing a {
+  color: var(--warn);
+}
+.cost-table-wrap {
+  overflow-x: auto;
+}
+.cost-table {
+  min-width: 760px;
+}
+.cost-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 12px 8px 0;
+}
+.cost .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.cost-row {
+  cursor: pointer;
+}
+.cost-row:hover td,
+.cost-row.open td,
+.cost-sources-row td {
+  background: var(--surface-2);
+}
+.cost-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.cost-caret {
+  width: 20px;
+  color: var(--faint);
+  padding-left: 6px !important;
+}
+.cost-formula {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 360px;
+}
+.cost-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.cost-src {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12px;
+  align-items: start;
+}
+.cost-src q {
+  color: var(--fg);
+  font-style: italic;
+}
+.cost-tag {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.tag-confluence {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.tag-terraform {
+  background: var(--grey-soft);
+  color: var(--muted);
+}
+.tag-rule {
+  background: var(--orange-soft);
+  color: var(--orange);
+}
+.tag-price {
+  background: var(--accent-2-soft);
+  color: var(--accent-2);
+}
+.cost-notes {
+  margin: 0 4px;
 }
 
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Download, ExternalLink, FlaskConical, Hammer, Lock, OctagonX, Pause, Play, RefreshCw, Rocket, RotateCw, Sparkles, Stethoscope, Undo2 } from "lucide-react";
+import { Bot, Coins, Download, ExternalLink, FlaskConical, Hammer, Lock, OctagonX, Pause, Play, RefreshCw, Rocket, RotateCw, Sparkles, Stethoscope, Undo2 } from "lucide-react";
+import CostPanel, { costOf, fmtUsd } from "../components/CostPanel.jsx";
 import Menu from "../components/Menu.jsx";
 import Dag from "../components/Dag.jsx";
 import Endpoints from "../components/Endpoints.jsx";
@@ -12,7 +13,7 @@ import StepInspector from "../components/StepInspector.jsx";
 import { api, fmtAgo, fmtTime, follow, reportUrl, repoKey, shortRepo, sourceApi } from "../mac/api.js";
 import { useLiveApprovals } from "../mac/useLiveApprovals.js";
 import { Link, navigate } from "../router.jsx";
-import { MODE_LABEL, STATUS, runMeta } from "../status.js";
+import { AGENT_MODES, MODE_LABEL, STATUS, runHref, runMeta } from "../status.js";
 import { cx } from "../lib.js";
 
 // The pipeline page. `source` is { kind: "migration", id: name } for a reviewed spec in
@@ -26,6 +27,13 @@ const AI_MODES = [
 ];
 
 const ACTIVE = new Set(["running", "waiting", "rolling_back"]);
+const TABS = ["pipeline", "approvals", "endpoints", "cost", "report", "activity", "history"];
+
+// ?tab=cost opens that tab (the usage reader links back here).
+function tabFromUrl() {
+  const t = new URLSearchParams(window.location.search).get("tab");
+  return TABS.includes(t) ? t : "pipeline";
+}
 
 function aggregate(states) {
   if (!states.length) return "pending";
@@ -84,7 +92,7 @@ export default function Migration({ source, initialRun }) {
   const [run, setRun] = useState(null);
   const [events, setEvents] = useState([]);
   const [buildRun, setBuildRun] = useState(null);
-  const [tab, setTab] = useState("pipeline");
+  const [tab, setTab] = useState(tabFromUrl);
   const [selected, setSelected] = useState(null);
   const [ai, setAi] = useState(null);
   const [toast, setToast] = useState(null);
@@ -115,7 +123,7 @@ export default function Migration({ source, initialRun }) {
     let alive = true;
     refresh().then((r) => {
       if (!alive || !r || chosen.current) return;
-      setRunId(r.m.active_run?.id ?? r.rs[0]?.id ?? null);
+      setRunId(r.m.active_run?.id ?? r.rs.find((x) => !AGENT_MODES.has(x.mode))?.id ?? null);
     });
     return () => {
       alive = false;
@@ -292,6 +300,14 @@ export default function Migration({ source, initialRun }) {
   const investigation = broke ? runs.find((r) => r.mode === "diagnose" && r.based_on === run.id) : null;
   const diagnoses = events.filter((e) => e.kind === "diagnosis");
   const canUndo = run && !run.active && run.mode !== "build" && (run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded") || run.status === "rollback_failed");
+  const cost = costOf(reportRun);
+  const readUsage = () =>
+    act("Usage reader", async () => {
+      const r = await api.readUsage(mig.name);
+      navigate(`/agents/${r.id}`);
+      return null;
+    });
+  const readUsageHint = noLlm ? llmHint : !mig.latest?.build ? "Run Build first: its Terraform plans say what the estimate must price" : "Nemotron reads Confluence for the figures the cost estimate needs; missing ones are asked in Jira";
   const investigate = () =>
     act("Investigation", async () => {
       const r = await api.investigate(run.id, ai);
@@ -351,6 +367,12 @@ export default function Migration({ source, initialRun }) {
                 run {run.id} · {fmtTime(run.created)}
               </span>
             )}
+            {cost && (
+              <button type="button" className="link-btn cost-chip" onClick={() => setTab("cost")} title="Open the cost estimate">
+                <Coins size={12} /> ≈ {fmtUsd(cost.monthly_usd)}/month on AWS
+                {cost.status === "partial" && <Pill tone="amber">partial</Pill>}
+              </button>
+            )}
             {run?.active && (
               <span className="live">
                 <span className="live-dot" /> live
@@ -377,6 +399,7 @@ export default function Migration({ source, initialRun }) {
                 { label: "Rehearse", detail: canRehearse ? "rehearsal env, undone after" : "needs a passing Build", hint: !canRehearse, icon: <FlaskConical size={14} />, onClick: () => setConfirming("rehearse") },
                 { label: "Deploy", detail: canDeploy ? "production" : "needs a passing Rehearse", hint: !canDeploy, icon: <Rocket size={14} />, onClick: () => setConfirming("deploy") },
                 ...(mig.approvals.length ? [{ label: "Sync with Jira", detail: mig.approvals_live ? "the server follows Jira already; ask it now" : "ask Jira about every open approval", icon: <RefreshCw size={14} />, onClick: () => act("Jira sync", () => api.approvalsSync(mig.name).then(() => null)) }] : []),
+                { label: "Read usage figures", detail: noLlm ? "no LLM configured here" : mig.latest?.build ? "AI finds the cost figures" : "needs a Build first", hint: noLlm || !mig.latest?.build, icon: <Bot size={14} />, onClick: readUsage },
                 ...(broke ? [{ label: investigation ? "Investigate again" : "Investigate", detail: noLlm ? "no LLM configured here" : `Diagnostician on ${run.failed_step}`, hint: noLlm, icon: <Stethoscope size={14} />, onClick: investigate }] : []),
                 ...(run?.ai_report ? [{ label: "Download AI report", detail: "report.md for a coding agent", icon: <Download size={14} />, onClick: () => window.open(reportUrl(run.id), "_blank") }] : []),
                 ...(broke && run.mode !== "build"
@@ -438,6 +461,7 @@ export default function Migration({ source, initialRun }) {
           ["pipeline", "Pipeline"],
           ["approvals", "Approvals", openApprovals ? `${openApprovals} open` : mig.approvals.length],
           ["endpoints", "Endpoints", mig.endpoints?.length || null],
+          ["cost", "Cost", cost ? `${fmtUsd(cost.monthly_usd)}/mo` : null],
           ["report", "Build report"],
           ["activity", "Activity", activity.length || null],
           ["history", "History", runs.length || null],
@@ -529,6 +553,12 @@ export default function Migration({ source, initialRun }) {
         </div>
       )}
 
+      {tab === "cost" && (
+        <div className="tab-panel" key="cost">
+          <CostPanel name={mig.name} build={buildRun ?? (run?.mode === "build" ? run : null)} onReadUsage={readUsage} readDisabled={busy || noLlm || !mig.latest?.build} readHint={readUsageHint} />
+        </div>
+      )}
+
       {tab === "report" && (
         <div className="tab-panel" key="report">
           <BuildReport run={reportRun} mig={mig} />
@@ -584,7 +614,7 @@ export default function Migration({ source, initialRun }) {
                 key={r.id}
                 className={cx("tr row-btn", { selected: r.id === runId })}
                 onClick={() => {
-                  if (r.mode === "diagnose") return navigate(`/agents/${r.id}`);
+                  if (AGENT_MODES.has(r.mode)) return navigate(runHref(r));
                   chosen.current = true;
                   setRunId(r.id);
                   setTab("pipeline");
