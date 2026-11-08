@@ -15,7 +15,6 @@ import { RouterProvider, matchPath, usePath } from "./router.jsx";
 // routed; see plan.md.
 
 const ORG = { label: "MaC-aroni", to: "/" };
-const BUILD = { label: "Build", to: "/migrate" };
 
 function Routes() {
   const path = usePath();
@@ -23,7 +22,7 @@ function Routes() {
 
   if (path === "/" || path === "/migrations") {
     return (
-      <Shell crumbs={[ORG, BUILD, { label: "Pipelines" }]}>
+      <Shell crumbs={[ORG, { label: "Pipelines" }]}>
         <Migrations />
       </Shell>
     );
@@ -31,7 +30,7 @@ function Routes() {
   if ((m = matchPath("/migrations/:name", path))) {
     const initialRun = new URLSearchParams(window.location.search).get("run");
     return (
-      <Shell crumbs={[ORG, BUILD, { label: "Pipelines", to: "/migrations" }, { label: m.name }]}>
+      <Shell crumbs={[ORG, { label: m.name }]}>
         <Migration key={`m:${m.name}`} source={{ kind: "migration", id: m.name }} initialRun={initialRun} />
       </Shell>
     );
@@ -39,21 +38,21 @@ function Routes() {
   if ((m = matchPath("/plans/:runId", path))) {
     const initialRun = new URLSearchParams(window.location.search).get("run");
     return (
-      <Shell crumbs={[ORG, BUILD, { label: "Pipelines", to: "/migrations" }, { label: `plan ${m.runId}` }]}>
+      <Shell crumbs={[ORG, { label: `plan ${m.runId}` }]}>
         <Migration key={`p:${m.runId}`} source={{ kind: "plan", id: m.runId }} initialRun={initialRun} />
       </Shell>
     );
   }
   if (path === "/migrate") {
     return (
-      <Shell crumbs={[ORG, BUILD, { label: "Migrate" }]}>
+      <Shell crumbs={[ORG, { label: "Migrate" }]}>
         <Migrate />
       </Shell>
     );
   }
   if ((m = matchPath("/migrate/:runId", path))) {
     return (
-      <Shell crumbs={[ORG, BUILD, { label: "Migrate", to: "/migrate" }, { label: `planning ${m.runId}` }]}>
+      <Shell crumbs={[ORG, { label: `planning ${m.runId}` }]}>
         <Planning key={m.runId} runId={m.runId} />
       </Shell>
     );

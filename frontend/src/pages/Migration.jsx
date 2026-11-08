@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Cloud, ExternalLink, FlaskConical, Hammer, Hand, Lock, Play, Rocket, RotateCw, Sparkles, Undo2, Users } from "lucide-react";
+import { Bot, ExternalLink, FlaskConical, Hammer, Hand, Lock, Play, Rocket, RotateCw, Sparkles, Undo2 } from "lucide-react";
+import Menu from "../components/Menu.jsx";
 import Dag from "../components/Dag.jsx";
 import { Confirm, EmptyState, useAuth } from "../components/Shell.jsx";
 import StatusIcon, { Pill } from "../components/StatusIcon.jsx";
@@ -36,17 +37,6 @@ function Aside({ step, state }) {
   return null;
 }
 
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="toggle-row">
-      <span>{label}</span>
-      <button type="button" role="switch" aria-checked={checked} className={cx("toggle", { on: checked })} onClick={() => onChange(!checked)}>
-        <span className="toggle-knob" />
-      </button>
-    </label>
-  );
-}
-
 function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast) return;
@@ -79,8 +69,6 @@ export default function Migration({ source, initialRun }) {
   const [buildRun, setBuildRun] = useState(null);
   const [tab, setTab] = useState("pipeline");
   const [selected, setSelected] = useState(null);
-  const [showDeps, setShowDeps] = useState(true);
-  const [fit, setFit] = useState(true);
   const [ai, setAi] = useState(null);
   const [toast, setToast] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -250,6 +238,16 @@ export default function Migration({ source, initialRun }) {
   const activity = withLogs ? events : events.filter((e) => e.kind !== "log");
   const openApprovals = mig.approvals.filter((a) => approvalStatus(reportRun, a.id)?.status !== "approved").length;
   const generated = mig.source === "generated";
+  const waitingStep = run?.status === "waiting" ? Object.entries(run.steps ?? {}).find(([, st]) => st === "waiting")?.[0] : null;
+  const primary = waitingStep
+    ? { label: `Run ${waitingStep}`, icon: <Play size={14} />, onClick: () => play(waitingStep), title: "Press play on the manual step" }
+    : canDeploy
+      ? { label: "Deploy", icon: <Rocket size={14} />, onClick: () => setConfirming("deploy"), title: "Run in production with the rehearsed commits" }
+      : canRehearse
+        ? { label: "Rehearse", icon: <FlaskConical size={14} />, onClick: () => setConfirming("rehearse"), title: "Run everything in the rehearsal environment, then undo it" }
+        : active
+          ? null
+          : { label: "Build", icon: <Hammer size={14} />, onClick: () => start("build"), title: "Validate, lock commits, check guardrails, raise approvals, plan" };
 
   return (
     <>
@@ -257,38 +255,38 @@ export default function Migration({ source, initialRun }) {
 
       <div className="run-head">
         <div className="run-head-main">
-          <div className="pill-row">
-            <Pill tone={rm.tone} className="pill-lg">
-              <StatusIcon status={rm.icon} size={16} />
-              {run ? `${MODE_LABEL[run.mode]} · ${rm.label}` : rm.label}
-            </Pill>
-            {generated ? (
-              <Link to={`/migrate/${mig.plan_run}`} className="pill tone-violet pill-link" title="Open the planning run">
-                <Sparkles size={13} /> Planned by Nemotron
-              </Link>
-            ) : (
-              <Pill tone="grey">reviewed spec</Pill>
-            )}
-          </div>
+          <Pill tone={rm.tone} className="pill-lg">
+            {run ? `${MODE_LABEL[run.mode]} · ${rm.label}` : rm.label}
+          </Pill>
           <h1>
             {mig.service} <span className="muted">→ {mig.target.provider.toUpperCase()}</span>
           </h1>
           <div className="run-meta">
-            <span className="mono">{mig.name}</span>
+            <span>{mig.name}</span>
+            <span>{mig.owner_team}</span>
             <span>
-              <Users size={13} /> {mig.owner_team}
+              {mig.target.account} · {mig.target.region}
             </span>
-            <span>
-              <Cloud size={13} /> {mig.target.account} · {mig.target.region}
-            </span>
+            {generated ? (
+              <Link to={`/migrate/${mig.plan_run}`} className="link" title="Open the planning run">
+                <Sparkles size={12} /> planned by Nemotron
+              </Link>
+            ) : (
+              <span className="faint">reviewed spec</span>
+            )}
             {mig.pr_url && (
               <a className="link" href={mig.pr_url} target="_blank" rel="noreferrer">
                 pull request <ExternalLink size={11} />
               </a>
             )}
             {run && (
-              <span className="mono">
+              <span>
                 run {run.id} · {fmtTime(run.created)}
+              </span>
+            )}
+            {run?.active && (
+              <span className="live">
+                <span className="live-dot" /> live
               </span>
             )}
             {run?.reason && (
@@ -300,33 +298,35 @@ export default function Migration({ source, initialRun }) {
         </div>
         <div className="run-actions">
           <div className="actions-row">
-            <div className="segmented" title="If a step fails, AI will">
-              <Sparkles size={13} className="nemotron seg-icon" />
-              {AI_MODES.map(([id, label]) => (
-                <button key={id} className={cx("seg", { active: ai === id })} onClick={() => setAi(id)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button className={cx("btn btn-primary", { hint: locked })} onClick={() => start("build")} disabled={busy} title="Validate, lock commits, check guardrails, raise approvals, plan">
-              <Hammer size={14} /> Build
-            </button>
-            <button className={cx("btn", { hint: !canRehearse || locked })} onClick={() => setConfirming("rehearse")} disabled={busy} title={canRehearse ? "Run everything in the rehearsal environment, then undo it" : "Needs a passing Build of this exact migration.yaml"}>
-              <FlaskConical size={14} /> Rehearse
-            </button>
-            <button className={cx("btn", { hint: !canDeploy || locked })} onClick={() => setConfirming("deploy")} disabled={busy} title={canDeploy ? "Run in production with the rehearsed commits" : "Needs a passing Rehearse of this exact migration.yaml"}>
-              <Rocket size={14} /> Deploy
-            </button>
-            {run?.status === "waiting" && (
-              <button className={cx("btn", { hint: locked })} onClick={() => act("Check approvals", () => api.resume(run.id))} disabled={busy} title="Check the approvals again">
-                <Play size={14} /> Check approvals
+            {primary && (
+              <button className={cx("btn btn-primary", { hint: locked })} onClick={primary.onClick} disabled={busy} title={primary.title}>
+                {primary.icon} {primary.label}
               </button>
             )}
-            {run && (run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded")) && (
-              <button className={cx("btn", { hint: locked })} onClick={() => act("Undo", () => api.undo(run.id))} disabled={busy}>
-                <Undo2 size={14} /> Undo
-              </button>
-            )}
+            <Menu
+              items={[
+                { heading: "Actions" },
+                { label: "Build", detail: "validate · lock · guardrails · plan", icon: <Hammer size={14} />, onClick: () => start("build") },
+                { label: "Rehearse", detail: canRehearse ? "rehearsal env, undone after" : "needs a passing Build", hint: !canRehearse, icon: <FlaskConical size={14} />, onClick: () => setConfirming("rehearse") },
+                { label: "Deploy", detail: canDeploy ? "production" : "needs a passing Rehearse", hint: !canDeploy, icon: <Rocket size={14} />, onClick: () => setConfirming("deploy") },
+                ...(run?.status === "waiting" ? [{ label: "Check approvals", detail: "ask Jira again", icon: <Play size={14} />, onClick: () => act("Check approvals", () => api.resume(run.id)) }] : []),
+                ...(run && (run.status === "waiting" || (run.mode === "deploy" && run.status === "succeeded")) ? [{ label: "Undo this run", danger: true, icon: <Undo2 size={14} />, onClick: () => act("Undo", () => api.undo(run.id)) }] : []),
+              ]}
+              footer={
+                <>
+                  <div className="menu-sep" />
+                  <div className="menu-heading">If a step fails, AI will</div>
+                </>
+              }
+            >
+              <div className="segmented" title="If a step fails, AI will">
+                {AI_MODES.map(([id, label]) => (
+                  <button key={id} className={cx("seg", { active: ai === id })} onClick={() => setAi(id)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Menu>
           </div>
           {confirming && (
             <Confirm
@@ -356,35 +356,8 @@ export default function Migration({ source, initialRun }) {
 
       {tab === "pipeline" && (
         <>
-          <div className="toolbar pipeline-toolbar">
-            <label className="run-picker">
-              <span className="muted small">Run</span>
-              <select
-                value={runId ?? ""}
-                onChange={(e) => {
-                  chosen.current = true;
-                  setRunId(e.target.value || null);
-                }}
-              >
-                {!runs.length && <option value="">no runs yet</option>}
-                {runs.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {MODE_LABEL[r.mode]} · {runMeta(r.status, r.mode).label} · {fmtTime(r.created)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Toggle label="Show flow" checked={showDeps} onChange={setShowDeps} />
-            <Toggle label="Fit to width" checked={fit} onChange={setFit} />
-            {run?.active && (
-              <span className="live">
-                <span className="live-dot" /> live
-              </span>
-            )}
-          </div>
-
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} showDeps={showDeps} fit={fit} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(id) => setSelected(id === selected ? null : id)} />
           </div>
 
           {step && <StepInspector step={step} state={stateOf(step.id)} run={run} events={events} approvals={mig.approvals} report={reportRun?.report} onPlay={play} onClose={() => setSelected(null)} busy={busy || locked} />}
@@ -440,7 +413,9 @@ export default function Migration({ source, initialRun }) {
       {tab === "activity" && (
         <>
           <div className="toolbar">
-            <Toggle label="Include log lines" checked={withLogs} onChange={setWithLogs} />
+            <button className="btn" onClick={() => setWithLogs((v) => !v)}>
+              {withLogs ? "Hide log lines" : "Include log lines"}
+            </button>
             {run && (
               <span className="muted small">
                 {MODE_LABEL[run.mode]} {run.id}
@@ -466,6 +441,9 @@ export default function Migration({ source, initialRun }) {
 
       {tab === "history" && (
         <div className="table runs-table">
+          <p className="muted small" style={{ padding: "8px 28px 4px" }}>
+            Click a run to show it on the pipeline. {run ? `Showing ${MODE_LABEL[run.mode]} ${run.id}.` : ""}
+          </p>
           <div className="tr th">
             <div>Status</div>
             <div>Run</div>

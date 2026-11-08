@@ -75,6 +75,24 @@ export default function Migrations() {
         <p className="muted">Reviewed migration.yaml files and the plans Nemotron generated. Build checks one, Rehearse proves it, Deploy ships it.</p>
       </div>
 
+      <div className="metrics">
+        <div className="metric">
+          <span className="label">Pipelines</span>
+          <span className="metric-value">{rows.length}</span>
+          <span className="metric-sub">{rows.filter((r) => r.source === "reviewed").length} reviewed · {rows.filter((r) => r.source === "generated").length} planned by Nemotron</span>
+        </div>
+        <div className="metric">
+          <span className="label">Active runs</span>
+          <span className="metric-value">{rows.filter((r) => headline(r.latest) && ACTIVE.has(headline(r.latest).status)).length}</span>
+          <span className="metric-sub">Build, Rehearse or Deploy in progress</span>
+        </div>
+        <div className="metric">
+          <span className="label">Deployed</span>
+          <span className="metric-value">{rows.filter((r) => r.latest?.deploy?.status === "succeeded").length}</span>
+          <span className="metric-sub">pipelines with a passing Deploy</span>
+        </div>
+      </div>
+
       <div className="toolbar">
         <label className="filter">
           <Search size={15} />

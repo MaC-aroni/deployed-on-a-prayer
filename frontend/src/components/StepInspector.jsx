@@ -109,11 +109,9 @@ export default function StepInspector({ step, state, run, events, approvals = []
             )}
           </header>
           {tab === "logs" ? (
-            <pre className="log trace" ref={logRef}>
+            <pre className="log log-trace" ref={logRef}>
               {mine.length === 0
-                ? run
-                  ? `no output from ${step.id} in this ${run.mode}`
-                  : "no run selected"
+                ? <div className="log-empty">{run ? `${step.id} produced no output in this ${run.mode}.` : "Select a run to see output."}</div>
                 : mine.map((e, i) => (
                     <div key={e.seq} className={cx("ln", lineClass(e))}>
                       <span className="ln-num">{i + 1}</span>
@@ -210,22 +208,21 @@ export default function StepInspector({ step, state, run, events, approvals = []
                     const st = r?.status ?? (a?.ticket ? "pending" : "unknown");
                     return (
                       <li key={id}>
-                        <Pill tone={STATUS[st]?.tone ?? "grey"}>{st === "pending" ? "Pending" : STATUS[st]?.label ?? st}</Pill> <span className="mono">{id}</span>
-                        {a && <span className="muted"> · {a.approver}</span>}
-                        {(a?.ticket?.url || r?.url) && (
-                          <>
-                            {" · "}
-                            <a className="link mono" href={a?.ticket?.url ?? r.url} target="_blank" rel="noreferrer">
-                              {a?.ticket?.key ?? r.ticket}
-                            </a>
-                          </>
+                        <Pill tone={STATUS[st]?.tone ?? "grey"} title={r?.detail ?? ""}>
+                          <span className="mono">{id}</span>
+                        </Pill>
+                        {(a?.ticket?.url || r?.url) ? (
+                          <a className="link mono" href={a?.ticket?.url ?? r.url} target="_blank" rel="noreferrer">
+                            {a?.ticket?.key ?? r.ticket}
+                          </a>
+                        ) : (
+                          <span className="faint small">{st === "pending" ? "pending" : "not raised"}</span>
                         )}
-                        {r?.detail && !a?.ticket && <div className="muted small">{r.detail}</div>}
                       </li>
                     );
                   })}
                 </ul>
-                <div className="muted small">Only Deploy waits for approvals; Rehearse doesn't.</div>
+                
               </Row>
             )}
             {step.sources?.length > 0 && (

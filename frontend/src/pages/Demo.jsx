@@ -56,17 +56,6 @@ function useReplay() {
   return { t, p, setP, playing, toggle };
 }
 
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="toggle-row">
-      <span>{label}</span>
-      <button type="button" role="switch" aria-checked={checked} className={cx("toggle", { on: checked })} onClick={() => onChange(!checked)}>
-        <span className="toggle-knob" />
-      </button>
-    </label>
-  );
-}
-
 function aside(step, status) {
   if (step.type === "agent") return <Sparkles size={14} className="nemotron" />;
   if (step.type === "approval") return <Lock size={14} />;
@@ -78,8 +67,6 @@ function aside(step, status) {
 export default function Demo() {
   const [tab, setTab] = useState("pipeline");
   const [selected, setSelected] = useState("diagnose");
-  const [showDeps, setShowDeps] = useState(true);
-  const [fit, setFit] = useState(true);
   const replay = useReplay();
   const t = replay.t;
 
@@ -133,13 +120,10 @@ export default function Demo() {
         </div>
         <div className="run-actions">
           <div className="actions-row">
-            <button className="btn">Hold</button>
-            <button className="btn" disabled title="Nothing to roll back: state is clean">
-              Rollback
-            </button>
-            <a className="btn" href="#" onClick={(e) => e.preventDefault()}>
+            <a className="btn btn-primary" href="#" onClick={(e) => e.preventDefault()}>
               Open PR !{RUN.pr} <ExternalLink size={13} />
             </a>
+            <button className="btn">Hold</button>
           </div>
         </div>
       </div>
@@ -161,8 +145,7 @@ export default function Demo() {
       {tab === "pipeline" && (
         <>
           <div className="toolbar pipeline-toolbar">
-            <Toggle label="Show dependencies" checked={showDeps} onChange={setShowDeps} />
-            <Toggle label="Fit to width" checked={fit} onChange={setFit} />
+            <span className="label">Replay</span>
             <div className="replay">
               <button className="icon-btn" onClick={replay.toggle} aria-label={replay.playing ? "Pause" : "Replay run"}>
                 {replay.playing ? <Pause size={14} /> : <Play size={14} />}
@@ -173,7 +156,7 @@ export default function Demo() {
           </div>
 
           <div className="dag-frame">
-            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} showDeps={showDeps} fit={fit} />
+            <Dag columns={columns} edges={edges} selectedId={selected} onSelect={(sid) => setSelected(sid === selected ? null : sid)} />
           </div>
 
           {step && <NodeDrawer step={step} t={t} onClose={() => setSelected(null)} />}
